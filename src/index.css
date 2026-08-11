@@ -3051,3 +3051,1046 @@
   color: #ffffff !important;
   border-color: var(--accent) !important;
 }
+/* =========================================================
+   PROFILE LOGOUT
+========================================================= */
+
+.logout-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+
+  width: 100%;
+  margin-top: 14px;
+  padding: 12px 18px;
+
+  border: 1px solid #e5caca;
+  border-radius: 12px;
+
+  background: #fff6f6;
+  color: #c43d3d;
+
+  font: 700 13px Manrope, sans-serif;
+
+  cursor: pointer;
+
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    transform 0.2s ease;
+}
+
+.logout-btn:hover {
+  background: #ffeaea;
+  border-color: #d99595;
+  transform: translateY(-1px);
+}
+
+/* Dark mode */
+
+.app-shell.dark-mode .logout-btn {
+  background: #281b20;
+  border-color: #563139;
+  color: #ff8f8f;
+}
+
+.app-shell.dark-mode .logout-btn:hover {
+  background: #352127;
+  border-color: #77424b;
+  color: #ffaaaa;
+}
+/* =========================================================
+   LOCATION / YOUR CAMPUS — DARK MODE FIX
+========================================================= */
+
+.location {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.location > span:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.location small {
+  color: #a7a9b8;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+
+.location b {
+  color: #111827;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+/* DARK MODE */
+.dark-mode .location b {
+  color: #f4f4f7 !important;
+}
+
+.dark-mode .location small {
+  color: #a8a9b8 !important;
+}
+
+.dark-mode .location .pin {
+  color: #7047ff;
+}
+
+/* LIGHT MODE */
+.light-mode .location b {
+  color: #111827 !important;
+}
+
+.light-mode .location small {
+  color: #7c7f91 !important;
+}
+
+.light-mode .location .pin {
+  color: #7047ff;
+}
+/* =========================================================
+   CAMPUSOS — TRADITIONAL FOOD MENU
+   Keeps the original CampusOS UI.
+========================================================= */
+
+
+/* =========================================================
+   MENU CONTAINER
+========================================================= */
+
+.traditional-menu {
+  width: 100%;
+  margin-top: 26px;
+}
+
+
+/* =========================================================
+   INDIVIDUAL CANTEEN SECTION
+========================================================= */
+
+.traditional-menu-section {
+
+  background: var(--surface);
+
+  border: 1px solid var(--border);
+
+  border-radius: 18px;
+
+  overflow: hidden;
+
+  margin-bottom: 20px;
+
+  box-shadow: var(--shadow);
+
+}
+
+
+/* =========================================================
+   CANTEEN HEADER
+========================================================= */
+
+.traditional-menu-header {
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  padding: 22px 24px;
+
+  border-bottom: 1px solid var(--border);
+
+  background:
+    linear-gradient(
+      120deg,
+      rgba(112, 71, 255, 0.08),
+      transparent
+    );
+
+}
+
+
+.traditional-menu-header h2 {
+
+  margin: 4px 0 3px;
+
+  font-size: 22px;
+
+  letter-spacing: -0.4px;
+
+}
+
+
+.traditional-menu-header p {
+
+  margin: 0;
+
+  color: var(--muted);
+
+  font-size: 13px;
+
+}
+
+
+/* =========================================================
+   STATUS
+========================================================= */
+
+.traditional-menu-status {
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 7px;
+
+  font-size: 12px;
+
+  font-weight: 700;
+
+  white-space: nowrap;
+
+}
+
+
+.traditional-menu-status small {
+
+  color: var(--muted);
+
+  font-weight: 500;
+
+  margin-left: 4px;
+
+}
+
+
+.menu-status-dot {
+
+  width: 8px;
+
+  height: 8px;
+
+  border-radius: 50%;
+
+  display: inline-block;
+
+}
+
+
+.menu-status-dot.green {
+
+  background: #38c172;
+
+  box-shadow: 0 0 8px rgba(56, 193, 114, .45);
+
+}
+
+
+.menu-status-dot.moderate {
+
+  background: #e9a227;
+
+  box-shadow: 0 0 8px rgba(233, 162, 39, .4);
+
+}
+
+
+.menu-status-dot.busy {
+
+  background: #e65353;
+
+  box-shadow: 0 0 8px rgba(230, 83, 83, .4);
+
+}
+
+
+/* =========================================================
+   MENU LIST
+========================================================= */
+
+.traditional-menu-list {
+
+  display: flex;
+
+  flex-direction: column;
+
+}
+
+
+/* =========================================================
+   FOOD ITEM
+========================================================= */
+
+.traditional-food-item {
+
+  display: grid;
+
+  grid-template-columns: 82px minmax(0, 1fr);
+
+  gap: 18px;
+
+  padding: 18px 24px;
+
+  border-bottom: 1px solid var(--border);
+
+  transition:
+    background .2s ease,
+    transform .2s ease;
+
+}
+
+
+.traditional-food-item:last-child {
+
+  border-bottom: none;
+
+}
+
+
+.traditional-food-item:hover {
+
+  background: var(--surface-2);
+
+}
+
+
+/* =========================================================
+   SMALL FOOD IMAGE
+========================================================= */
+
+.traditional-food-image {
+
+  width: 82px;
+
+  height: 82px;
+
+  border-radius: 12px;
+
+  overflow: hidden;
+
+  background: var(--soft);
+
+  flex-shrink: 0;
+
+}
+
+
+.traditional-food-image img {
+
+  width: 100%;
+
+  height: 100%;
+
+  object-fit: cover;
+
+  display: block;
+
+  transition: transform .25s ease;
+
+}
+
+
+.traditional-food-item:hover
+.traditional-food-image img {
+
+  transform: scale(1.05);
+
+}
+
+
+/* =========================================================
+   FOOD INFORMATION
+========================================================= */
+
+.traditional-food-info {
+
+  min-width: 0;
+
+  display: flex;
+
+  flex-direction: column;
+
+  justify-content: center;
+
+}
+
+
+.traditional-food-title-row {
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  gap: 16px;
+
+}
+
+
+.traditional-food-name {
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 8px;
+
+  min-width: 0;
+
+}
+
+
+.traditional-food-name h3 {
+
+  margin: 0;
+
+  font-size: 16px;
+
+  font-weight: 700;
+
+  color: var(--text);
+
+}
+
+
+.traditional-food-price {
+
+  font-size: 16px;
+
+  font-weight: 800;
+
+  color: var(--text);
+
+  white-space: nowrap;
+
+}
+
+
+/* =========================================================
+   VEG / NON-VEG INDICATOR
+========================================================= */
+
+.veg-indicator {
+
+  width: 12px;
+
+  height: 12px;
+
+  border: 2px solid;
+
+  display: inline-flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  border-radius: 2px;
+
+  flex-shrink: 0;
+
+}
+
+
+.veg-indicator::after {
+
+  content: "";
+
+  width: 5px;
+
+  height: 5px;
+
+  border-radius: 50%;
+
+}
+
+/* =========================================================
+   FOOD HUB — CANTEEN TOGGLE
+========================================================= */
+
+.food-canteen-toggle {
+  width: 100%;
+
+  display: grid;
+
+  grid-template-columns:
+    repeat(5, minmax(0, 1fr));
+
+  gap: 10px;
+
+  margin-top: 26px;
+
+  padding: 8px;
+
+  background: var(--surface);
+
+  border: 1px solid var(--border);
+
+  border-radius: 18px;
+
+  box-shadow: var(--shadow);
+}
+
+
+/* =========================================================
+   TOGGLE BUTTON
+========================================================= */
+
+.canteen-toggle-btn {
+
+  position: relative;
+
+  min-height: 86px;
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 11px;
+
+  padding: 12px;
+
+  border: 1px solid transparent;
+
+  border-radius: 13px;
+
+  background: transparent;
+
+  color: var(--text);
+
+  cursor: pointer;
+
+  text-align: left;
+
+  transition:
+    background .2s ease,
+    border .2s ease,
+    transform .2s ease;
+
+}
+
+
+.canteen-toggle-btn:hover {
+
+  background: var(--surface-2);
+
+  transform: translateY(-1px);
+
+}
+
+
+.canteen-toggle-btn.active {
+
+  background: var(--soft);
+
+  border-color: var(--primary);
+
+  box-shadow:
+    0 0 0 1px rgba(112, 71, 255, .08),
+    0 8px 22px rgba(112, 71, 255, .08);
+
+}
+
+
+/* =========================================================
+   ICON
+========================================================= */
+
+.canteen-toggle-icon {
+
+  width: 42px;
+
+  height: 42px;
+
+  min-width: 42px;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  border-radius: 12px;
+
+  background: var(--surface-2);
+
+  color: var(--primary);
+
+  font-size: 20px;
+
+}
+
+
+.canteen-toggle-icon.green {
+
+  color: #2daa68;
+
+}
+
+
+.canteen-toggle-icon.moderate {
+
+  color: #d99620;
+
+}
+
+
+.canteen-toggle-icon.busy {
+
+  color: #e25555;
+
+}
+
+
+/* =========================================================
+   TEXT
+========================================================= */
+
+.canteen-toggle-info {
+
+  min-width: 0;
+
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 3px;
+
+}
+
+
+.canteen-toggle-info b {
+
+  font-size: 14px;
+
+  color: var(--text);
+
+}
+
+
+.canteen-toggle-info small {
+
+  font-size: 10px;
+
+  color: var(--muted);
+
+  white-space: nowrap;
+
+  overflow: hidden;
+
+  text-overflow: ellipsis;
+
+}
+
+
+/* =========================================================
+   STATUS
+========================================================= */
+
+.canteen-toggle-status {
+
+  margin-left: auto;
+
+  align-self: flex-start;
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 5px;
+
+  font-size: 9px;
+
+  color: var(--muted);
+
+  white-space: nowrap;
+
+}
+
+
+.canteen-toggle-status i {
+
+  width: 6px;
+
+  height: 6px;
+
+  border-radius: 50%;
+
+  display: inline-block;
+
+}
+
+
+.canteen-toggle-status i.green {
+
+  background: #35bd70;
+
+}
+
+
+.canteen-toggle-status i.moderate {
+
+  background: #e5a52a;
+
+}
+
+
+.canteen-toggle-status i.busy {
+
+  background: #e65555;
+
+}
+
+
+/* =========================================================
+   ACTIVE CANTEEN BANNER
+========================================================= */
+
+.active-canteen-banner {
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  margin-top: 18px;
+
+  padding: 17px 20px;
+
+  border-radius: 15px;
+
+  background:
+    linear-gradient(
+      110deg,
+      rgba(112, 71, 255, .10),
+      rgba(112, 71, 255, .03)
+    );
+
+  border: 1px solid rgba(112, 71, 255, .18);
+
+}
+
+
+.active-canteen-left {
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 13px;
+
+}
+
+
+.active-canteen-icon {
+
+  width: 44px;
+
+  height: 44px;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  border-radius: 12px;
+
+  background: var(--surface);
+
+  color: var(--primary);
+
+  font-size: 20px;
+
+}
+
+
+.active-canteen-left h3 {
+
+  margin: 3px 0;
+
+  font-size: 17px;
+
+}
+
+
+.active-canteen-left p {
+
+  margin: 0;
+
+  font-size: 12px;
+
+  color: var(--muted);
+
+}
+
+
+.active-canteen-right {
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 12px;
+
+}
+
+
+.active-canteen-right span {
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 5px;
+
+  font-size: 11px;
+
+  color: var(--muted);
+
+}
+
+
+.active-canteen-right span i {
+
+  width: 7px;
+
+  height: 7px;
+
+  border-radius: 50%;
+
+  background: #35bd70;
+
+}
+
+
+.active-canteen-right b {
+
+  font-size: 12px;
+
+}
+
+
+/* =========================================================
+   FOOD MENU HEADER
+========================================================= */
+
+.food-menu-heading {
+
+  display: flex;
+
+  align-items: flex-end;
+
+  justify-content: space-between;
+
+  margin: 30px 0 16px;
+
+}
+
+
+.food-menu-heading h2 {
+
+  margin: 4px 0;
+
+  font-size: 22px;
+
+  letter-spacing: -.4px;
+
+}
+
+
+.food-menu-heading p {
+
+  margin: 0;
+
+  font-size: 12px;
+
+  color: var(--muted);
+
+}
+
+
+.food-menu-count {
+
+  min-width: 54px;
+
+  height: 54px;
+
+  display: flex;
+
+  flex-direction: column;
+
+  align-items: center;
+
+  justify-content: center;
+
+  border-radius: 14px;
+
+  background: var(--surface);
+
+  border: 1px solid var(--border);
+
+  font-size: 17px;
+
+  font-weight: 800;
+
+}
+
+
+.food-menu-count small {
+
+  color: var(--muted);
+
+  font-size: 9px;
+
+  font-weight: 500;
+
+}
+
+
+/* =========================================================
+   SEARCH CLEAR
+========================================================= */
+
+.search-clear {
+
+  width: 26px;
+
+  height: 26px;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  border: 0;
+
+  border-radius: 50%;
+
+  background: var(--surface-2);
+
+  color: var(--muted);
+
+  cursor: pointer;
+
+}
+
+
+/* =========================================================
+   EMPTY FOOD
+========================================================= */
+
+.empty-food-results {
+
+  min-height: 260px;
+
+  display: flex;
+
+  flex-direction: column;
+
+  align-items: center;
+
+  justify-content: center;
+
+  text-align: center;
+
+  border: 1px dashed var(--border);
+
+  border-radius: 18px;
+
+  margin-top: 20px;
+
+}
+
+
+.empty-food-results > svg {
+
+  width: 42px;
+
+  height: 42px;
+
+  color: var(--muted);
+
+  margin-bottom: 10px;
+
+}
+
+
+.empty-food-results h3 {
+
+  margin: 0 0 5px;
+
+}
+
+
+.empty-food-results p {
+
+  margin: 0 0 15px;
+
+  color: var(--muted);
+
+  font-size: 13px;
+
+}
+
+
+/* =========================================================
+   MOBILE
+========================================================= */
+
+@media (max-width: 900px) {
+
+  .food-canteen-toggle {
+
+    grid-template-columns:
+      repeat(2, minmax(0, 1fr));
+
+  }
+
+}
+
+
+@media (max-width: 600px) {
+
+  .food-canteen-toggle {
+
+    grid-template-columns: 1fr;
+
+  }
+
+
+  .canteen-toggle-btn {
+
+    min-height: 70px;
+
+  }
+
+
+  .active-canteen-banner {
+
+    align-items: flex-start;
+
+    flex-direction: column;
+
+    gap: 12px;
+
+  }
+
+
+  .food-menu-heading {
+
+    align-items: center;
+
+  }
+
+}

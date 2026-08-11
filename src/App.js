@@ -5,6 +5,7 @@ import "./index.css";
 import {
   HiHome,
   HiSparkles,
+  HiArrowLeftOnRectangle,
   HiCalendarDays,
   HiWrenchScrewdriver,
   HiUserCircle,
@@ -85,23 +86,87 @@ const navItems = [
 ========================================================= */
 
 const FOOD_IMAGES = {
-  dosa:
-    "https://images.unsplash.com/photo-1601050690597-df0568f70950?auto=format&fit=crop&w=900&q=80",
-  idli:
-    "https://images.unsplash.com/photo-1630383249896-424eec5f8f6e?auto=format&fit=crop&w=900&q=80",
-  biryani:
-    "https://images.unsplash.com/photo-1585937421612-70a008356fbe?auto=format&fit=crop&w=900&q=80",
-  noodles:
-    "https://images.unsplash.com/photo-1559314809-0d155014e29e?auto=format&fit=crop&w=900&q=80",
-  pasta:
-    "https://images.unsplash.com/photo-1473093295043-cdd812d0e601?auto=format&fit=crop&w=900&q=80",
-  coffee:
-    "https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?auto=format&fit=crop&w=900&q=80",
-  sandwich:
-    "https://images.unsplash.com/photo-1528735602780-2552fd46c7af?auto=format&fit=crop&w=900&q=80",
-  fries:
-    "https://images.unsplash.com/photo-1573080496219-bb080dd4f877?auto=format&fit=crop&w=900&q=80",
+
+  // ==========================================================
+  // UDUPI — SOUTH INDIAN
+  // ==========================================================
+
+  masalaDosa:
+    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ40JxSkHbTrsOvnDZBifOAPCP3z4QD3aTh7kZEgDc-VdQ7FNyuQuwT38Bg3NC-ieKXZ7C9ff5vmISLL2uQxK-F-ufEFT6Cw3Jrv2e64w3cCg&s=10",
+
+  idliVada:
+    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS_PW83NBAEUdXYUoZVTWuP24YzRmhkwiR11AqBELTvW2Glf9Rz2tYS4lvCPymSdPMx-nF95V61yxgVXqpBjwrEjQa69qi8uaxbf1anaIZMmw&s=10",
+
+  paneerMasalaDosa:
+    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSD1wmrt96nNOATDSWyDbuzSMy9IAbARYT4GCmcxmQh6w&s=10",
+
+  setDosa:
+    "https://images.pexels.com/photos/5560763/pexels-photo-5560763.jpeg?auto=compress&cs=tinysrgb&w=900",
+
+
+  // ==========================================================
+  // TANGO — ROLLS / NOODLES / BIRYANI / PASTA / SANDWICH
+  // ==========================================================
+
+  chickenRoll:
+    "https://images.pexels.com/photos/461198/pexels-photo-461198.jpeg?auto=compress&cs=tinysrgb&w=900",
+
+  vegNoodles:
+    "https://images.pexels.com/photos/2347311/pexels-photo-2347311.jpeg?auto=compress&cs=tinysrgb&w=900",
+
+  chickenBiryani:
+    "https://images.pexels.com/photos/1624487/pexels-photo-1624487.jpeg?auto=compress&cs=tinysrgb&w=900",
+
+  pennePasta:
+    "https://images.pexels.com/photos/1437267/pexels-photo-1437267.jpeg?auto=compress&cs=tinysrgb&w=900",
+
+  grilledSandwich:
+    "https://images.pexels.com/photos/1600711/pexels-photo-1600711.jpeg?auto=compress&cs=tinysrgb&w=900",
+
+
+  // ==========================================================
+  // MUNCH — FRIED RICE / NOODLES / CHINESE
+  // ==========================================================
+
+  chickenFriedRice:
+    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRpgOm6aMKAmMOynkpok2yQNAQUvxm5J-ss3kaLZ57cXA&s=10",
+
+  schezwanFriedRice:
+    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS5QRjF57ry-JUWJRPmbnIG3fMJeQDrzUmac0AdFJ_l8g&s=10",
+
+  schezwanNoodles:
+    "https://images.pexels.com/photos/2347311/pexels-photo-2347311.jpeg?auto=compress&cs=tinysrgb&w=900",
+
+  chilliChicken:
+    "https://images.pexels.com/photos/2338407/pexels-photo-2338407.jpeg?auto=compress&cs=tinysrgb&w=900",
+
+  vegManchurian:
+    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTtyNdC_i7_vVpaxbyn4uO9LZ2s5vUw-j9x689Sh_VaFQ&s=10",
+
+
+  // ==========================================================
+  // NESCAFE — COFFEE / MAGGI / SNACKS
+  // ==========================================================
+
+  classicCoffee:
+    "https://images.pexels.com/photos/312418/pexels-photo-312418.jpeg?auto=compress&cs=tinysrgb&w=900",
+
+  coldCoffee:
+    "https://images.pexels.com/photos/302899/pexels-photo-302899.jpeg?auto=compress&cs=tinysrgb&w=900",
+
+  masalaMaggi:
+    "https://images.pexels.com/photos/2347311/pexels-photo-2347311.jpeg?auto=compress&cs=tinysrgb&w=900",
+
+  chickenMaggi:
+    "https://images.pexels.com/photos/2347311/pexels-photo-2347311.jpeg?auto=compress&cs=tinysrgb&w=900",
+
+  chickenNuggets:
+    "https://images.pexels.com/photos/6941010/pexels-photo-6941010.jpeg?auto=compress&cs=tinysrgb&w=900",
+
+  frenchFries:
+    "https://images.pexels.com/photos/1583884/pexels-photo-1583884.jpeg?auto=compress&cs=tinysrgb&w=900",
 };
+
 
 /* =========================================================
    COMMUNITY
@@ -361,172 +426,248 @@ const canteens = [
   },
 ];
 
+
 const foodItems = [
+
+  // ==========================================================
+  // UDUPI
+  // ==========================================================
+
   {
-    id: 101,
+    id: "udupi-1",
     name: "Masala Dosa",
-    vendor: "Udupi",
-    price: 45,
-    category: "South Indian",
-    image: FOOD_IMAGES.dosa,
+    price: 55,
+    image: FOOD_IMAGES.masalaDosa,
+    category: "Udupi",
+    description:
+      "Crispy dosa with spiced potato masala, chutney and sambar",
+    veg: true,
   },
+
   {
-    id: 102,
+    id: "udupi-2",
     name: "Idli Vada",
-    vendor: "Udupi",
-    price: 35,
-    category: "South Indian",
-    image: FOOD_IMAGES.idli,
-  },
-  {
-    id: 103,
-    name: "Paneer Masala Dosa",
-    vendor: "Udupi",
-    price: 70,
-    category: "South Indian",
-    image: FOOD_IMAGES.dosa,
-  },
-  {
-    id: 104,
-    name: "Set Dosa",
-    vendor: "Udupi",
-    price: 55,
-    category: "South Indian",
-    image: FOOD_IMAGES.dosa,
-  },
-
-  {
-    id: 201,
-    name: "Chicken Roll",
-    vendor: "Tango",
-    price: 90,
-    category: "Rolls",
-    image: FOOD_IMAGES.sandwich,
-  },
-  {
-    id: 202,
-    name: "Veg Noodles",
-    vendor: "Tango",
-    price: 75,
-    category: "Noodles",
-    image: FOOD_IMAGES.noodles,
-  },
-  {
-    id: 203,
-    name: "Chicken Biryani",
-    vendor: "Tango",
-    price: 120,
-    category: "Biryani",
-    image: FOOD_IMAGES.biryani,
-  },
-  {
-    id: 204,
-    name: "Penne Pasta",
-    vendor: "Tango",
-    price: 95,
-    category: "Pasta",
-    image: FOOD_IMAGES.pasta,
-  },
-  {
-    id: 205,
-    name: "Grilled Sandwich",
-    vendor: "Tango",
-    price: 80,
-    category: "Sandwich",
-    image: FOOD_IMAGES.sandwich,
-  },
-
-  {
-    id: 301,
-    name: "Chicken Fried Rice",
-    vendor: "Munch",
-    price: 105,
-    category: "Fried Rice",
-    image: FOOD_IMAGES.biryani,
-  },
-  {
-    id: 302,
-    name: "Schezwan Fried Rice",
-    vendor: "Munch",
-    price: 90,
-    category: "Fried Rice",
-    image: FOOD_IMAGES.biryani,
-  },
-  {
-    id: 303,
-    name: "Schezwan Noodles",
-    vendor: "Munch",
-    price: 90,
-    category: "Chinese",
-    image: FOOD_IMAGES.noodles,
-  },
-  {
-    id: 304,
-    name: "Chilli Chicken",
-    vendor: "Munch",
-    price: 120,
-    category: "Chinese",
-    image: FOOD_IMAGES.biryani,
-  },
-  {
-    id: 305,
-    name: "Veg Manchurian",
-    vendor: "Munch",
-    price: 95,
-    category: "Chinese",
-    image: FOOD_IMAGES.noodles,
-  },
-
-  {
-    id: 401,
-    name: "Classic Coffee",
-    vendor: "Nescafe",
-    price: 25,
-    category: "Coffee",
-    image: FOOD_IMAGES.coffee,
-  },
-  {
-    id: 402,
-    name: "Cold Coffee",
-    vendor: "Nescafe",
-    price: 55,
-    category: "Coffee",
-    image: FOOD_IMAGES.coffee,
-  },
-  {
-    id: 403,
-    name: "Masala Maggi",
-    vendor: "Nescafe",
     price: 45,
-    category: "Maggi",
-    image: FOOD_IMAGES.noodles,
+    image: FOOD_IMAGES.idliVada,
+    category: "Udupi",
+    description:
+      "Soft idlis with crispy vada, sambar and coconut chutney",
+    veg: true,
   },
+
   {
-    id: 404,
-    name: "Chicken Maggi",
-    vendor: "Nescafe",
-    price: 80,
-    category: "Maggi",
-    image: FOOD_IMAGES.noodles,
+    id: "udupi-3",
+    name: "Paneer Masala Dosa",
+    price: 85,
+    image: FOOD_IMAGES.paneerMasalaDosa,
+    category: "Udupi",
+    description:
+      "Crispy dosa filled with paneer and masala",
+    veg: true,
   },
+
   {
-    id: 405,
-    name: "Chicken Nuggets",
-    vendor: "Nescafe",
+    id: "udupi-4",
+    name: "Set Dosa",
+    price: 50,
+    image: FOOD_IMAGES.setDosa,
+    category: "Udupi",
+    description:
+      "Soft fluffy set dosas served with chutney and sambar",
+    veg: true,
+  },
+
+
+  // ==========================================================
+  // TANGO
+  // ==========================================================
+
+  {
+    id: "tango-1",
+    name: "Chicken Roll",
     price: 90,
-    category: "Snacks",
-    image: FOOD_IMAGES.fries,
+    image: FOOD_IMAGES.chickenRoll,
+    category: "Tango",
+    description:
+      "Spiced chicken wrapped in a soft roll with fresh vegetables",
+    veg: false,
   },
+
   {
-    id: 406,
-    name: "French Fries",
-    vendor: "Nescafe",
+    id: "tango-2",
+    name: "Veg Noodles",
+    price: 75,
+    image: FOOD_IMAGES.vegNoodles,
+    category: "Tango",
+    description:
+      "Wok-tossed noodles with fresh vegetables",
+    veg: true,
+  },
+
+  {
+    id: "tango-3",
+    name: "Chicken Biryani",
+    price: 120,
+    image: FOOD_IMAGES.chickenBiryani,
+    category: "Tango",
+    description:
+      "Aromatic chicken biryani with fragrant basmati rice",
+    veg: false,
+  },
+
+  {
+    id: "tango-4",
+    name: "Penne Pasta",
+    price: 95,
+    image: FOOD_IMAGES.pennePasta,
+    category: "Tango",
+    description:
+      "Penne pasta tossed in a rich, creamy sauce",
+    veg: true,
+  },
+
+  {
+    id: "tango-5",
+    name: "Grilled Sandwich",
     price: 70,
-    category: "Snacks",
-    image: FOOD_IMAGES.fries,
+    image: FOOD_IMAGES.grilledSandwich,
+    category: "Tango",
+    description:
+      "Crispy grilled sandwich with a cheesy vegetable filling",
+    veg: true,
+  },
+
+
+  // ==========================================================
+  // MUNCH
+  // ==========================================================
+
+  {
+    id: "munch-1",
+    name: "Chicken Fried Rice",
+    price: 100,
+    image: FOOD_IMAGES.chickenFriedRice,
+    category: "Munch",
+    description:
+      "Wok-fried rice with chicken, vegetables and seasoning",
+    veg: false,
+  },
+
+  {
+    id: "munch-2",
+    name: "Schezwan Fried Rice",
+    price: 90,
+    image: FOOD_IMAGES.schezwanFriedRice,
+    category: "Munch",
+    description:
+      "Spicy Schezwan-style fried rice with vegetables",
+    veg: true,
+  },
+
+  {
+    id: "munch-3",
+    name: "Schezwan Noodles",
+    price: 90,
+    image: FOOD_IMAGES.schezwanNoodles,
+    category: "Munch",
+    description:
+      "Spicy wok-tossed noodles with Schezwan sauce",
+    veg: true,
+  },
+
+  {
+    id: "munch-4",
+    name: "Chilli Chicken",
+    price: 120,
+    image: FOOD_IMAGES.chilliChicken,
+    category: "Munch",
+    description:
+      "Crispy chicken tossed with peppers, onions and chilli sauce",
+    veg: false,
+  },
+
+  {
+    id: "munch-5",
+    name: "Veg Manchurian",
+    price: 90,
+    image: FOOD_IMAGES.vegManchurian,
+    category: "Munch",
+    description:
+      "Crispy vegetable balls in a savoury Indo-Chinese sauce",
+    veg: true,
+  },
+
+
+  // ==========================================================
+  // NESCAFE
+  // ==========================================================
+
+  {
+    id: "nescafe-1",
+    name: "Classic Coffee",
+    price: 35,
+    image: FOOD_IMAGES.classicCoffee,
+    category: "Nescafe",
+    description:
+      "Hot, creamy college-style coffee",
+    veg: true,
+  },
+
+  {
+    id: "nescafe-2",
+    name: "Cold Coffee",
+    price: 60,
+    image: FOOD_IMAGES.coldCoffee,
+    category: "Nescafe",
+    description:
+      "Chilled creamy coffee served cold",
+    veg: true,
+  },
+
+  {
+    id: "nescafe-3",
+    name: "Masala Maggi",
+    price: 50,
+    image: FOOD_IMAGES.masalaMaggi,
+    category: "Nescafe",
+    description:
+      "Hot Maggi noodles tossed with Indian masala",
+    veg: true,
+  },
+
+  {
+    id: "nescafe-4",
+    name: "Chicken Maggi",
+    price: 80,
+    image: FOOD_IMAGES.chickenMaggi,
+    category: "Nescafe",
+    description:
+      "Maggi noodles with spicy chicken pieces",
+    veg: false,
+  },
+
+  {
+    id: "nescafe-5",
+    name: "Chicken Nuggets",
+    price: 85,
+    image: FOOD_IMAGES.chickenNuggets,
+    category: "Nescafe",
+    description:
+      "Crispy golden chicken nuggets",
+    veg: false,
+  },
+
+  {
+    id: "nescafe-6",
+    name: "French Fries",
+    price: 60,
+    image: FOOD_IMAGES.frenchFries,
+    category: "Nescafe",
+    description:
+      "Crispy golden fries with seasoning",
+    veg: true,
   },
 ];
-
 /* =========================================================
    STORE
 ========================================================= */
@@ -874,6 +1015,12 @@ function App() {
     window.__campusToast = window.setTimeout(() => setToast(""), 2400);
   };
 
+  const handleLogout = () => {
+  setUser(null);
+  setActive("home");
+  notify("You have been logged out");
+  };
+
   const go = (key) => {
     setActive(key);
     setModal(null);
@@ -1001,6 +1148,7 @@ function App() {
         <Profile
           user={user}
           onLogin={() => setLoginOpen(true)}
+          onLogout={handleLogout}
           notify={notify}
           openModal={setModal}
         />
@@ -1114,7 +1262,7 @@ function App() {
           </span>
           <span>
             <small>YOUR CAMPUS</small>
-            <b>New Horizon Campus</b>
+            <b>New Horizon College Of Engineering</b>
           </span>
         </div>
 
@@ -1609,12 +1757,12 @@ function Campus({
           <span className="section-kicker">YOUR CAMPUS</span>
 
           <div className="mini-stat">
-            <b>8,000+</b>
+            <b>6,000+</b>
             <span>students</span>
           </div>
 
           <div className="mini-stat">
-            <b>42</b>
+            <b>20</b>
             <span>active clubs</span>
           </div>
         </aside>
@@ -2038,112 +2186,441 @@ function MiniService({ icon, title, text, onClick }) {
    FOOD HUB
 ========================================================= */
 
+/* =========================================================
+   FOOD HUB — TRADITIONAL CAMPUS MENU
+========================================================= */
+
+/* =========================================================
+   FOOD HUB
+========================================================= */
+
 function Food({ canteens: vendorList, items, cart, addFood, openModal }) {
   const [selectedCanteen, setSelectedCanteen] = useState("All");
   const [q, setQ] = useState("");
 
-  const filtered = items.filter(
-    (item) =>
-      (selectedCanteen === "All" || item.vendor === selectedCanteen) &&
-      `${item.name} ${item.category}`
-        .toLowerCase()
-        .includes(q.toLowerCase())
-  );
+  /* Filter food by selected canteen + search */
+  const filtered = items.filter((item) => {
+    const matchesCanteen =
+      selectedCanteen === "All" ||
+      item.category.toLowerCase() === selectedCanteen.toLowerCase();
 
-  const total = cart.reduce((sum, item) => sum + item.price, 0);
+    const matchesSearch =
+      `${item.name} ${item.category} ${item.description || ""}`
+        .toLowerCase()
+        .includes(q.toLowerCase());
+
+    return matchesCanteen && matchesSearch;
+  });
+
+  const total = cart.reduce(
+    (sum, item) => sum + Number(item.price || 0),
+    0
+  );
 
   return (
     <section className="page-section food-page">
+
+      {/* =====================================================
+          HEADER
+      ===================================================== */}
+
       <PageHeader
         kicker="CAMPUS FOOD"
         title="Food Hub"
         text="Four canteens, one campus checkout."
         action={
-          <button className="primary" onClick={() => openModal("food-cart")}>
-            <HiShoppingCart /> Cart ({cart.length})
+          <button
+            className="primary"
+            onClick={() => openModal("food-cart")}
+          >
+            <HiShoppingCart />
+            Cart ({cart.length})
           </button>
         }
       />
 
-      <div className="canteen-status-grid">
+
+      {/* =====================================================
+          CANTEEN TOGGLE
+      ===================================================== */}
+
+      <div className="food-canteen-toggle">
+
+        <button
+          className={`canteen-toggle-btn ${
+            selectedCanteen === "All" ? "active" : ""
+          }`}
+          onClick={() => setSelectedCanteen("All")}
+        >
+          <span className="canteen-toggle-icon">
+            <HiShoppingBag />
+          </span>
+
+          <span className="canteen-toggle-info">
+            <b>All</b>
+            <small>All canteens</small>
+          </span>
+        </button>
+
+
         {vendorList.map((canteen) => (
           <button
             key={canteen.id}
-            className={`canteen-status ${
-              selectedCanteen === canteen.name ? "selected" : ""
+            className={`canteen-toggle-btn ${
+              selectedCanteen === canteen.name ? "active" : ""
             }`}
-            onClick={() =>
-              setSelectedCanteen(
-                selectedCanteen === canteen.name ? "All" : canteen.name
-              )
-            }
+            onClick={() => setSelectedCanteen(canteen.name)}
           >
-            <div>
-              <div>
-                <b>{canteen.name}</b>
-                <small>{canteen.eta}</small>
-              </div>
-            </div>
 
-            <p className="canteen-subtitle">{canteen.subtitle}</p>
-
-            <span className={`load-bar ${canteen.color}`}>
-              <i style={{ width: `${canteen.load}%` }} />
+            <span className={`canteen-toggle-icon ${canteen.color}`}>
+              {canteen.name === "Udupi" && <HiHome />}
+              {canteen.name === "Tango" && <HiFire />}
+              {canteen.name === "Munch" && <HiShoppingBag />}
+              {canteen.name === "Nescafe" && <HiBolt />}
             </span>
 
-            <small>{canteen.status}</small>
+            <span className="canteen-toggle-info">
+              <b>{canteen.name}</b>
+              <small>{canteen.subtitle}</small>
+            </span>
+
+            <span className="canteen-toggle-status">
+              <i className={canteen.color}></i>
+              {canteen.eta}
+            </span>
+
           </button>
         ))}
+
       </div>
 
+
+      {/* =====================================================
+          ACTIVE CANTEEN INFORMATION
+      ===================================================== */}
+
+      {selectedCanteen !== "All" && (
+        <div className="active-canteen-banner">
+
+          <div className="active-canteen-left">
+
+            <span className="active-canteen-icon">
+              <HiShoppingBag />
+            </span>
+
+            <div>
+              <span className="section-kicker">
+                SELECTED CANTEEN
+              </span>
+
+              <h3>
+                {selectedCanteen}
+              </h3>
+
+              <p>
+                {
+                  vendorList.find(
+                    (canteen) =>
+                      canteen.name === selectedCanteen
+                  )?.subtitle
+                }
+              </p>
+            </div>
+
+          </div>
+
+
+          <div className="active-canteen-right">
+
+            <span>
+              <i></i>
+
+              {
+                vendorList.find(
+                  (canteen) =>
+                    canteen.name === selectedCanteen
+                )?.status
+              }
+            </span>
+
+            <b>
+              {
+                vendorList.find(
+                  (canteen) =>
+                    canteen.name === selectedCanteen
+                )?.eta
+              }
+            </b>
+
+          </div>
+
+        </div>
+      )}
+
+
+      {/* =====================================================
+          SEARCH
+      ===================================================== */}
+
       <div className="searchbar compact wide-search">
+
         <HiMagnifyingGlass />
+
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search dosa, biryani, Maggi, coffee..."
         />
+
+        {q && (
+          <button
+            className="search-clear"
+            onClick={() => setQ("")}
+          >
+            <HiXMark />
+          </button>
+        )}
+
       </div>
+
+
+      {/* =====================================================
+          MENU TITLE
+      ===================================================== */}
+
+      <div className="food-menu-heading">
+
+        <div>
+          <span className="section-kicker">
+            {selectedCanteen === "All"
+              ? "CAMPUS MENU"
+              : `${selectedCanteen.toUpperCase()} MENU`}
+          </span>
+
+          <h2>
+            {selectedCanteen === "All"
+              ? "Today's Menu"
+              : `${selectedCanteen} Menu`}
+          </h2>
+
+          <p>
+            {filtered.length} items available
+          </p>
+        </div>
+
+        <div className="food-menu-count">
+          {filtered.length}
+          <small>items</small>
+        </div>
+
+      </div>
+
+
+      {/* =====================================================
+          MENU
+      ===================================================== */}
 
       <div className="product-grid food-product-grid">
+
         {filtered.map((item) => (
-          <FoodCard key={item.id} item={item} add={addFood} />
+          <FoodCard
+            key={item.id}
+            item={item}
+            add={addFood}
+          />
         ))}
+
       </div>
 
-      {cart.length > 0 && (
-        <div className="floating-cart">
-          <div>
-            <HiShoppingCart />
-            <b>{cart.length} items</b>
-            <span>₹{total}</span>
-          </div>
-          <button onClick={() => openModal("food-cart")}>
-            Checkout <HiArrowRight />
+
+      {/* =====================================================
+          EMPTY RESULT
+      ===================================================== */}
+
+      {filtered.length === 0 && (
+        <div className="empty-food-results">
+
+          <HiMagnifyingGlassCircle />
+
+          <h3>No food found</h3>
+
+          <p>
+            Try another dish or switch to a different canteen.
+          </p>
+
+          <button
+            className="ghost"
+            onClick={() => {
+              setSelectedCanteen("All");
+              setQ("");
+            }}
+          >
+            Show all food
           </button>
+
         </div>
       )}
+
+
+      {/* =====================================================
+          FLOATING CART
+      ===================================================== */}
+
+      {cart.length > 0 && (
+
+        <div className="floating-cart">
+
+          <div>
+
+            <HiShoppingCart />
+
+            <b>
+              {cart.length} items
+            </b>
+
+            <span>
+              ₹{total}
+            </span>
+
+          </div>
+
+          <button
+            onClick={() => openModal("food-cart")}
+          >
+            Checkout
+            <HiArrowRight />
+          </button>
+
+        </div>
+
+      )}
+
     </section>
   );
 }
 
+
+/* =========================================================
+   TRADITIONAL FOOD MENU ITEM
+========================================================= */
+
+function TraditionalFoodItem({ item, add }) {
+
+  return (
+
+    <article className="traditional-food-item">
+
+      {/* SMALL FOOD IMAGE */}
+
+      <div className="traditional-food-image">
+
+        <img
+          src={item.image}
+          alt={item.name}
+          loading="lazy"
+        />
+
+      </div>
+
+
+      {/* FOOD INFORMATION */}
+
+      <div className="traditional-food-info">
+
+        <div className="traditional-food-title-row">
+
+          <div className="traditional-food-name">
+
+            <span
+              className={`veg-indicator ${
+                item.veg ? "veg" : "non-veg"
+              }`}
+            />
+
+            <h3>
+              {item.name}
+            </h3>
+
+          </div>
+
+          <span className="traditional-food-price">
+            ₹{item.price}
+          </span>
+
+        </div>
+
+
+        <p>
+          {item.description ||
+            `${item.category} from ${item.vendor}`}
+        </p>
+
+
+        <div className="traditional-food-meta">
+
+          <span>
+            {item.category}
+          </span>
+
+          <button
+            onClick={() => add(item)}
+            className="traditional-add-button"
+          >
+            <HiPlus />
+            Add
+          </button>
+
+        </div>
+
+      </div>
+
+    </article>
+
+  );
+}
+/* =========================================================
+   FOOD CARD
+========================================================= */
+
 function FoodCard({ item, add }) {
   return (
     <article className="product-card food-card">
+
       <div className="food-image-wrap">
-        <img src={item.image} alt={item.name} loading="lazy" />
+        <img
+          src={item.image}
+          alt={item.name}
+          loading="lazy"
+        />
       </div>
 
-      <span className="event-club">{item.category}</span>
-      <h3>{item.name}</h3>
-      <p>{item.vendor}</p>
+      <div className="food-card-content">
 
-      <div className="product-bottom">
-        <b>₹{item.price}</b>
-        <button onClick={() => add(item)}>
-          <HiPlus /> Add
-        </button>
+        <div className="food-card-category">
+          {item.category}
+        </div>
+
+        <h3>{item.name}</h3>
+
+        <p>
+          {item.description || "Freshly prepared on campus."}
+        </p>
+
+        <div className="product-bottom">
+
+          <b>₹{item.price}</b>
+
+          <button
+            onClick={() => add(item)}
+          >
+            <HiPlus />
+            Add
+          </button>
+
+        </div>
+
       </div>
+
     </article>
   );
 }
@@ -2247,7 +2724,7 @@ function Store({ items, cart, addStore, openModal }) {
    LINKEDIN-STYLE PROFILE
 ========================================================= */
 
-function Profile({ user, onLogin, notify }) {
+function Profile({ user, onLogin, onLogout, notify }) {
   if (!user) {
     return (
       <section className="page-section profile-page">
@@ -2309,6 +2786,9 @@ function Profile({ user, onLogin, notify }) {
             <HiUserPlus /> Open to projects
           </button>
         </div>
+        <button className="logout-btn" onClick={onLogout}>
+        <HiArrowLeftOnRectangle /> Logout
+        </button>
       </div>
 
       <div className="profile-grid linkedin-grid">
