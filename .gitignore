@@ -1,0 +1,16 @@
+*out
+*logs
+*actions
+*notifications
+*tools
+plugins
+user_trunk.yaml
+user.yaml
+tmp
+node_modules
+dist
+.parcel-cache
+.trunk
+coverage
+.DS_Store
+src/.env.local
