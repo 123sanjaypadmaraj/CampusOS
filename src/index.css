@@ -4094,3 +4094,172 @@
   }
 
 }
+/* =========================================================
+   CAMPUS OS — FINAL DARK MODE ICON FIX
+   Add this at the VERY BOTTOM of index.css
+========================================================= */
+
+/* ---------- Campus Service Icons ---------- */
+
+.service-icon {
+  background: var(--soft) !important;
+  color: var(--purple) !important;
+
+  display: grid !important;
+  place-items: center !important;
+
+  width: 46px;
+  height: 46px;
+
+  border-radius: 13px;
+  flex: 0 0 auto;
+}
+
+.service-icon svg {
+  width: 23px !important;
+  height: 23px !important;
+
+  color: currentColor !important;
+  stroke: currentColor !important;
+}
+
+
+/* ---------- Dark Mode ---------- */
+
+.app-shell.dark-mode .service-icon {
+  background: var(--surface-2) !important;
+  color: var(--accent) !important;
+
+  border: 1px solid var(--border);
+}
+
+.app-shell.dark-mode .service-icon svg {
+  color: var(--accent) !important;
+  stroke: var(--accent) !important;
+}
+
+
+/* ---------- Light Mode ---------- */
+
+.app-shell:not(.dark-mode) .service-icon {
+  background: var(--soft) !important;
+  color: var(--purple) !important;
+}
+
+.app-shell:not(.dark-mode) .service-icon svg {
+  color: var(--purple) !important;
+  stroke: var(--purple) !important;
+}
+
+
+/* =========================================================
+   CANTEEN TOGGLE — FIX OLD VARIABLE
+========================================================= */
+
+.canteen-toggle-btn.active {
+  border-color: var(--accent) !important;
+
+  box-shadow:
+    0 0 0 1px rgba(112, 71, 255, 0.08),
+    0 8px 22px rgba(112, 71, 255, 0.08);
+}
+
+.canteen-toggle-icon {
+  color: var(--accent) !important;
+}
+
+.canteen-toggle-btn.active .canteen-toggle-icon {
+  background: var(--surface-2);
+  color: var(--accent) !important;
+}
+
+
+/* =========================================================
+   DARK MODE — SERVICE CARDS
+========================================================= */
+
+.app-shell.dark-mode .service-card {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.app-shell.dark-mode .service-card h3 {
+  color: var(--text) !important;
+}
+
+.app-shell.dark-mode .service-card p {
+  color: var(--muted) !important;
+}
+
+.app-shell.dark-mode .service-arrow {
+  color: var(--accent) !important;
+}
+
+
+/* =========================================================
+   DARK MODE — ALL SERVICE ICON CONTAINERS
+========================================================= */
+
+.app-shell.dark-mode .service-detail-icon,
+.app-shell.dark-mode .workflow-card > span,
+.app-shell.dark-mode .resource-icon,
+.app-shell.dark-mode .mini-service > span,
+.app-shell.dark-mode .command-card > span {
+  background: var(--surface-2) !important;
+  color: var(--accent) !important;
+}
+
+.app-shell.dark-mode .service-detail-icon svg,
+.app-shell.dark-mode .workflow-card > span svg,
+.app-shell.dark-mode .resource-icon svg,
+.app-shell.dark-mode .mini-service > span svg,
+.app-shell.dark-mode .command-card > span svg {
+  color: var(--accent) !important;
+  stroke: var(--accent) !important;
+}
+
+
+/* =========================================================
+   DARK MODE — FOOD HUB ICONS
+========================================================= */
+
+.app-shell.dark-mode .canteen-toggle-icon {
+  background: var(--surface-2) !important;
+  color: var(--accent) !important;
+}
+
+.app-shell.dark-mode .active-canteen-icon {
+  background: var(--surface-2) !important;
+  color: var(--accent) !important;
+}
+
+.app-shell.dark-mode .product-placeholder {
+  background: var(--surface-2) !important;
+  color: var(--accent) !important;
+}
+
+
+/* =========================================================
+   FIX UNDEFINED --primary VARIABLE
+========================================================= */
+
+.canteen-toggle-btn.active {
+  border-color: var(--accent) !important;
+}
+
+.canteen-toggle-icon {
+  color: var(--accent) !important;
+}
+
+.canteen-toggle-icon.green {
+  color: #2daa68 !important;
+}
+
+.canteen-toggle-icon.moderate {
+  color: #d99620 !important;
+}
+
+.canteen-toggle-icon.busy {
+  color: #e25555 !important;
+}

@@ -1,6 +1,60 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import "./index.css";
+import { supabase } from "./lib/supabase";
+import { mergeCartItem } from "./utils/mvpHelpers";
+import {
+  getDefaultCampus,
+  getCurrentUser,
+  getOrCreateProfile,
+  getCampusPosts,
+  getCampusEvents,
+  getClubs,
+  getCampusFood,
+  getUserNotifications,
+  getMyOrders,
+  createFoodOrder,
+  publishPost,
+  markAllNotificationsRead,
+  registerEvent,
+  sendMagicLink,
+  uploadPrintJob,
+  signInWithPassword,
+  subscribeToAuthChanges,
+  subscribeToUserNotifications,
+  subscribeToOrders,
+  subscribeToPosts,
+  subscribeToEvents,
+  subscribeToClubs,
+  subscribeToMarketplace,
+  subscribeToLostFound,
+  togglePostLike,
+  getPostComments,
+  addPostComment,
+  joinClub,
+  leaveClub,
+  getMyClubs,
+  signOut,
+  getPeople,
+  updateProfile,
+  getMyPrintJobs,
+  getMyServiceRequests,
+  getResources,
+  getMyBookings,
+  createCampusServiceRequest,
+  createResourceBooking,
+  getMyRegisteredEventIds,
+  getSavedEvents,
+  toggleSavedEvent,
+  cancelEventRegistration,
+  getLostFoundItems,
+  createLostFoundItem,
+  claimLostFoundItem,
+  getMarketplaceListings,
+  createMarketplaceListing,
+  markMarketplaceListingSold,
+  reportContent,
+} from "./services/mvpService";
 
 import {
   HiHome,
@@ -174,7 +228,7 @@ const FOOD_IMAGES = {
 
 const postsSeed = [
   {
-    id: 1,
+    id: "00000000-0000-4000-a000-000000000001",
     type: "Hackathon",
     icon: <HiBolt />,
     title: "Need 2 Flutter developers for Smart India Hackathon",
@@ -187,7 +241,7 @@ const postsSeed = [
     verified: true,
   },
   {
-    id: 2,
+    id: "00000000-0000-4000-a000-000000000002",
     type: "Event",
     icon: <HiCalendarDays />,
     title: "Generative AI Workshop — registrations are open",
@@ -200,7 +254,7 @@ const postsSeed = [
     verified: true,
   },
   {
-    id: 3,
+    id: "00000000-0000-4000-a000-000000000003",
     type: "Help Needed",
     icon: <HiUserGroup />,
     title: "Does anyone have a Type-C charger near Block C?",
@@ -213,7 +267,7 @@ const postsSeed = [
     verified: true,
   },
   {
-    id: 4,
+    id: "00000000-0000-4000-a000-000000000004",
     type: "Achievement",
     icon: <HiTrophy />,
     title:
@@ -234,7 +288,7 @@ const postsSeed = [
 
 const eventsSeed = [
   {
-    id: 1,
+    id: "00000000-0000-4000-a000-000000000001",
     date: "12",
     month: "AUG",
     title: "Generative AI Workshop",
@@ -246,7 +300,7 @@ const eventsSeed = [
     attendees: 184,
   },
   {
-    id: 2,
+    id: "00000000-0000-4000-a000-000000000002",
     date: "14",
     month: "AUG",
     title: "Campus Hackathon 2026",
@@ -258,7 +312,7 @@ const eventsSeed = [
     attendees: 420,
   },
   {
-    id: 3,
+    id: "00000000-0000-4000-a000-000000000003",
     date: "16",
     month: "AUG",
     title: "Robotics Project Showcase",
@@ -990,36 +1044,89 @@ function App() {
   const [active, setActive] = useState("home");
   const [search, setSearch] = useState("");
   const [loginOpen, setLoginOpen] = useState(false);
-  const [user, setUser] = useState({
-    name: "Sanjay Padmaraj",
-    email: "sanjaypadmaraj@nhce.edu.in",
-    usn: "1NH25CS123",
-    course: "Computer Science & Engineering",
-    year: "2nd Year",
-  });
+  const [user, setUser] = useState(null);
   const [toast, setToast] = useState("");
   const [postFilter, setPostFilter] = useState("All");
+  const defaultLoginEmail = "sanjaypadmaraj@nhce.edu.in";
+  const defaultLoginName = "Sanjay Padmaraj";
+  // DEV BYPASS: set VITE_DEV_EMAIL in .env to enable direct login without magic link.
+  // Leave unset (or empty) in production.
+  const devEmail = "sanjaypadmaraj@nhce.edu.in";
+  const devPassword = "CampusOS@2026";
   const [darkMode, setDarkMode] = useState(
     () => localStorage.getItem("campus-theme") === "dark"
   );
   const [notifications, setNotifications] = useState(notificationsSeed);
   const [modal, setModal] = useState(null);
-  const [posts, setPosts] = useState(postsSeed);
+  const [posts, setPosts] = useState([]);
+  const [postsLoading, setPostsLoading] = useState(false);
   const [foodCart, setFoodCart] = useState([]);
   const [storeCart, setStoreCart] = useState([]);
   const [printFile, setPrintFile] = useState(null);
+  const [dbCanteens, setDbCanteens] = useState([]);
+  const [dbFoodItems, setDbFoodItems] = useState([]);
+  const [dbLoading, setDbLoading] = useState(true);
+  const [dbError, setDbError] = useState("");
+  const [authUser, setAuthUser] =
+    useState(null);
+
+  const [campusId, setCampusId] =
+    useState(null);
+
+  const [profile, setProfile] =
+    useState(null);
+
+  const [backendLoading, setBackendLoading] =
+    useState(true);
+
+  const [backendError, setBackendError] =
+    useState("");
+
+  const [orders, setOrders] =
+    useState([]);
+  const [people, setPeople] = useState([]);
+  const [registeredEventIds, setRegisteredEventIds] = useState([]);
+  const [savedEventIds, setSavedEventIds] = useState([]);
+  const [printJobs, setPrintJobs] = useState([]);
+  const [serviceRequests, setServiceRequests] = useState([]);
+  const [resources, setResources] = useState([]);
+  const [bookings, setBookings] = useState([]);
+  const [lostItems, setLostItems] = useState([]);
+  const [marketListings, setMarketListings] = useState([]);
+
+  const toastTimer = useRef(null);
 
   const notify = (message) => {
     setToast(message);
-    window.clearTimeout(window.__campusToast);
-    window.__campusToast = window.setTimeout(() => setToast(""), 2400);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(""), 2400);
   };
 
-  const handleLogout = () => {
-  setUser(null);
-  setActive("home");
-  notify("You have been logged out");
-  };
+  const handleLogout = async () => {
+  try {
+    await signOut();
+
+    setAuthUser(null);
+    setProfile(null);
+    setUser(null);
+
+    setActive("home");
+
+    notify(
+      "You have been logged out"
+    );
+
+  } catch (error) {
+    console.error(
+      "Logout failed:",
+      error
+    );
+
+    notify(
+      "Logout failed"
+    );
+  }
+};
 
   const go = (key) => {
     setActive(key);
@@ -1049,37 +1156,599 @@ function App() {
   }, [search, postFilter, posts]);
 
   const addFood = (item) => {
-    setFoodCart((cart) => [...cart, item]);
-    notify(`${item.name} added to food cart`);
+    setFoodCart((cart) => {
+      if (cart.length && cart[0].canteenId && item.canteenId && cart[0].canteenId !== item.canteenId) {
+        notify("You can only order from one canteen at a time.");
+        return cart;
+      }
+      notify(`${item.name} added to food cart`);
+      return mergeCartItem(cart, item);
+    });
   };
 
   const addStore = (item) => {
     setStoreCart((cart) => [...cart, item]);
     notify(`${item.name} added to store cart`);
   };
+  const checkoutFood = async () => {
+    try {
 
-  const createPost = (post) => {
-    setPosts((current) => [
-      {
-        ...post,
-        id: Date.now(),
-        icon: <HiMegaphone />,
-        time: "Just now",
-        likes: 0,
-        comments: 0,
-        verified: true,
-      },
-      ...current,
-    ]);
-    setModal(null);
-    notify("Post published to Campus Feed");
+      if (!authUser) {
+        setLoginOpen(true);
+
+        notify(
+          "Sign in before placing an order"
+        );
+
+        return;
+      }
+
+      if (!foodCart.length) {
+        notify(
+          "Your food cart is empty"
+        );
+
+        return;
+      }
+
+      const canteenId =
+        foodCart[0]?.canteenId;
+
+      if (!canteenId) {
+        notify(
+          "Please select a canteen"
+        );
+
+        return;
+      }
+
+      const order =
+        await createFoodOrder({
+          userId:
+            authUser.id,
+
+          canteenId,
+
+          cart:
+            foodCart,
+        });
+
+      setOrders(
+        (current) => [
+          order,
+          ...current,
+        ]
+      );
+
+      setFoodCart([]);
+
+      setModal(null);
+
+      notify(
+        `Order placed · Pickup ${order.pickup_code}`
+      );
+
+    } catch (error) {
+
+      console.error(
+        "Food order:",
+        error
+      );
+
+      notify(
+        error.message ||
+        "Unable to place order"
+      );
+    }
   };
 
-  const markNotificationsRead = () => {
-    setNotifications((items) =>
-      items.map((item) => ({ ...item, unread: false }))
-    );
+  const createPost = async (post) => {
+    try {
+
+      if (!authUser) {
+        setLoginOpen(true);
+
+        notify(
+          "Sign in to publish posts"
+        );
+
+        return;
+      }
+
+      const savedPost =
+        await publishPost({
+          userId:
+            authUser.id,
+
+          campusId,
+
+          type:
+            post.type,
+
+          title:
+            post.title,
+
+          content:
+            post.content || "",
+
+          tags:
+            post.tags || [],
+        });
+
+      setPosts(
+        (current) => [
+          {
+            ...post,
+
+            id:
+              savedPost.id,
+
+            icon:
+              <HiMegaphone />,
+
+            time:
+              "Just now",
+
+            likes: 0,
+
+            comments: 0,
+
+            verified: true,
+          },
+
+          ...current,
+        ]
+      );
+
+      setModal(null);
+
+      notify(
+        "Post published to Campus Feed"
+      );
+
+    } catch (error) {
+
+      console.error(
+        "Post creation:",
+        error
+      );
+
+      notify(
+        error.message ||
+        "Unable to publish post"
+      );
+    }
   };
+
+  const markNotificationsRead =
+    async () => {
+
+      setNotifications(
+        (items) =>
+          items.map(
+            (item) => ({
+              ...item,
+              unread: false,
+            })
+          )
+      );
+
+      if (!authUser) {
+        notify(
+          "Notifications marked as read"
+        );
+
+        return;
+      }
+
+      try {
+
+        await markAllNotificationsRead(
+          authUser.id
+        );
+
+        notify(
+          "All notifications marked as read"
+        );
+
+      } catch (error) {
+
+        console.error(
+          "Notification update:",
+          error
+        );
+
+        notify(
+          "Updated locally"
+        );
+      }
+    };
+    const [events, setEvents] =
+      useState([]);
+
+    const [eventsLoading, setEventsLoading] =
+      useState(false);
+    const [clubs, setClubs] = useState([]);
+
+      useEffect(() => {
+        if (!campusId) return;
+
+        let mounted = true;
+
+        async function loadClubs() {
+          try {
+            const data =
+              await getClubs(
+                campusId
+              );
+
+            if (mounted) {
+              setClubs(data);
+            }
+
+          } catch (error) {
+            console.error(
+              "Club loading failed:",
+              error
+            );
+          }
+        }
+
+        loadClubs();
+
+        return () => {
+          mounted = false;
+        };
+      }, [campusId]);
+
+      useEffect(() => {
+        if (!campusId) return;
+
+        let mounted = true;
+
+        async function loadPosts() {
+          try {
+            setPostsLoading(true);
+            const data = await getCampusPosts(campusId);
+            if (mounted) setPosts(data);
+          } catch (error) {
+            console.error("Post loading failed:", error);
+          } finally {
+            if (mounted) setPostsLoading(false);
+          }
+        }
+
+        loadPosts();
+        const unsub = subscribeToPosts(() => loadPosts());
+
+        return () => {
+          mounted = false;
+          unsub?.();
+        };
+      }, [campusId]);
+
+      useEffect(() => {
+        if (!campusId) return;
+
+        let mounted = true;
+
+        async function loadEvents() {
+          try {
+            setEventsLoading(true);
+            const data = await getCampusEvents(campusId);
+            if (mounted) setEvents(data);
+          } catch (error) {
+            console.error("Event loading failed:", error);
+          } finally {
+            if (mounted) setEventsLoading(false);
+          }
+        }
+
+        loadEvents();
+        const unsub = subscribeToEvents(() => loadEvents());
+
+        return () => {
+          mounted = false;
+          unsub?.();
+        };
+      }, [campusId]);
+
+    useEffect(() => {
+      let mounted = true;
+
+      async function initialize() {
+        try {
+          setBackendLoading(true);
+          setBackendError("");
+
+          // ── KINGPIN AUTO-LOGIN ───────────────────────────────────────────────
+          // If VITE_DEV_EMAIL + VITE_DEV_PASSWORD are set:
+          //   1. Try signInWithPassword (existing account)
+          //   2. If account doesn't exist yet, auto-create it via signUp
+          //      (requires "Confirm email" to be OFF in Supabase Auth settings)
+          if (devEmail && devPassword) {
+            const { data: sessionCheck } = await supabase.auth.getSession();
+            if (!sessionCheck?.session) {
+              // ── Step 1: Try to sign in ─────────────────────────────────────
+              const { data: signInData, error: signInErr } =
+                await supabase.auth.signInWithPassword({
+                  email: devEmail,
+                  password: devPassword,
+                });
+
+              if (signInData?.session) {
+                // ✅ Signed in — real session established
+                console.info("[CampusOS] Kingpin auto-login OK:", devEmail);
+              } else {
+                // ── Step 2: Account missing — auto-create it ──────────────
+                const isInvalidCreds =
+                  signInErr?.message?.toLowerCase().includes("invalid") ||
+                  signInErr?.status === 400;
+
+                if (isInvalidCreds) {
+                  console.info(
+                    "[CampusOS] Kingpin account not found — creating it now..."
+                  );
+                  const { data: signUpData, error: signUpErr } =
+                    await supabase.auth.signUp({
+                      email: devEmail,
+                      password: devPassword,
+                      options: {
+                        data: {
+                          name: "Sanjay Padmaraj",
+                          usn: "1NH22CS101",
+                          course: "Computer Science & Engineering",
+                          year: "2nd Year",
+                        },
+                      },
+                    });
+
+                  if (signUpData?.session) {
+                    // ✅ Auto-confirmed + signed in (email confirmation is OFF)
+                    console.info(
+                      "[CampusOS] Kingpin account created & signed in."
+                    );
+                  } else if (signUpData?.user && !signUpData?.session) {
+                    // Email confirmation is ON — tell the user what to do
+                    console.warn(
+                      "[CampusOS] Account created but needs email confirmation.\n" +
+                      "To fix: Supabase Dashboard → Authentication → Providers → Email\n" +
+                      "→ turn OFF 'Confirm email' → Save. Then refresh the app."
+                    );
+                    notify(
+                      "One-time setup needed: disable 'Confirm email' in Supabase Auth settings, then refresh."
+                    );
+                  } else if (signUpErr) {
+                    console.warn("[CampusOS] Auto-create failed:", signUpErr.message);
+                  }
+                } else if (signInErr) {
+                  console.warn("[CampusOS] Kingpin login error:", signInErr.message);
+                }
+              }
+            }
+          }
+          // ────────────────────────────────────────────────────────────────────
+
+
+          const campus = await getDefaultCampus();
+          if (!mounted) return;
+
+          setCampusId(campus.id);
+
+          const currentUser = await getCurrentUser();
+
+          if (currentUser) {
+            const currentProfile = await getOrCreateProfile(
+              currentUser,
+              campus.id
+            );
+
+            if (!mounted) return;
+
+            setAuthUser(currentUser);
+            setProfile(currentProfile);
+            setUser({
+              name:
+                currentProfile?.name ||
+                currentUser.email?.split("@")[0] ||
+                "Campus Student",
+              email: currentUser.email || "",
+              usn: currentProfile?.usn || "",
+              course:
+                currentProfile?.course ||
+                "Computer Science & Engineering",
+              year: currentProfile?.year || "2nd Year",
+            });
+
+            const [userNotifications, userOrders] = await Promise.all([
+              getUserNotifications(currentUser.id),
+              getMyOrders(currentUser.id),
+            ]);
+
+            if (!mounted) return;
+
+            if (userNotifications?.length) {
+              setNotifications(
+                userNotifications.map((item) => ({
+                  id: item.id,
+                  type: item.type || "official",
+                  title: item.title || "",
+                  time: item.created_at
+                    ? new Date(item.created_at).toLocaleString()
+                    : "Recently",
+                  unread: !item.read,
+                }))
+              );
+            }
+            if (userOrders?.length) {
+              setOrders(userOrders);
+            }
+          }
+        } catch (error) {
+          console.error("CampusOS initialization failed:", error);
+          if (mounted) {
+            setBackendError(
+              error?.message || "Unable to connect to CampusOS."
+            );
+          }
+        } finally {
+          if (mounted) {
+            setBackendLoading(false);
+          }
+        }
+      }
+
+      initialize();
+
+      const unsubscribe = subscribeToAuthChanges(async ({ user: nextUser }) => {
+        if (!mounted) return;
+        setAuthUser(nextUser);
+        if (!nextUser) {
+          setProfile(null);
+          setUser(null);
+          return;
+        }
+        try {
+          const campus = await getDefaultCampus();
+          const currentProfile = await getOrCreateProfile(
+            nextUser,
+            campus.id
+          );
+          if (!mounted) return;
+          setCampusId(campus.id);
+          setProfile(currentProfile);
+          setUser({
+            name:
+              currentProfile?.name ||
+              nextUser.email?.split("@")[0] ||
+              "Campus Student",
+            email: nextUser.email || "",
+            usn: currentProfile?.usn || "",
+            course:
+              currentProfile?.course ||
+              "Computer Science & Engineering",
+            year: currentProfile?.year || "2nd Year",
+          });
+          setLoginOpen(false);
+          notify("Welcome to CampusOS");
+        } catch (error) {
+          console.error("Auth sync failed:", error);
+        }
+      });
+
+      return () => {
+        mounted = false;
+        unsubscribe?.();
+      };
+    }, []);
+
+    useEffect(() => {
+      let mounted = true;
+
+      async function loadFood() {
+        try {
+          setDbLoading(true);
+          setDbError("");
+
+          const { canteens, items } = await getCampusFood(campusId);
+
+          if (!mounted) return;
+
+          setDbCanteens(canteens);
+          setDbFoodItems(items);
+        } catch (error) {
+          console.error("Food loading error:", error);
+          if (mounted) {
+            setDbError(error.message || "Unable to load campus food.");
+          }
+        } finally {
+          if (mounted) {
+            setDbLoading(false);
+          }
+        }
+      }
+
+      loadFood();
+
+      return () => {
+        mounted = false;
+      };
+    }, [campusId]);
+
+    useEffect(() => {
+      if (!authUser?.id) return;
+
+      const unsubscribeNotifications = subscribeToUserNotifications(
+        authUser.id,
+        () => {
+          getUserNotifications(authUser.id).then((items) => {
+            if (items?.length) {
+              setNotifications(
+                items.map((item) => ({
+                  id: item.id,
+                  type: item.type || "official",
+                  title: item.title || "",
+                  time: item.created_at
+                    ? new Date(item.created_at).toLocaleString()
+                    : "Recently",
+                  unread: !item.read,
+                }))
+              );
+            }
+          });
+        }
+      );
+
+      const unsubscribeOrders = subscribeToOrders(authUser.id, () => {
+        getMyOrders(authUser.id).then((ordersList) => {
+          if (ordersList) {
+            setOrders(ordersList);
+          }
+        });
+      });
+
+      return () => {
+        unsubscribeNotifications?.();
+        unsubscribeOrders?.();
+      };
+    }, [authUser?.id]);
+
+    useEffect(() => {
+      if (!campusId) return;
+
+      const loadCampusData = () => {
+        getPeople({ campusId }).then(setPeople).catch((error) => console.error("People loading failed", error));
+        getResources(campusId).then(setResources).catch((error) => console.error("Resource loading failed", error));
+        getLostFoundItems(campusId).then(setLostItems).catch((error) => console.error("Lost & found loading failed", error));
+        getMarketplaceListings(campusId).then(setMarketListings).catch((error) => console.error("Marketplace loading failed", error));
+      };
+
+      loadCampusData();
+
+      const unsubMarket = subscribeToMarketplace(() => {
+        getMarketplaceListings(campusId).then(setMarketListings).catch(() => {});
+      });
+
+      const unsubLost = subscribeToLostFound(() => {
+        getLostFoundItems(campusId).then(setLostItems).catch(() => {});
+      });
+
+      return () => {
+        unsubMarket?.();
+        unsubLost?.();
+      };
+    }, [campusId]);
+
+    useEffect(() => {
+      if (!authUser?.id) return;
+      Promise.all([
+        getMyRegisteredEventIds(authUser.id), getSavedEvents(authUser.id), getMyPrintJobs(authUser.id),
+        getMyServiceRequests(authUser.id), getMyBookings(authUser.id), getMyOrders(authUser.id),
+      ]).then(([registered, saved, jobs, requests, myBookings, myOrders]) => {
+        setRegisteredEventIds(registered); setSavedEventIds(saved); setPrintJobs(jobs);
+        setServiceRequests(requests); setBookings(myBookings); setOrders(myOrders);
+      }).catch((error) => console.error("Personal workspace loading failed", error));
+    }, [authUser?.id]);
 
   const renderPage = () => {
     if (active === "home") {
@@ -1107,9 +1776,11 @@ function App() {
           notify={notify}
           posts={filteredPosts}
           openModal={setModal}
-          people={peopleSeed}
+          people={people}
           clubs={clubs}
           go={go}
+          authUser={authUser}
+          setLoginOpen={() => setLoginOpen(true)}
         />
       );
     }
@@ -1118,10 +1789,16 @@ function App() {
       return (
         <Events
           notify={notify}
-          events={eventsSeed}
+          events={events.length ? events : eventsSeed}
           opportunities={opportunities}
           mentors={mentors}
           go={go}
+          authUser={authUser}
+          openLogin={() => setLoginOpen(true)}
+          registeredIds={registeredEventIds}
+          savedIds={savedEventIds}
+          onRegistrationChange={setRegisteredEventIds}
+          onSavedChange={setSavedEventIds}
         />
       );
     }
@@ -1151,6 +1828,9 @@ function App() {
           onLogout={handleLogout}
           notify={notify}
           openModal={setModal}
+          profile={profile}
+          onProfileUpdated={(next) => { setProfile(next); setUser((current) => ({ ...current, ...next })); }}
+          stats={{ posts: posts.length, events: registeredEventIds.length, clubs: 0 }}
         />
       );
     }
@@ -1161,24 +1841,24 @@ function App() {
 
     if (active === "people") {
       return (
-        <People notify={notify} people={peopleSeed} openModal={setModal} />
+        <People notify={notify} people={people} openModal={setModal} />
       );
     }
 
     if (active === "clubs") {
-      return <Clubs notify={notify} clubs={clubs} />;
+      return <Clubs notify={notify} clubs={clubs} authUser={authUser} setLoginOpen={setLoginOpen} />;
     }
 
     if (active === "food") {
       return (
         <Food
-          notify={notify}
-          canteens={canteens}
-          items={foodItems}
-          cart={foodCart}
-          addFood={addFood}
-          openModal={setModal}
-        />
+        notify={notify}
+        canteens={dbCanteens}
+        items={dbFoodItems}
+        cart={foodCart}
+        addFood={addFood}
+        openModal={setModal}
+      />
       );
     }
 
@@ -1190,6 +1870,7 @@ function App() {
           cart={storeCart}
           addStore={addStore}
           openModal={setModal}
+          orders={orders}
         />
       );
     }
@@ -1203,7 +1884,7 @@ function App() {
     }
 
     if (active === "calendar") {
-      return <MyCalendar notify={notify} events={eventsSeed} />;
+      return <MyCalendar notify={notify} events={events.length ? events : eventsSeed} />;
     }
 
     if (active === "notifications") {
@@ -1234,6 +1915,20 @@ function App() {
           notify={notify}
           go={go}
           openModal={setModal}
+          openLogin={() => setLoginOpen(true)}
+          authUser={authUser}
+          user={user}
+          campusId={campusId}
+          resources={resources}
+          bookings={bookings}
+          serviceRequests={serviceRequests}
+          printJobs={printJobs}
+          lostItems={lostItems}
+          marketListings={marketListings}
+          onBookingsChange={setBookings}
+          onRequestsChange={setServiceRequests}
+          onLostItemsChange={setLostItems}
+          onMarketListingsChange={setMarketListings}
         />
       );
     }
@@ -1299,7 +1994,11 @@ function App() {
               {user.name.split(" ")[0]}
             </button>
           ) : (
-            <button className="login-btn" onClick={() => setLoginOpen(true)}>
+            <button
+              className="login-btn"
+              onClick={() => setLoginOpen(true)}
+              data-testid="sign-in-button"
+            >
               Sign in
             </button>
           )}
@@ -1314,6 +2013,7 @@ function App() {
             key={key}
             className={active === key ? "active" : ""}
             onClick={() => go(key)}
+            data-testid={key === "campus" ? "nav-campus-button" : undefined}
           >
             <span>{icon}</span>
             <small>{label}</small>
@@ -1324,11 +2024,35 @@ function App() {
       {loginOpen && (
         <LoginModal
           onClose={() => setLoginOpen(false)}
-          onLogin={(u) => {
-            setUser(u);
-            setLoginOpen(false);
-            notify(`Welcome, ${u.name.split(" ")[0]}!`);
+          notify={notify}
+          defaultEmail={defaultLoginEmail}
+        onDirectLogin={async (email) => {
+            const normalizedEmail = email.trim().toLowerCase();
+
+            // Only fires for the configured kingpin/dev email
+            if (!devEmail || normalizedEmail !== devEmail) {
+              return; // falls through to magic link
+            }
+
+            if (devPassword) {
+              // Real Supabase password auth → real auth.uid() → RLS passes
+              // subscribeToAuthChanges handles setting profile/user state
+              try {
+                await signInWithPassword(normalizedEmail, devPassword);
+                setLoginOpen(false);
+                notify("Signed in as kingpin ✓");
+              } catch (err) {
+                notify(
+                  err.message ||
+                  "Kingpin sign-in failed. Check VITE_DEV_PASSWORD in .env."
+                );
+              }
+              return true; // signal: handled, skip magic link
+            }
+
+            // devPassword not set → fall through to magic link
           }}
+
         />
       )}
 
@@ -1336,17 +2060,28 @@ function App() {
         <PostComposer
           onClose={() => setModal(null)}
           onCreate={createPost}
+          user={user}
+        />
+      )}
+
+      {modal === "edit-profile" && profile && (
+        <EditProfileModal
+          profile={profile}
+          onClose={() => setModal(null)}
+          onSaved={(next) => { setProfile(next); setUser((current) => ({ ...current, ...next })); setModal(null); notify("Profile updated"); }}
+          notify={notify}
         />
       )}
 
       {modal === "food-cart" && (
-        <CartModal
-          title="Food cart"
-          cart={foodCart}
-          type="food"
-          onClose={() => setModal(null)}
-          notify={notify}
-        />
+      <CartModal
+        title="Food cart"
+        cart={foodCart}
+        type="food"
+        onClose={() => setModal(null)}
+        notify={notify}
+        onCheckout={checkoutFood}
+      />
       )}
 
       {modal === "store-cart" && (
@@ -1369,6 +2104,10 @@ function App() {
 
       {modal === "sos" && (
         <SOSModal onClose={() => setModal(null)} notify={notify} />
+      )}
+
+      {modal === "navigation" && (
+        <NavigationModal onClose={() => setModal(null)} notify={notify} />
       )}
 
       {toast && (
@@ -1660,6 +2399,8 @@ function Campus({
   posts,
   openModal,
   go,
+  authUser,
+  setLoginOpen,
 }) {
   const filters = [
     "All",
@@ -1730,7 +2471,13 @@ function Campus({
       <div className="feed-layout">
         <div className="feed">
           {posts.map((post) => (
-            <Post key={post.id} post={post} notify={notify} />
+            <Post
+              key={post.id}
+              post={post}
+              notify={notify}
+              authUser={authUser}
+              setLoginOpen={setLoginOpen}
+            />
           ))}
         </div>
 
@@ -1771,11 +2518,77 @@ function Campus({
   );
 }
 
-function Post({ post, notify }) {
+function Post({ post, notify, authUser, setLoginOpen }) {
+  const [likes, setLikes] = useState(post.likes || 0);
+  const [liked, setLiked] = useState(post.liked || false);
+  const [showComments, setShowComments] = useState(false);
+  const [comments, setComments] = useState([]);
+  const [commentText, setCommentText] = useState("");
+
+  const handleLike = async () => {
+    if (!authUser) {
+      setLoginOpen?.();
+      notify("Sign in to like posts");
+      return;
+    }
+
+    try {
+      const isLikedNow = await togglePostLike({ postId: post.id, userId: authUser.id });
+      setLiked(isLikedNow);
+      setLikes((prev) => (isLikedNow ? prev + 1 : Math.max(0, prev - 1)));
+    } catch (err) {
+      console.error(err);
+      notify("Could not toggle like");
+    }
+  };
+
+  const toggleComments = async () => {
+    if (!showComments) {
+      try {
+        const loaded = await getPostComments(post.id);
+        setComments(loaded);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    setShowComments(!showComments);
+  };
+
+  const handleAddComment = async () => {
+    if (!authUser) {
+      setLoginOpen?.();
+      notify("Sign in to comment");
+      return;
+    }
+    if (!commentText.trim()) return;
+
+    try {
+      const added = await addPostComment({
+        postId: post.id,
+        userId: authUser.id,
+        content: commentText,
+      });
+      setComments((prev) => [
+        ...prev,
+        {
+          id: added.id,
+          author: authUser.email?.split("@")[0] || "You",
+          content: commentText,
+          time: "Just now",
+        },
+      ]);
+      setCommentText("");
+      notify("Comment added");
+    } catch (err) {
+      console.error(err);
+      notify("Could not post comment");
+    }
+  };
+
   return (
     <article className={`post ${post.accent}`}>
       <div className="post-head">
-        <div className="avatar">{post.author[0]}</div>
+        <div className="avatar">{post.author ? post.author[0] : "C"}</div>
 
         <div>
           <b>
@@ -1807,16 +2620,39 @@ function Post({ post, notify }) {
       </div>
 
       <div className="post-actions">
-        <button onClick={() => notify("Liked")}>
-          <HiHeart /> {post.likes}
+        <button onClick={handleLike} className={liked ? "liked" : ""}>
+          <HiHeart style={{ color: liked ? "#ef4444" : "inherit" }} /> {likes}
         </button>
-        <button onClick={() => notify("Comments opened")}>
-          <HiChatBubbleOvalLeft /> {post.comments}
+        <button onClick={toggleComments}>
+          <HiChatBubbleOvalLeft /> {post.comments + comments.length}
         </button>
         <button onClick={() => notify("Post shared")}>
           <HiArrowUpTray /> Share
         </button>
       </div>
+
+      {showComments && (
+        <div className="comments-section" style={{ marginTop: "12px", paddingTop: "12px", borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+          {comments.map((c) => (
+            <div key={c.id} style={{ marginBottom: "8px", fontSize: "0.9rem" }}>
+              <b>{c.author}: </b>
+              <span>{c.content}</span>
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
+            <input
+              type="text"
+              value={commentText}
+              onChange={(e) => setCommentText(e.target.value)}
+              placeholder="Add a comment..."
+              style={{ flex: 1, padding: "6px 12px", borderRadius: "6px" }}
+            />
+            <button className="primary" onClick={handleAddComment}>
+              Post
+            </button>
+          </div>
+        </div>
+      )}
     </article>
   );
 }
@@ -1916,7 +2752,45 @@ function PersonCard({ person, notify }) {
   );
 }
 
-function Clubs({ notify, clubs: clubList }) {
+function Clubs({ notify, clubs: clubList, authUser, setLoginOpen }) {
+  const [selectedClub, setSelectedClub] = useState(null);
+  const [joinedClubs, setJoinedClubs] = useState({});
+
+  useEffect(() => {
+    if (!authUser?.id) return;
+    getMyClubs(authUser.id).then((myClubs) => {
+      const map = {};
+      (myClubs || []).forEach((item) => {
+        map[item.club_id] = true;
+      });
+      setJoinedClubs(map);
+    });
+  }, [authUser?.id]);
+
+  const handleToggleJoin = async (club) => {
+    if (!authUser) {
+      setLoginOpen?.();
+      notify("Sign in to join clubs");
+      return;
+    }
+
+    const isJoined = joinedClubs[club.id];
+    try {
+      if (isJoined) {
+        await leaveClub({ clubId: club.id, userId: authUser.id });
+        setJoinedClubs((prev) => ({ ...prev, [club.id]: false }));
+        notify(`Left ${club.name}`);
+      } else {
+        await joinClub({ clubId: club.id, userId: authUser.id });
+        setJoinedClubs((prev) => ({ ...prev, [club.id]: true }));
+        notify(`Joined ${club.name}!`);
+      }
+    } catch (err) {
+      console.error(err);
+      notify("Club action failed");
+    }
+  };
+
   return (
     <section className="page-section">
       <PageHeader
@@ -1926,28 +2800,62 @@ function Clubs({ notify, clubs: clubList }) {
       />
 
       <div className="club-grid">
-        {clubList.map((club) => (
-          <article className="club-card" key={club.id}>
-            <div className="club-icon">
-              <HiAcademicCap />
-            </div>
-            <h3>{club.name}</h3>
-            <p>{club.description}</p>
+        {clubList.map((club) => {
+          const isMember = Boolean(joinedClubs[club.id]);
+          return (
+            <article className="club-card" key={club.id}>
+              <div className="club-icon">
+                <HiAcademicCap />
+              </div>
+              <h3>{club.name}</h3>
+              <p>{club.description}</p>
 
-            <div className="club-stats">
-              <span>{club.members} members</span>
-              <span>{club.events} events</span>
-            </div>
+              <div className="club-stats">
+                <span>{club.members + (isMember ? 1 : 0)} members</span>
+                <span>{club.events} events</span>
+              </div>
 
-            <button
-              className="ghost"
-              onClick={() => notify(`${club.name} opened`)}
-            >
-              View club <HiArrowRight />
-            </button>
-          </article>
-        ))}
+              <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
+                <button
+                  className="ghost"
+                  onClick={() => setSelectedClub(club)}
+                >
+                  View club <HiArrowRight />
+                </button>
+                <button
+                  className={isMember ? "ghost" : "primary"}
+                  onClick={() => handleToggleJoin(club)}
+                >
+                  {isMember ? "Leave" : "Join"}
+                </button>
+              </div>
+            </article>
+          );
+        })}
       </div>
+
+      {selectedClub && (
+        <ModalShell
+          kicker="CLUB DETAILS"
+          title={selectedClub.name}
+          onClose={() => setSelectedClub(null)}
+        >
+          <p>{selectedClub.description}</p>
+          <div className="club-stats" style={{ margin: "16px 0" }}>
+            <span>Category: {selectedClub.category}</span>
+            <span>Members: {selectedClub.members}</span>
+          </div>
+          <button
+            className="primary wide"
+            onClick={() => {
+              handleToggleJoin(selectedClub);
+              setSelectedClub(null);
+            }}
+          >
+            {joinedClubs[selectedClub.id] ? "Leave Club" : "Join Club"}
+          </button>
+        </ModalShell>
+      )}
     </section>
   );
 }
@@ -1956,7 +2864,18 @@ function Clubs({ notify, clubs: clubList }) {
    EVENTS
 ========================================================= */
 
-function Events({ notify, events, opportunities: opps, mentors: mentorList }) {
+function Events({
+  notify,
+  events,
+  opportunities: opps,
+  mentors: mentorList,
+  authUser,
+  openLogin,
+  registeredIds = [],
+  savedIds = [],
+  onRegistrationChange,
+  onSavedChange,
+}) {
   return (
     <section className="page-section events-page">
       <PageHeader
@@ -1992,18 +2911,62 @@ function Events({ notify, events, opportunities: opps, mentors: mentorList }) {
 
               <div>
                 <button
-                  onClick={() =>
-                    notify(`${event.title}: registration opened`)
-                  }
-                >
-                  Register
+                  onClick={async () => {
+
+                    try {
+
+                      if (!authUser) {
+                        openLogin();
+
+                        notify(
+                          "Sign in to register"
+                        );
+
+                        return;
+                      }
+
+                      if (registeredIds.includes(event.id)) {
+                        await cancelEventRegistration({ eventId: event.id, userId: authUser.id });
+                        onRegistrationChange?.((ids) => ids.filter((id) => id !== event.id));
+                        notify(`${event.title}: registration cancelled`);
+                        return;
+                      }
+                      await registerEvent({ eventId: event.id, userId: authUser.id });
+                      onRegistrationChange?.((ids) => [...ids, event.id]);
+
+                      notify(
+                        `${event.title}: registration confirmed`
+                      );
+
+                    } catch (error) {
+
+                      console.error(
+                        "Event registration:",
+                        error
+                      );
+
+                      notify(
+                        error.message ||
+                        "Registration failed"
+                      );
+                    }
+                  }}
+                                  >
+                  {registeredIds.includes(event.id) ? "Cancel registration" : "Register"}
                 </button>
 
                 <button
                   className="ghost"
-                  onClick={() => notify("Event saved")}
+                  onClick={async () => {
+                    if (!authUser) { openLogin(); notify("Sign in to save events"); return; }
+                    try {
+                      const saved = await toggleSavedEvent({ eventId: event.id, userId: authUser.id });
+                      onSavedChange?.((ids) => saved ? [...ids, event.id] : ids.filter((id) => id !== event.id));
+                      notify(saved ? "Event saved" : "Event removed from saved");
+                    } catch (error) { notify(error.message || "Could not save event"); }
+                  }}
                 >
-                  <HiHeart /> Save
+                  <HiHeart /> {savedIds.includes(event.id) ? "Saved" : "Save"}
                 </button>
               </div>
             </div>
@@ -2213,9 +3176,10 @@ function Food({ canteens: vendorList, items, cart, addFood, openModal }) {
   });
 
   const total = cart.reduce(
-    (sum, item) => sum + Number(item.price || 0),
+    (sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1),
     0
   );
+  const itemCount = cart.reduce((sum, item) => sum + Number(item.quantity || 1), 0);
 
   return (
     <section className="page-section food-page">
@@ -2234,7 +3198,7 @@ function Food({ canteens: vendorList, items, cart, addFood, openModal }) {
             onClick={() => openModal("food-cart")}
           >
             <HiShoppingCart />
-            Cart ({cart.length})
+            Cart ({itemCount})
           </button>
         }
       />
@@ -2724,7 +3688,7 @@ function Store({ items, cart, addStore, openModal }) {
    LINKEDIN-STYLE PROFILE
 ========================================================= */
 
-function Profile({ user, onLogin, onLogout, notify }) {
+function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfileUpdated, stats = {} }) {
   if (!user) {
     return (
       <section className="page-section profile-page">
@@ -2769,19 +3733,22 @@ function Profile({ user, onLogin, onLogout, notify }) {
 
           <button
             className="ghost"
-            onClick={() => notify("Edit profile opened")}
+            onClick={() => openModal("edit-profile")}
           >
             Edit profile
           </button>
         </div>
 
         <div className="linkedin-actions">
-          <button className="primary" onClick={() => notify("Profile shared")}>
+          <button className="primary" onClick={() => { navigator.clipboard?.writeText(window.location.href); notify("Profile link copied"); }}>
             <HiArrowUpTray /> Share profile
           </button>
           <button
             className="ghost"
-            onClick={() => notify("Availability updated")}
+            onClick={async () => {
+              try { const next = await updateProfile(profile.id, { ...profile, open_to_projects: !profile.open_to_projects }); onProfileUpdated(next); notify(next.open_to_projects ? "Open to projects" : "Availability hidden"); }
+              catch (error) { notify(error.message || "Could not update availability"); }
+            }}
           >
             <HiUserPlus /> Open to projects
           </button>
@@ -2796,8 +3763,7 @@ function Profile({ user, onLogin, onLogout, notify }) {
           <span className="section-kicker">ABOUT</span>
           <h3>Student builder focused on AI + hardware.</h3>
           <p>
-            Building Campus OS to connect students, campus services, AI and
-            future autonomous systems into one digital layer.
+            {profile?.bio || "Add a short bio so fellow students can understand your interests and project goals."}
           </p>
         </div>
 
@@ -2805,10 +3771,10 @@ function Profile({ user, onLogin, onLogout, notify }) {
           <span className="section-kicker">ACTIVITY</span>
           <h3>Campus contribution</h3>
           <div className="stats">
-            <b>12<span>Posts</span></b>
-            <b>5<span>Events</span></b>
-            <b>3<span>Teams</span></b>
-            <b>17<span>Helpful</span></b>
+            <b>{stats.posts || 0}<span>Posts</span></b>
+            <b>{stats.events || 0}<span>Events</span></b>
+            <b>{stats.clubs || 0}<span>Clubs</span></b>
+            <b>{profile?.open_to_projects ? "Open" : "Closed"}<span>Projects</span></b>
           </div>
         </div>
       </div>
@@ -2957,6 +3923,20 @@ function Socialize({ notify, go }) {
                 <button onClick={() => notify("Shared to your campus")}>
                   <HiArrowUpTray /> Share
                 </button>
+                <button
+                  onClick={async () => {
+                    if (!authUser) return notify("Sign in to report");
+                    try {
+                      await reportContent("post", post.id, "Inappropriate content");
+                      notify("Content reported to admins");
+                    } catch (e) {
+                      notify("Failed to report content");
+                    }
+                  }}
+                  title="Report Post"
+                >
+                  <HiExclamationTriangle /> Report
+                </button>
               </div>
             </article>
           ))}
@@ -3053,7 +4033,7 @@ const serviceDetailData = {
   },
 };
 
-function ServiceDetail({ serviceId, notify, go, openModal }) {
+function ServiceDetail({ serviceId, notify, go, openModal, openLogin, authUser, user, campusId, resources, bookings, serviceRequests, printJobs, lostItems, marketListings, onBookingsChange, onRequestsChange, onLostItemsChange, onMarketListingsChange }) {
   const data = serviceDetailData[serviceId];
 
   return (
@@ -3079,7 +4059,7 @@ function ServiceDetail({ serviceId, notify, go, openModal }) {
       </div>
 
       {serviceId === "print" && (
-        <div className="service-detail-grid">
+        <><div className="service-detail-grid">
           <WorkflowCard
             icon={<HiDocumentArrowUp />}
             title="1. Upload document"
@@ -3101,31 +4081,31 @@ function ServiceDetail({ serviceId, notify, go, openModal }) {
             button="View queue"
             onClick={() => notify("Print queue: 3 orders ahead")}
           />
-        </div>
+        </div>{printJobs?.length > 0 && <div className="resource-list">{printJobs.map((job) => <article className="resource-row" key={job.id}><div className="resource-icon"><HiPrinter /></div><div><b>{job.file_name}</b><small>{job.total_pages} pages · {job.copies} copies · Pickup {job.pickup_code}</small></div><strong>{job.status}</strong></article>)}</div>}</>
       )}
 
       {serviceId === "issues" && (
-        <IssueService notify={notify} />
+        <IssueService notify={notify} authUser={authUser} openLogin={openLogin} campusId={campusId} requests={serviceRequests} onChange={onRequestsChange} />
       )}
 
       {serviceId === "booking" && (
-        <BookingService notify={notify} />
+        <BookingService notify={notify} authUser={authUser} openLogin={openLogin} resources={resources} bookings={bookings} onChange={onBookingsChange} />
       )}
 
       {serviceId === "lost" && (
-        <LostService notify={notify} />
+        <LostService notify={notify} authUser={authUser} openLogin={openLogin} campusId={campusId} items={lostItems} onChange={onLostItemsChange} />
       )}
 
       {serviceId === "market" && (
-        <MarketplaceService notify={notify} />
+        <MarketplaceService notify={notify} authUser={authUser} openLogin={openLogin} campusId={campusId} listings={marketListings} onChange={onMarketListingsChange} />
       )}
 
       {serviceId === "pass" && (
-        <PassService notify={notify} />
+        <PassService notify={notify} user={user} />
       )}
 
       {serviceId === "hostel" && (
-        <HostelService notify={notify} />
+        <HostelService notify={notify} go={go} />
       )}
 
       {serviceId === "delivery" && (
@@ -3148,7 +4128,7 @@ function WorkflowCard({ icon, title, text, button, onClick }) {
   );
 }
 
-function IssueService({ notify }) {
+function IssueService({ notify, authUser, openLogin, campusId, requests = [], onChange }) {
   const categories = [
     ["Wi-Fi", <HiWifi />],
     ["Electrical", <HiLightBulb />],
@@ -3167,15 +4147,27 @@ function IssueService({ notify }) {
           title={title}
           text={`Report a ${title.toLowerCase()} issue.`}
           button="Report"
-          onClick={() => notify(`${title} issue ticket created`)}
+          onClick={async () => {
+            if (!authUser) {
+              openLogin?.();
+              notify("Sign in to report an issue");
+              return;
+            }
+            try { const request = await createCampusServiceRequest({ userId: authUser.id, campusId, serviceName: "Report an Issue", title: `${title} issue`, details: { category: title } }); onChange?.((items) => [request, ...items]); notify(`Ticket created · ${request.id.slice(0, 8)}`); }
+            catch (error) { notify(error.message || "Could not create ticket"); }
+          }}
         />
       ))}
+      {requests.map((request) => <article className="resource-row" key={request.id}><div className="resource-icon"><HiWrenchScrewdriver /></div><div><b>{request.title}</b><small>Ticket {request.id.slice(0, 8)}</small></div><strong>{request.status}</strong></article>)}
     </div>
   );
 }
 
-function BookingService({ notify }) {
-  const resources = [
+function BookingService({ notify, authUser, openLogin, resources: dbResources = [], bookings = [], onChange }) {
+  const [selected, setSelected] = useState(null);
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+  const resources = dbResources.length ? dbResources.map((item) => [item.name, "Available", item.locations?.name || item.resource_type, item.id]) : [
     ["Innovation Lab", "Available", "2nd Floor"],
     ["Seminar Hall 2", "Available", "Main Block"],
     ["Robotics Lab", "Available", "Block D"],
@@ -3184,26 +4176,31 @@ function BookingService({ notify }) {
 
   return (
     <div className="resource-list">
-      {resources.map(([name, status, location]) => (
-        <article className="resource-row" key={name}>
+      {resources.map(([name, status, location, resourceId]) => (
+        <article className="resource-row" key={resourceId || name}>
           <div className="resource-icon"><HiBuildingOffice2 /></div>
           <div>
             <b>{name}</b>
             <small>{location} · {status}</small>
           </div>
           <button
-            onClick={() => notify(`${name} booking request submitted`)}
+            onClick={() => resourceId ? setSelected({ id: resourceId, name }) : notify("No bookable resources are configured")}
           >
             Book <HiArrowRight />
           </button>
         </article>
       ))}
+      {selected && <ModalShell kicker="RESOURCE BOOKING" title={selected.name} onClose={() => setSelected(null)}><label>Start<input type="datetime-local" value={startTime} onChange={(e) => setStartTime(e.target.value)} /></label><label>End<input type="datetime-local" value={endTime} onChange={(e) => setEndTime(e.target.value)} /></label><button className="primary wide" onClick={async () => { if (!authUser) { openLogin?.(); notify("Sign in to book a resource"); return; } try { const booking = await createResourceBooking({ userId: authUser.id, resourceId: selected.id, startTime, endTime }); onChange?.((items) => [...items, booking]); setSelected(null); notify("Booking requested"); } catch (error) { notify(error.message || "Could not create booking"); } }}>Request booking</button></ModalShell>}
+      {bookings.map((booking) => <article className="resource-row" key={booking.id}><div className="resource-icon"><HiCalendarDays /></div><div><b>{booking.resources?.name}</b><small>{new Date(booking.start_time).toLocaleString()}</small></div><strong>{booking.status}</strong></article>)}
     </div>
   );
 }
 
-function LostService({ notify }) {
-  const items = [
+function LostService({ notify, authUser, openLogin, campusId, items: dbItems = [], onChange }) {
+  const [reporting, setReporting] = useState(false);
+  const [title, setTitle] = useState("");
+  const [location, setLocation] = useState("");
+  const items = dbItems.length ? dbItems.map((item) => [item.title, `${item.item_type} · ${item.location}`, item.id]) : [
     ["Black backpack", "Found near Block B · 18 min ago"],
     ["Student ID card", "Found near Main Gate · 1 hr ago"],
     ["AirPods case", "Found near Library · Yesterday"],
@@ -3211,27 +4208,31 @@ function LostService({ notify }) {
 
   return (
     <div className="resource-list">
-      {items.map(([name, location]) => (
-        <article className="resource-row" key={name}>
+      {items.map(([name, location, itemId]) => (
+        <article className="resource-row" key={itemId || name}>
           <div className="resource-icon"><HiMagnifyingGlassCircle /></div>
           <div>
             <b>{name}</b>
             <small>{location}</small>
           </div>
-          <button onClick={() => notify(`Claim request submitted for ${name}`)}>
+          <button onClick={async () => { if (!authUser) { openLogin?.(); notify("Sign in to claim an item"); return; } if (!itemId) return notify("Demo item — add the production SQL migration first"); try { await claimLostFoundItem({ itemId, userId: authUser.id }); onChange?.((items) => items.filter((item) => item.id !== itemId)); notify("Claim request submitted"); } catch (error) { notify(error.message || "Could not claim item"); } }}>
             Claim
           </button>
         </article>
       ))}
-      <button className="primary" onClick={() => notify("Lost item report opened")}>
+      <button className="primary" onClick={() => setReporting(true)}>
         <HiPlus /> Report lost item
       </button>
+      {reporting && <ModalShell kicker="LOST & FOUND" title="Report lost item" onClose={() => setReporting(false)}><label>Item title<input value={title} onChange={(e) => setTitle(e.target.value)} /></label><label>Last seen location<input value={location} onChange={(e) => setLocation(e.target.value)} /></label><button className="primary wide" onClick={async () => { if (!authUser) { openLogin?.(); notify("Sign in to report an item"); return; } try { const item = await createLostFoundItem({ userId: authUser.id, campusId, itemType: "lost", title, location }); onChange?.((items) => [item, ...items]); setReporting(false); notify("Lost item reported"); } catch (error) { notify(error.message || "Could not report item"); } }}>Submit report</button></ModalShell>}
     </div>
   );
 }
 
-function MarketplaceService({ notify }) {
-  const listings = [
+function MarketplaceService({ notify, authUser, openLogin, campusId, listings: dbListings = [], onChange }) {
+  const [creating, setCreating] = useState(false);
+  const [title, setTitle] = useState("");
+  const [price, setPrice] = useState("");
+  const listings = dbListings.length ? dbListings.map((item) => [item.title, `₹${item.price}`, item.profiles?.name || "Campus seller", item.id, item.seller_id]) : [
     ["MacBook sleeve", "₹450", "CSE 3rd Year"],
     ["Scientific calculator", "₹420", "ECE 2nd Year"],
     ["Arduino Uno", "₹500", "Robotics Club"],
@@ -3239,24 +4240,40 @@ function MarketplaceService({ notify }) {
 
   return (
     <div className="resource-list">
-      {listings.map(([name, price, seller]) => (
-        <article className="resource-row" key={name}>
+      {listings.map(([name, price, seller, listingId, sellerId]) => (
+        <article className="resource-row" key={listingId || name}>
           <div className="resource-icon"><HiShoppingCart /></div>
           <div>
             <b>{name}</b>
             <small>{seller}</small>
           </div>
           <strong>{price}</strong>
-          <button onClick={() => notify(`Chat opened with seller of ${name}`)}>
-            Contact
-          </button>
+          {sellerId === authUser?.id ? <button onClick={async () => { try { await markMarketplaceListingSold({ listingId, userId: authUser.id }); onChange?.((items) => items.filter((item) => item.id !== listingId)); notify("Listing marked sold"); } catch (error) { notify(error.message || "Could not update listing"); } }}>Mark sold</button> : <button onClick={() => notify("Contact details are shared after seller approval")}>Contact</button>}
         </article>
       ))}
+      <button className="primary" onClick={() => setCreating(true)}><HiPlus /> Create listing</button>
+      {creating && <ModalShell kicker="MARKETPLACE" title="Create listing" onClose={() => setCreating(false)}>
+        <label>Title<input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
+        <label>Price<input type="number" min="0" value={price} onChange={(event) => setPrice(event.target.value)} /></label>
+        <button className="primary wide" onClick={async () => {
+          if (!authUser) { openLogin?.(); notify("Sign in to create a listing"); return; }
+          try {
+            const listing = await createMarketplaceListing({ userId: authUser.id, campusId, title, price });
+            onChange?.((items) => [listing, ...items]);
+            setCreating(false);
+            notify("Listing published");
+          } catch (error) { notify(error.message || "Could not publish listing"); }
+        }}>Publish listing</button>
+      </ModalShell>}
     </div>
   );
 }
 
-function PassService({ notify }) {
+function PassService({ notify, user }) {
+  const [showPassModal, setShowPassModal] = useState(false);
+  const studentName = user?.name || "Sanjay Padmaraj";
+  const studentUsn = user?.usn || "1NH22CS101";
+
   return (
     <div className="digital-pass-card">
       <div className="qr-placeholder">
@@ -3264,28 +4281,78 @@ function PassService({ notify }) {
       </div>
       <div>
         <span className="section-kicker">STUDENT PASS</span>
-        <h2>NHCE · SANJAY PADMARAJ</h2>
+        <h2>NHCE · {studentName.toUpperCase()}</h2>
         <p>Valid for events, workshops, pickups and approved campus workflows.</p>
-        <button className="primary" onClick={() => notify("QR pass displayed")}>
+        <button className="primary" onClick={() => setShowPassModal(true)}>
           Display QR <HiQrCode />
         </button>
       </div>
+
+      {showPassModal && (
+        <ModalShell kicker="VERIFIED CAMPUS PASS" title="Digital Identity Pass" onClose={() => setShowPassModal(false)}>
+          <div style={{ textAlign: "center", padding: "16px 0" }}>
+            <div style={{ width: "160px", height: "160px", margin: "0 auto 16px", background: "#f0ecff", borderRadius: "16px", display: "grid", placeItems: "center", border: "2px dashed #6e48ed" }}>
+              <HiQrCode style={{ fontSize: "110px", color: "#6e48ed" }} />
+            </div>
+            <h3 style={{ margin: "4px 0", font: "800 20px Manrope" }}>{studentName}</h3>
+            <p style={{ margin: "0 0 12px", color: "var(--muted)", fontSize: "13px" }}>USN: {studentUsn} · NHCE CSE</p>
+            <span style={{ background: "#e4f7ef", color: "#13845b", padding: "6px 14px", borderRadius: "999px", fontSize: "11px", fontWeight: "800" }}>ACTIVE · VERIFIED</span>
+          </div>
+          <button className="primary wide" onClick={() => { notify("Pass image saved to downloads"); setShowPassModal(false); }}>
+            Download Pass QR <HiArrowRight />
+          </button>
+        </ModalShell>
+      )}
     </div>
   );
 }
 
-function HostelService({ notify }) {
+function HostelService({ notify, go }) {
+  const [showRoomModal, setShowRoomModal] = useState(false);
+  const [showLaundryModal, setShowLaundryModal] = useState(false);
+  const [laundrySlot, setLaundrySlot] = useState("4:00 PM - 5:00 PM");
+
   return (
     <div className="hostel-grid">
-      <WorkflowCard icon={<HiHomeModern />} title="Room" text="B-204 · Occupied" button="Open" onClick={() => notify("Room details opened")} />
-      <WorkflowCard icon={<HiShoppingBag />} title="Mess" text="Today's menu available." button="View menu" onClick={() => notify("Mess menu opened")} />
-      <WorkflowCard icon={<HiWrenchScrewdriver />} title="Maintenance" text="2 open requests." button="Track" onClick={() => notify("Maintenance opened")} />
-      <WorkflowCard icon={<HiArrowPath />} title="Laundry" text="12 slots available." button="Book" onClick={() => notify("Laundry booking opened")} />
+      <WorkflowCard icon={<HiHomeModern />} title="Room" text="B-204 · Occupied" button="Open" onClick={() => setShowRoomModal(true)} />
+      <WorkflowCard icon={<HiShoppingBag />} title="Mess" text="Today's menu available." button="View menu" onClick={() => go?.("food")} />
+      <WorkflowCard icon={<HiWrenchScrewdriver />} title="Maintenance" text="2 open requests." button="Track" onClick={() => go?.("issues")} />
+      <WorkflowCard icon={<HiArrowPath />} title="Laundry" text="12 slots available." button="Book" onClick={() => setShowLaundryModal(true)} />
+
+      {showRoomModal && (
+        <ModalShell kicker="HOSTEL ROOM" title="Room B-204 Details" onClose={() => setShowRoomModal(false)}>
+          <div style={{ padding: "12px 0" }}>
+            <p><strong>Block:</strong> Boys Hostel Block B (2nd Floor)</p>
+            <p><strong>Roommate:</strong> Rahul Sharma (CSE 3rd Year)</p>
+            <p><strong>Wi-Fi:</strong> Hostel_5G_Zone (Connected)</p>
+            <p><strong>Status:</strong> All fees cleared for current semester</p>
+          </div>
+          <button className="primary wide" onClick={() => setShowRoomModal(false)}>Close</button>
+        </ModalShell>
+      )}
+
+      {showLaundryModal && (
+        <ModalShell kicker="LAUNDRY BOOKING" title="Reserve Laundry Machine" onClose={() => setShowLaundryModal(false)}>
+          <label>Select Time Slot
+            <select value={laundrySlot} onChange={(e) => setLaundrySlot(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "6px", borderRadius: "8px", border: "1px solid var(--line)" }}>
+              <option>2:00 PM - 3:00 PM</option>
+              <option>4:00 PM - 5:00 PM</option>
+              <option>5:00 PM - 6:00 PM</option>
+              <option>7:00 PM - 8:00 PM</option>
+            </select>
+          </label>
+          <button className="primary wide" style={{ marginTop: "16px" }} onClick={() => { notify(`Laundry reserved for ${laundrySlot}`); setShowLaundryModal(false); }}>
+            Confirm Booking <HiArrowRight />
+          </button>
+        </ModalShell>
+      )}
     </div>
   );
 }
 
 function DeliveryService({ notify }) {
+  const [activeDelivery, setActiveDelivery] = useState(null);
+
   return (
     <div className="delivery-panel">
       <div className="delivery-route">
@@ -3298,7 +4365,17 @@ function DeliveryService({ notify }) {
         <span><HiTruck /> Robot available</span>
         <span><HiBolt /> Low traffic</span>
       </div>
-      <button className="primary" onClick={() => notify("Delivery request created — demo")}>
+      {activeDelivery ? (
+        <div style={{ background: "#eee9ff", color: "#6241db", padding: "14px", borderRadius: "14px", margin: "16px 0", textAlign: "center" }}>
+          <b>Delivery En Route!</b>
+          <p style={{ margin: "4px 0", fontSize: "12px" }}>ETA: 6 minutes · Code: {activeDelivery.code}</p>
+        </div>
+      ) : null}
+      <button className="primary" onClick={() => {
+        const code = Math.floor(1000 + Math.random() * 9000).toString();
+        setActiveDelivery({ code });
+        notify(`Delivery order dispatched · Code ${code}`);
+      }}>
         Request delivery <HiTruck />
       </button>
     </div>
@@ -3712,6 +4789,8 @@ function StatCard({ label, value, icon }) {
 ========================================================= */
 
 function MyCalendar({ notify, events }) {
+  const eventDays = new Set(events.map((event) => Number(event.date)).filter(Boolean));
+  const monthName = events[0]?.month ? `${events[0].month[0]}${events[0].month.slice(1).toLowerCase()}` : "August";
   return (
     <section className="page-section">
       <PageHeader
@@ -3723,7 +4802,7 @@ function MyCalendar({ notify, events }) {
       <div className="calendar-layout">
         <div className="calendar-box">
           <div className="calendar-header">
-            <h3>August 2026</h3>
+            <h3>{monthName} 2026</h3>
             <button onClick={() => notify("Calendar synced")}>
               <HiArrowPath />
             </button>
@@ -3738,7 +4817,7 @@ function MyCalendar({ notify, events }) {
           <div className="calendar-days">
             {Array.from({ length: 31 }, (_, index) => {
               const day = index + 1;
-              const hasEvent = [12, 14, 16, 22].includes(day);
+              const hasEvent = eventDays.has(day);
               return (
                 <button
                   key={day}
@@ -3859,7 +4938,7 @@ function ModalShell({ title, kicker, onClose, children }) {
   );
 }
 
-function PostComposer({ onClose, onCreate }) {
+function PostComposer({ onClose, onCreate, user }) {
   const [title, setTitle] = useState("");
   const [type, setType] = useState("General");
   const [tag, setTag] = useState("");
@@ -3906,7 +4985,7 @@ function PostComposer({ onClose, onCreate }) {
           onCreate({
             type,
             title,
-            author: "Sanjay Padmaraj",
+            author: user?.name || "Campus Student",
             accent: "violet",
             tags: tag ? [tag] : [],
           })
@@ -3918,10 +4997,52 @@ function PostComposer({ onClose, onCreate }) {
   );
 }
 
-function LoginModal({ onClose, onLogin }) {
-  const [name, setName] = useState("Sanjay Padmaraj");
-  const [email, setEmail] = useState("sanjaypadmaraj@nhce.edu.in");
-  const [usn, setUsn] = useState("1NH25CS123");
+function LoginModal({ onClose, notify, defaultEmail, onDirectLogin }) {
+  const [email, setEmail] = useState(defaultEmail);
+  const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  // Dev bypass runs via onDirectLogin prop (only active when VITE_DEV_EMAIL is set).
+
+  const handleLogin = async () => {
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanEmail) {
+      notify("Enter your college email");
+      return;
+    }
+
+    // Dev bypass: onDirectLogin is a no-op unless VITE_DEV_EMAIL matches.
+    if (onDirectLogin) {
+      const result = await onDirectLogin(cleanEmail);
+      if (result !== undefined) return;
+    }
+
+    if (!cleanEmail.endsWith("@nhce.edu.in") && !cleanEmail.endsWith("@newhorizonindia.edu") && !cleanEmail.endsWith("@gmail.com")) {
+      notify("Please use an allowed email domain (@nhce.edu.in, @gmail.com)");
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      await sendMagicLink(email.trim());
+
+      setSent(true);
+
+      notify("Magic login link sent to your email");
+
+    } catch (error) {
+      console.error("Magic link error:", error);
+
+      notify(
+        error.message ||
+        "Unable to send login link"
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <ModalShell
@@ -3929,49 +5050,84 @@ function LoginModal({ onClose, onLogin }) {
       title="Welcome to Campus OS"
       onClose={onClose}
     >
-      <p>
-        Use your college identity to join the verified campus network.
-      </p>
+      {!sent ? (
+        <>
+          <p>
+            Sign in using your official NHCE college email.
+          </p>
 
-      <label>
-        Full name
-        <input value={name} onChange={(e) => setName(e.target.value)} />
-      </label>
+          <label>
+            College email
 
-      <label>
-        College email
-        <input value={email} onChange={(e) => setEmail(e.target.value)} />
-      </label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) =>
+                setEmail(e.target.value)
+              }
+              placeholder="yourname@gmail.com"
+              autoFocus
+            />
+          </label>
 
-      <label>
-        USN
-        <input value={usn} onChange={(e) => setUsn(e.target.value)} />
-      </label>
+          <button
+            className="primary wide"
+            disabled={loading}
+            onClick={handleLogin}
+            data-testid="direct-login-button"
+          >
+            {loading ? "Processing..." : "Send login link"}
 
-      <button
-        className="primary wide"
-        onClick={() =>
-          onLogin({
-            name: name || "Campus Student",
-            email,
-            usn,
-            course: "Computer Science & Engineering",
-            year: "2nd Year",
-          })
-        }
-      >
-        Continue with college account <HiArrowRight />
-      </button>
+            {!loading && <HiArrowRight />}
+          </button>
+        </>
+      ) : (
+        <div className="empty-state">
+          <HiCheckCircle />
 
-      <small className="login-note">
-        Demo mode · authentication will be connected to Supabase later.
-      </small>
+          <h3>Check your email</h3>
+
+          <p>
+            We sent a secure login link to:
+          </p>
+
+          <b>{email}</b>
+
+          <button
+            className="ghost"
+            onClick={onClose}
+          >
+            Done
+          </button>
+        </div>
+      )}
     </ModalShell>
   );
 }
 
+function EditProfileModal({ profile, onClose, onSaved, notify }) {
+  const [form, setForm] = useState({ name: profile.name || "", course: profile.course || "", year: profile.year || "", usn: profile.usn || "", bio: profile.bio || "", skills: (profile.skills || []).join(", "), open_to_projects: Boolean(profile.open_to_projects) });
+  const [saving, setSaving] = useState(false);
+  const change = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  return <ModalShell kicker="PROFILE" title="Edit profile" onClose={onClose}>
+    <div className="form-grid">
+      <label>Name<input value={form.name} onChange={(e) => change("name", e.target.value)} /></label>
+      <label>USN<input value={form.usn} onChange={(e) => change("usn", e.target.value)} /></label>
+      <label>Course<input value={form.course} onChange={(e) => change("course", e.target.value)} /></label>
+      <label>Year<input value={form.year} onChange={(e) => change("year", e.target.value)} /></label>
+    </div>
+    <label>Bio<textarea value={form.bio} onChange={(e) => change("bio", e.target.value)} placeholder="What are you building or learning?" /></label>
+    <label>Skills (comma separated)<input value={form.skills} onChange={(e) => change("skills", e.target.value)} placeholder="React, Python, Design" /></label>
+    <label style={{ display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={form.open_to_projects} onChange={(e) => change("open_to_projects", e.target.checked)} /> Open to projects</label>
+    <button className="primary wide" disabled={saving} onClick={async () => {
+      try { setSaving(true); const next = await updateProfile(profile.id, { ...form, skills: form.skills.split(",").map((skill) => skill.trim()).filter(Boolean) }); onSaved(next); }
+      catch (error) { notify(error.message || "Could not update profile"); } finally { setSaving(false); }
+    }}>{saving ? "Saving…" : "Save profile"}</button>
+  </ModalShell>;
+}
+
 function PrintModal({ onClose, setPrintFile, notify }) {
-  const [file, setFile] = useState("");
+  const [file, setFile] = useState(null);
   const [pages, setPages] = useState(12);
   const [color, setColor] = useState("B&W");
 
@@ -3983,8 +5139,13 @@ function PrintModal({ onClose, setPrintFile, notify }) {
           type="file"
           onChange={(event) => {
             const selected = event.target.files?.[0];
-            setFile(selected?.name || "");
-            setPrintFile(selected?.name || "");
+            setFile(
+              selected || null
+            );
+
+            setPrintFile(
+              selected || null
+            );
           }}
         />
       </label>
@@ -3992,7 +5153,7 @@ function PrintModal({ onClose, setPrintFile, notify }) {
       {file && (
         <div className="file-chip">
           <HiDocumentArrowUp />
-          {file}
+          {file.name}
           <HiCheck />
         </div>
       )}
@@ -4027,10 +5188,70 @@ function PrintModal({ onClose, setPrintFile, notify }) {
 
       <button
         className="primary wide"
-        onClick={() => {
-          notify("Print order created — demo");
+        onClick={async () => {
+
+        try {
+
+          if (!file) {
+            notify(
+              "Choose a document first"
+            );
+
+            return;
+          }
+
+          const currentUser =
+            await getCurrentUser();
+
+          if (!currentUser) {
+            notify(
+              "Sign in before printing"
+            );
+
+            return;
+          }
+
+          const job =
+            await uploadPrintJob({
+              userId:
+                currentUser.id,
+
+              file,
+
+              pages:
+                Number(pages),
+
+              copies: 1,
+
+              colorMode:
+                color === "Colour"
+                  ? "colour"
+                  : "black_white",
+
+              paperSize:
+                "A4",
+
+            });
+
+          notify(
+            `Print job created · ${job.pickup_code}`
+          );
+
           onClose();
-        }}
+
+        } catch (error) {
+
+          console.error(
+            "Print job:",
+            error
+          );
+
+          notify(
+            error.message ||
+            "Unable to create print job"
+          );
+        }
+      }}
       >
         Place print order <HiCreditCard />
       </button>
@@ -4038,8 +5259,42 @@ function PrintModal({ onClose, setPrintFile, notify }) {
   );
 }
 
-function CartModal({ title, cart, onClose, notify, type }) {
-  const total = cart.reduce((sum, item) => sum + item.price, 0);
+function NavigationModal({ onClose, notify }) {
+  const [destination, setDestination] = useState("Innovation Lab");
+
+  return (
+    <ModalShell kicker="CAMPUS MAP" title="Navigation & Route" onClose={onClose}>
+      <label>
+        Destination
+        <select value={destination} onChange={(e) => setDestination(e.target.value)}>
+          <option>Innovation Lab</option>
+          <option>Food Court</option>
+          <option>Main Auditorium</option>
+          <option>Seminar Hall 2</option>
+          <option>Library</option>
+        </select>
+      </label>
+
+      <div className="route-stats" style={{ margin: "16px 0", display: "flex", gap: "12px" }}>
+        <span><HiClock /> 4 min walk</span>
+        <span><HiMapPin /> Block C, 2nd Floor</span>
+      </div>
+
+      <button
+        className="primary wide"
+        onClick={() => {
+          notify(`Navigation started to ${destination}`);
+          onClose();
+        }}
+      >
+        Start Directions <HiArrowRight />
+      </button>
+    </ModalShell>
+  );
+}
+
+function CartModal({ title,cart,onClose,notify,type,onCheckout}) {
+  const total = cart.reduce((sum, item) => sum + Number(item.price) * Number(item.quantity || 1), 0);
 
   return (
     <ModalShell
@@ -4072,10 +5327,16 @@ function CartModal({ title, cart, onClose, notify, type }) {
 
           <button
             className="primary wide"
-            onClick={() => {
-              notify("Checkout opened — payment integration comes later");
+            onClick={async () => {
+            if (onCheckout) {
+              await onCheckout();
+            } else {
+              notify(
+                "Checkout opened"
+              );
               onClose();
-            }}
+            }
+          }}
           >
             Continue to payment <HiCreditCard />
           </button>
@@ -4197,4 +5458,11 @@ function Feature({ icon, title, text, onClick }) {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+export default App;
+
+if (typeof document !== "undefined") {
+  const rootElement = document.getElementById("root");
+  if (rootElement) {
+    ReactDOM.createRoot(rootElement).render(<App />);
+  }
+}
