@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from "react";
 import ReactDOM from "react-dom/client";
 import "./index.css";
+import CheckoutInvoice from "./components/CheckoutInvoice";
+import { calculateOrderSummary } from "./utils/orderCalculator";
 
 import {
   HiHome,
@@ -906,9 +908,55 @@ function App() {
     notify(`${item.name} added to food cart`);
   };
 
+  const updateFoodQuantity = (itemId, delta) => {
+    setFoodCart((prevCart) => {
+      if (delta > 0) {
+        const existingItem = prevCart.find((i) => i.id === itemId);
+        if (existingItem) return [...prevCart, existingItem];
+        const foundInMenu = foodItems.find((i) => i.id === itemId);
+        if (foundInMenu) return [...prevCart, foundInMenu];
+        return prevCart;
+      } else {
+        const index = prevCart.findIndex((i) => i.id === itemId);
+        if (index === -1) return prevCart;
+        const nextCart = [...prevCart];
+        nextCart.splice(index, 1);
+        return nextCart;
+      }
+    });
+  };
+
+  const clearFoodCart = () => {
+    setFoodCart([]);
+    notify("Food cart cleared");
+  };
+
   const addStore = (item) => {
     setStoreCart((cart) => [...cart, item]);
     notify(`${item.name} added to store cart`);
+  };
+
+  const updateStoreQuantity = (itemId, delta) => {
+    setStoreCart((prevCart) => {
+      if (delta > 0) {
+        const existingItem = prevCart.find((i) => i.id === itemId);
+        if (existingItem) return [...prevCart, existingItem];
+        const foundInStore = storeItems.find((i) => i.id === itemId);
+        if (foundInStore) return [...prevCart, foundInStore];
+        return prevCart;
+      } else {
+        const index = prevCart.findIndex((i) => i.id === itemId);
+        if (index === -1) return prevCart;
+        const nextCart = [...prevCart];
+        nextCart.splice(index, 1);
+        return nextCart;
+      }
+    });
+  };
+
+  const clearStoreCart = () => {
+    setStoreCart([]);
+    notify("Store cart cleared");
   };
 
   const createPost = (post) => {
@@ -1193,9 +1241,12 @@ function App() {
 
       {modal === "food-cart" && (
         <CartModal
-          title="Food cart"
+          title="Food Cart Invoice"
           cart={foodCart}
           type="food"
+          user={user}
+          onUpdateQuantity={updateFoodQuantity}
+          onClearCart={clearFoodCart}
           onClose={() => setModal(null)}
           notify={notify}
         />
@@ -1203,9 +1254,12 @@ function App() {
 
       {modal === "store-cart" && (
         <CartModal
-          title="Store cart"
+          title="Store Cart Invoice"
           cart={storeCart}
           type="store"
+          user={user}
+          onUpdateQuantity={updateStoreQuantity}
+          onClearCart={clearStoreCart}
           onClose={() => setModal(null)}
           notify={notify}
         />
@@ -2050,7 +2104,7 @@ function Food({ canteens: vendorList, items, cart, addFood, openModal }) {
         .includes(q.toLowerCase())
   );
 
-  const total = cart.reduce((sum, item) => sum + item.price, 0);
+  const summary = calculateOrderSummary(cart);
 
   return (
     <section className="page-section food-page">
@@ -2060,7 +2114,7 @@ function Food({ canteens: vendorList, items, cart, addFood, openModal }) {
         text="Four canteens, one campus checkout."
         action={
           <button className="primary" onClick={() => openModal("food-cart")}>
-            <HiShoppingCart /> Cart ({cart.length})
+            <HiShoppingCart /> Cart ({summary.itemCount})
           </button>
         }
       />
@@ -2111,12 +2165,12 @@ function Food({ canteens: vendorList, items, cart, addFood, openModal }) {
         ))}
       </div>
 
-      {cart.length > 0 && (
+      {summary.itemCount > 0 && (
         <div className="floating-cart">
           <div>
             <HiShoppingCart />
-            <b>{cart.length} items</b>
-            <span>₹{total}</span>
+            <b>{summary.itemCount} items</b>
+            <span>₹{summary.finalTotal.toFixed(2)}</span>
           </div>
           <button onClick={() => openModal("food-cart")}>
             Checkout <HiArrowRight />
@@ -2159,7 +2213,7 @@ function Store({ items, cart, addStore, openModal }) {
     `${item.name} ${item.category}`.toLowerCase().includes(q.toLowerCase())
   );
 
-  const total = cart.reduce((sum, item) => sum + item.price, 0);
+  const summary = calculateOrderSummary(cart);
 
   return (
     <section className="page-section">
@@ -2169,7 +2223,7 @@ function Store({ items, cart, addStore, openModal }) {
         text="Everything you need for classes and projects."
         action={
           <button className="primary" onClick={() => openModal("store-cart")}>
-            <HiShoppingCart /> Cart ({cart.length})
+            <HiShoppingCart /> Cart ({summary.itemCount})
           </button>
         }
       />
@@ -2218,12 +2272,12 @@ function Store({ items, cart, addStore, openModal }) {
         ))}
       </div>
 
-      {cart.length > 0 && (
+      {summary.itemCount > 0 && (
         <div className="floating-cart">
           <div>
             <HiShoppingCart />
-            <b>{cart.length} items</b>
-            <span>₹{total}</span>
+            <b>{summary.itemCount} items</b>
+            <span>₹{summary.finalTotal.toFixed(2)}</span>
           </div>
           <button onClick={() => openModal("store-cart")}>
             Checkout <HiArrowRight />
@@ -3558,49 +3612,31 @@ function PrintModal({ onClose, setPrintFile, notify }) {
   );
 }
 
-function CartModal({ title, cart, onClose, notify, type }) {
-  const total = cart.reduce((sum, item) => sum + item.price, 0);
-
+function CartModal({
+  title,
+  cart,
+  onClose,
+  notify,
+  type,
+  user,
+  onUpdateQuantity,
+  onClearCart,
+}) {
   return (
     <ModalShell
-      kicker={type === "food" ? "FOOD HUB" : "CAMPUS STORE"}
+      kicker={type === "food" ? "FOOD HUB DIGITAL INVOICE" : "CAMPUS STORE DIGITAL INVOICE"}
       title={title}
       onClose={onClose}
     >
-      {cart.length === 0 ? (
-        <div className="empty-state">
-          <HiShoppingCart />
-          <h3>Your cart is empty</h3>
-          <p>Add something to continue.</p>
-        </div>
-      ) : (
-        <>
-          <div className="cart-list">
-            {cart.map((item, index) => (
-              <div key={`${item.id}-${index}`}>
-                <span>{item.name}</span>
-                <small>{item.vendor || item.category}</small>
-                <b>₹{item.price}</b>
-              </div>
-            ))}
-          </div>
-
-          <div className="price-preview">
-            <span>Total</span>
-            <b>₹{total}</b>
-          </div>
-
-          <button
-            className="primary wide"
-            onClick={() => {
-              notify("Checkout opened — payment integration comes later");
-              onClose();
-            }}
-          >
-            Continue to payment <HiCreditCard />
-          </button>
-        </>
-      )}
+      <CheckoutInvoice
+        cart={cart}
+        type={type}
+        user={user}
+        onUpdateQuantity={onUpdateQuantity}
+        onClearCart={onClearCart}
+        onClose={onClose}
+        notify={notify}
+      />
     </ModalShell>
   );
 }

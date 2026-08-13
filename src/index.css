@@ -3051,3 +3051,459 @@
   color: #ffffff !important;
   border-color: var(--accent) !important;
 }
+
+/* =========================================================
+   DIGITAL INVOICE & CHECKOUT STYLES (Campus OS)
+========================================================= */
+
+.digital-invoice-wrap {
+  width: 100%;
+}
+
+.digital-invoice {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.invoice-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 16px;
+  border-bottom: 2px dashed var(--line);
+}
+
+.app-shell.dark-mode .invoice-header {
+  border-color: var(--border);
+}
+
+.invoice-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.invoice-title {
+  font: 800 18px/1.2 Manrope;
+  display: block;
+}
+
+.invoice-subtitle {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.invoice-meta-badge {
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.invoice-status {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  font-weight: 800;
+  background: var(--soft);
+  color: var(--purple);
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.app-shell.dark-mode .invoice-status {
+  background: rgba(146, 120, 255, 0.2);
+  color: var(--accent);
+}
+
+.invoice-id {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.invoice-info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  background: var(--soft);
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(105, 69, 232, 0.1);
+}
+
+.app-shell.dark-mode .invoice-info-grid {
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+
+.info-block {
+  display: flex;
+  flex-direction: column;
+}
+
+.info-label {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  font-weight: 800;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.info-val {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.info-sub {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.invoice-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.section-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.clear-cart-text-btn {
+  font-size: 11px;
+  font-weight: 700;
+  color: #e5484d;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.clear-cart-text-btn:hover {
+  background: rgba(229, 72, 77, 0.1);
+}
+
+.invoice-items-table {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.app-shell.dark-mode .invoice-items-table {
+  border-color: var(--border);
+}
+
+.table-head {
+  display: grid;
+  grid-template-columns: 2fr 1.2fr 1fr 1fr;
+  padding: 10px 14px;
+  background: var(--surface-2);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line);
+}
+
+.app-shell.dark-mode .table-head {
+  border-color: var(--border);
+}
+
+.table-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.table-row {
+  display: grid;
+  grid-template-columns: 2fr 1.2fr 1fr 1fr;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.table-row:last-child {
+  border-bottom: none;
+}
+
+.app-shell.dark-mode .table-row {
+  border-color: var(--border);
+}
+
+.item-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.item-name {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.item-vendor-badge {
+  font-size: 10px;
+  color: var(--purple);
+  font-weight: 600;
+}
+
+.app-shell.dark-mode .item-vendor-badge {
+  color: var(--accent);
+}
+
+.qty-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  padding: 3px 6px;
+  border-radius: 8px;
+}
+
+.app-shell.dark-mode .qty-pill {
+  border-color: var(--border);
+}
+
+.qty-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 11px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.qty-btn:hover {
+  background: var(--purple);
+  color: white;
+  border-color: var(--purple);
+}
+
+.qty-val {
+  font-weight: 800;
+  font-size: 12px;
+  min-width: 16px;
+}
+
+.price-text, .subtotal-text {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.subtotal-text {
+  font-weight: 800;
+  color: var(--text);
+}
+
+.text-center {
+  text-align: center;
+}
+
+.text-right {
+  text-align: right;
+}
+
+.invoice-summary-box {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.app-shell.dark-mode .invoice-summary-box {
+  border-color: var(--border);
+}
+
+.summary-title {
+  font: 800 13px Manrope;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.summary-row.sub-row {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.free-badge {
+  color: var(--green);
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.summary-divider {
+  height: 1px;
+  background: var(--line);
+  margin: 6px 0;
+}
+
+.app-shell.dark-mode .summary-divider {
+  background: var(--border);
+}
+
+.final-total-row {
+  margin-top: 4px;
+}
+
+.final-label {
+  font: 800 15px/1.2 Manrope;
+  display: block;
+}
+
+.final-sub {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.final-amount {
+  font: 800 24px/1 Manrope;
+  color: var(--purple);
+}
+
+.app-shell.dark-mode .final-amount {
+  color: var(--accent);
+}
+
+.razorpay-placeholder-banner {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  background: #f0f7ff;
+  border: 1px solid #cce5ff;
+  padding: 12px 14px;
+  border-radius: 12px;
+  color: #004085;
+}
+
+.app-shell.dark-mode .razorpay-placeholder-banner {
+  background: rgba(0, 80, 160, 0.2);
+  border-color: rgba(100, 160, 240, 0.3);
+  color: #99ccff;
+}
+
+.banner-icon {
+  font-size: 18px;
+  margin-top: 1px;
+  flex-shrink: 0;
+}
+
+.banner-text strong {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+
+.banner-text p {
+  font-size: 11px;
+  margin: 0;
+  line-height: 1.4;
+  opacity: 0.85;
+}
+
+.invoice-actions {
+  margin-top: 4px;
+}
+
+.pay-now-btn {
+  width: 100%;
+  padding: 14px 20px;
+  background: linear-gradient(135deg, #17151f, #2c293d);
+  color: #ffffff;
+  border-radius: 14px;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 10px 25px rgba(23, 21, 31, 0.25);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.app-shell.dark-mode .pay-now-btn {
+  background: linear-gradient(135deg, #6d4aff, #8b6cff);
+  box-shadow: 0 10px 25px rgba(109, 74, 255, 0.35);
+}
+
+.pay-now-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px rgba(23, 21, 31, 0.35);
+}
+
+.pay-btn-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 800 16px Manrope;
+}
+
+.pay-icon {
+  font-size: 20px;
+}
+
+.pay-dot {
+  opacity: 0.6;
+}
+
+.pay-amount {
+  letter-spacing: 0.02em;
+}
+
+.placeholder-tag {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  opacity: 0.7;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.invoice-empty-container {
+  padding: 20px 0;
+}
+
+.empty-icon-wrap {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--soft);
+  color: var(--purple);
+  display: grid;
+  place-items: center;
+  margin: 0 auto 16px;
+  font-size: 28px;
+}
