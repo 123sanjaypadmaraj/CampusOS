@@ -40,6 +40,7 @@ const TABS = [
   ["announcements", "Announcements"],
   ["events", "Events & Clubs"],
   ["verifications", "Student Verifications"],
+  ["users", "Users"],
 ];
 
 export default function AdminCMS({ notify, campusId, authUser }) {
@@ -71,7 +72,131 @@ export default function AdminCMS({ notify, campusId, authUser }) {
       {tab === "announcements" && <AnnouncementsTab notify={notify} campusId={campusId} />}
       {tab === "events" && <EventsClubsTab notify={notify} campusId={campusId} authUser={authUser} />}
       {tab === "verifications" && <VerificationsTab notify={notify} campusId={campusId} authUser={authUser} />}
+      {tab === "users" && <UsersTab notify={notify} campusId={campusId} authUser={authUser} />}
     </section>
+  );
+}
+
+/* =========================================================
+   USERS (doc §54-58)
+========================================================= */
+
+const ROLE_OPTIONS = ["student", "club_admin", "vendor", "facilities_staff", "college_admin", "super_admin"];
+
+function UsersTab({ notify, campusId, authUser }) {
+  const [q, setQ] = useState("");
+  const [roleFilter, setRoleFilter] = useState("");
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busyId, setBusyId] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      setUsers(await adminApi.listAllUsers(campusId, { search: q, role: roleFilter || null, limit: 100 }));
+    } catch (err) {
+      setError(err.message || "Could not load users");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, [campusId, roleFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const changeRole = async (user, newRole) => {
+    if (newRole === user.role) return;
+    if (!window.confirm(`Change ${user.name}'s role from ${user.role} to ${newRole}?`)) return;
+    try {
+      setBusyId(user.id);
+      await adminApi.setUserRole(user.id, newRole);
+      notify(`${user.name} is now ${newRole}`);
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not change role");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const toggleStatus = async (user) => {
+    const nextStatus = user.status === "suspended" ? "active" : "suspended";
+    let reason;
+    if (nextStatus === "suspended") {
+      reason = window.prompt(`Reason for suspending ${user.name}?`);
+      if (reason === null) return;
+    }
+    try {
+      setBusyId(user.id);
+      await adminApi.setUserStatus(user.id, nextStatus, reason);
+      notify(nextStatus === "suspended" ? `${user.name} suspended` : `${user.name} reactivated`);
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not change account status");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div>
+      <div className="searchbar compact wide-search" style={{ marginBottom: 12 }}>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && reload()}
+          placeholder="Search name, email or USN…"
+        />
+        <button onClick={reload}>Search</button>
+      </div>
+
+      <div className="chips" style={{ marginBottom: 16 }}>
+        <button className={roleFilter === "" ? "chip active" : "chip"} onClick={() => setRoleFilter("")}>All roles</button>
+        {ROLE_OPTIONS.map((role) => (
+          <button key={role} className={roleFilter === role ? "chip active" : "chip"} onClick={() => setRoleFilter(role)}>
+            {role}
+          </button>
+        ))}
+      </div>
+
+      {loading && <LoadingState label="Loading users…" />}
+      {error && <ErrorState text={error} onRetry={reload} />}
+
+      {!loading && !error && (
+        <div className="resource-list">
+          {users.length === 0 && <EmptyState title="No users match" />}
+          {users.map((user) => (
+            <article className="resource-row" key={user.id}>
+              <div>
+                <b>{user.name} {user.status === "suspended" && <span className="social-type">SUSPENDED</span>}</b>
+                <small>
+                  {user.email || "no email"} · {user.usn || "no USN"} · {user.course} · {user.year}
+                </small>
+                {user.status === "suspended" && user.suspended_reason && (
+                  <small>Reason: {user.suspended_reason}</small>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <select
+                  value={user.role}
+                  disabled={busyId === user.id || user.id === authUser?.id}
+                  onChange={(e) => changeRole(user, e.target.value)}
+                >
+                  {ROLE_OPTIONS.map((role) => <option key={role} value={role}>{role}</option>)}
+                </select>
+                <button
+                  disabled={busyId === user.id || user.id === authUser?.id || ["college_admin", "super_admin"].includes(user.role)}
+                  onClick={() => toggleStatus(user)}
+                >
+                  {user.status === "suspended" ? "Reactivate" : "Suspend"}
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

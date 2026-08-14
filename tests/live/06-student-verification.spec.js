@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, expect } from '@playwright/test';
 import { seedRealSession } from './helpers/realSession.js';
+import { resetVerificationFor } from './helpers/resetVerification.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // A real (tiny, 1x1) PNG -- the upload path exercises the real 'documents'
@@ -20,6 +21,12 @@ const CAROL = 'e2e.carol@nhce.edu.in'; // dedicated to this spec so it doesn't c
 const ADMIN = '1nh25cs265@usn.campusos.internal';
 
 test.describe.serial('Student ID verification', () => {
+  test.beforeAll(async () => {
+    const { listTestUsers } = await import('./helpers/realSession.js');
+    const carol = listTestUsers().find((u) => u.email === CAROL);
+    await resetVerificationFor(carol.userId);
+  });
+
   test('Carol submits her ID for verification', async ({ page, context }) => {
     await seedRealSession(context, CAROL);
     await page.goto('/');

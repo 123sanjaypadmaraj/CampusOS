@@ -201,6 +201,36 @@ export function deriveGithubUrlFromIdentities(identities) {
 }
 
 /*
+ * connectLinkedin — same linkIdentity() pattern as connectGithub(), but
+ * LinkedIn's "Sign In using OpenID Connect" product doesn't return a
+ * profile URL (only name/email/picture) -- getting that back needs
+ * LinkedIn's older, partner-approval-gated Profile API. So this only
+ * proves account ownership; call markLinkedinVerified() once linked to
+ * record that server-side. The profile URL itself stays a manual field.
+ */
+export async function connectLinkedin() {
+  const { error } = await supabase.auth.linkIdentity({
+    provider: "linkedin_oidc",
+    options: { redirectTo: `${window.location.origin}/` },
+  });
+  if (error) throw error;
+}
+
+// Server-checks auth.identities for a real linked linkedin_oidc identity
+// before recording profiles.linkedin_verified_at -- deliberately not a
+// plain client-side profiles.update(), so the verified badge can't be
+// self-reported without actually completing LinkedIn OAuth.
+export async function markLinkedinVerified() {
+  const { data, error } = await supabase.rpc("mark_linkedin_verified");
+  throwIfError(error);
+  return data;
+}
+
+export function hasLinkedinIdentity(identities) {
+  return (identities || []).some((identity) => identity.provider === "linkedin_oidc");
+}
+
+/*
  * Name + USN + Password login (alongside magic link). Supabase Auth is
  * still email-based internally -- signUpWithUsn() creates the account
  * server-side via the signup-with-usn Edge Function (service_role,
@@ -545,6 +575,50 @@ export async function getCohortGroupMembers({ campusId, course, year, limit = 30
   });
   throwIfError(error);
   return data || [];
+}
+
+/* =========================================================================
+   ADMIN: USER MANAGEMENT (doc §54-58)
+   Admins can read every profiles row directly (RLS bypass via
+   current_user_is_admin(), see 0011) -- only the two mutating actions need
+   RPCs, since profiles_update_self only allows updating your own row.
+========================================================================= */
+
+export async function listAllUsers(campusId, { search = "", role = null, limit = 50, cursor = null } = {}) {
+  let query = supabase
+    .from("profiles")
+    .select("id, name, email, usn, course, year, role, status, suspended_reason, created_at")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (campusId) query = query.eq("campus_id", campusId);
+  if (role) query = query.eq("role", role);
+  if (search?.trim()) {
+    const q = search.trim();
+    query = query.or(`name.ilike.%${q}%,email.ilike.%${q}%,usn.ilike.%${q}%`);
+  }
+  if (cursor) query = query.lt("created_at", cursor);
+  const { data, error } = await query;
+  throwIfError(error);
+  return data || [];
+}
+
+export async function setUserRole(userId, newRole, reason) {
+  const { error } = await supabase.rpc("admin_set_user_role", {
+    p_target_user: userId,
+    p_new_role: newRole,
+    p_reason: reason || null,
+  });
+  throwIfError(error);
+}
+
+export async function setUserStatus(userId, status, reason) {
+  const { data, error } = await supabase.rpc("admin_set_user_status", {
+    p_target_user: userId,
+    p_status: status,
+    p_reason: reason || null,
+  });
+  throwIfError(error);
+  return data;
 }
 
 /* =========================================================================

@@ -23,6 +23,9 @@ import {
   signInWithGoogle,
   connectGithub,
   deriveGithubUrlFromIdentities,
+  connectLinkedin,
+  markLinkedinVerified,
+  hasLinkedinIdentity,
   uploadPrintJob,
   subscribeToAuthChanges,
   subscribeToUserNotifications,
@@ -1697,6 +1700,18 @@ function App() {
           .catch((error) => console.error("GitHub link sync failed", error));
       }
     }, [authUser?.identities, profile?.id, profile?.github_url]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Same idea for LinkedIn, but LinkedIn's OAuth can't hand back a
+    // profile URL (see mvpService.js) -- this only records the verified
+    // badge server-side via mark_linkedin_verified(), never writes
+    // linkedin_url itself.
+    useEffect(() => {
+      if (!authUser?.identities || !profile?.id || profile.linkedin_verified_at) return;
+      if (!hasLinkedinIdentity(authUser.identities)) return;
+      markLinkedinVerified()
+        .then(applyProfileUpdate)
+        .catch((error) => console.error("LinkedIn verification sync failed", error));
+    }, [authUser?.identities, profile?.id, profile?.linkedin_verified_at]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const renderPage = () => {
     if (active === "home") {
@@ -3921,11 +3936,35 @@ function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfil
             unconnected one is a one-click "Connect" prompt right here. */}
         <div className="linkedin-social-links">
           {profile?.linkedin_url ? (
+            // A pasted link, OAuth-verified or not -- the checkmark just
+            // adds "and it's confirmed to really be them" on top of it.
             <a href={profile.linkedin_url} target="_blank" rel="noreferrer">
               <FaLinkedin /> LinkedIn
+              {profile?.linkedin_verified_at && <HiShieldCheck title="Verified via LinkedIn sign-in" />}
             </a>
+          ) : profile?.linkedin_verified_at ? (
+            // Verified via OAuth, but LinkedIn's sign-in doesn't hand back
+            // a profile URL -- still need it pasted in to link anywhere.
+            <>
+              <span className="verified-chip">
+                <FaLinkedin /> <HiShieldCheck /> LinkedIn verified
+              </span>
+              <button className="ghost" onClick={() => openModal("edit-profile")}>
+                <HiPlus /> Add profile link
+              </button>
+            </>
           ) : (
-            <button className="ghost" onClick={() => openModal("edit-profile")}>
+            <button
+              className="ghost"
+              onClick={async () => {
+                try {
+                  await connectLinkedin(); // redirects the browser away on success
+                } catch (error) {
+                  console.error("Connect LinkedIn:", error);
+                  notify(error.message || "Unable to connect LinkedIn");
+                }
+              }}
+            >
               <FaLinkedin /> Connect LinkedIn
             </button>
           )}

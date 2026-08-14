@@ -212,4 +212,7 @@ export {
   listPendingVerifications,
   reviewStudentVerification,
   getVerificationDocumentUrl,
+  listAllUsers,
+  setUserRole,
+  setUserStatus,
 } from "../../services/mvpService";

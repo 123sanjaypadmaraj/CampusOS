@@ -24,6 +24,9 @@ import {
   startFoodOrderPayment,
   connectGithub,
   deriveGithubUrlFromIdentities,
+  connectLinkedin,
+  markLinkedinVerified,
+  hasLinkedinIdentity,
 } from "./mvpService";
 
 describe("createFoodOrder", () => {
@@ -196,9 +199,60 @@ describe("connectGithub", () => {
   });
 
   it("throws Supabase's error (e.g. provider not configured) instead of swallowing it", async () => {
-    supabase.auth.linkIdentity.mockResolvedValue({ error: { message: "Unsupported provider" } });
+    // Real Supabase auth errors (AuthApiError) are actual Error instances,
+    // not plain objects -- match that shape here, since Jest's toThrow()
+    // only recognizes real Errors.
+    supabase.auth.linkIdentity.mockResolvedValue({ error: new Error("Unsupported provider") });
 
     await expect(connectGithub()).rejects.toThrow("Unsupported provider");
+  });
+});
+
+describe("connectLinkedin", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("calls linkIdentity with the linkedin_oidc provider", async () => {
+    supabase.auth.linkIdentity.mockResolvedValue({ error: null });
+
+    await connectLinkedin();
+
+    expect(supabase.auth.linkIdentity).toHaveBeenCalledWith({
+      provider: "linkedin_oidc",
+      options: { redirectTo: expect.stringContaining("http") },
+    });
+  });
+
+  it("throws on error instead of swallowing it", async () => {
+    supabase.auth.linkIdentity.mockResolvedValue({ error: new Error("Unsupported provider") });
+    await expect(connectLinkedin()).rejects.toThrow("Unsupported provider");
+  });
+});
+
+describe("markLinkedinVerified", () => {
+  it("calls the mark_linkedin_verified RPC and returns the updated profile", async () => {
+    jest.clearAllMocks();
+    supabase.rpc.mockResolvedValue({ data: { id: "user-1", linkedin_verified_at: "2026-08-14T00:00:00Z" }, error: null });
+
+    const result = await markLinkedinVerified();
+
+    expect(supabase.rpc).toHaveBeenCalledWith("mark_linkedin_verified");
+    expect(result.linkedin_verified_at).toBe("2026-08-14T00:00:00Z");
+  });
+
+  it("surfaces LINKEDIN_NOT_LINKED with a clean message", async () => {
+    jest.clearAllMocks();
+    supabase.rpc.mockResolvedValue({ data: null, error: { message: "LINKEDIN_NOT_LINKED: link a LinkedIn account first" } });
+
+    await expect(markLinkedinVerified()).rejects.toThrow("link a LinkedIn account first");
+  });
+});
+
+describe("hasLinkedinIdentity", () => {
+  it("detects a linked linkedin_oidc identity", () => {
+    expect(hasLinkedinIdentity([{ provider: "linkedin_oidc" }])).toBe(true);
+    expect(hasLinkedinIdentity([{ provider: "email" }])).toBe(false);
+    expect(hasLinkedinIdentity([])).toBe(false);
+    expect(hasLinkedinIdentity(null)).toBe(false);
   });
 });
 
