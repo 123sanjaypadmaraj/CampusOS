@@ -622,6 +622,52 @@ export async function setUserStatus(userId, status, reason) {
 }
 
 /* =========================================================================
+   ADMIN: MODERATION CONSOLE (doc §40-41, §58)
+   moderate_content() (community.sql) already exists and handles hide/
+   remove/approve for posts/comments; content_reports RLS already lets a
+   moderator read/update any report directly. Only reading "what/who a
+   report is actually about" needed an RPC (target_id is polymorphic).
+========================================================================= */
+
+export async function listOpenReports(limit = 50) {
+  const { data, error } = await supabase
+    .from("content_reports")
+    .select("*, profiles!content_reports_reporter_id_fkey(name)")
+    .eq("status", "open")
+    .order("created_at", { ascending: true })
+    .limit(limit);
+  throwIfError(error);
+  return data || [];
+}
+
+export async function getReportContext(targetType, targetId) {
+  const { data, error } = await supabase.rpc("get_report_context", {
+    p_target_type: targetType,
+    p_target_id: targetId,
+  });
+  throwIfError(error);
+  return data?.[0] || null;
+}
+
+export async function moderateContent(targetType, targetId, action, reason) {
+  const { error } = await supabase.rpc("moderate_content", {
+    p_target_type: targetType,
+    p_target_id: targetId,
+    p_action: action,
+    p_reason: reason || null,
+  });
+  throwIfError(error);
+}
+
+export async function resolveReport(reportId, reviewerId, status = "resolved") {
+  const { error } = await supabase
+    .from("content_reports")
+    .update({ status, reviewed_by: reviewerId, reviewed_at: new Date().toISOString() })
+    .eq("id", reportId);
+  throwIfError(error);
+}
+
+/* =========================================================================
    STUDENT ID VERIFICATION (doc §7)
    student_verifications is a real table with real RLS (own row read/insert,
    admin read/update-any -- see 0011) but had no frontend code at all before

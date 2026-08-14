@@ -215,4 +215,8 @@ export {
   listAllUsers,
   setUserRole,
   setUserStatus,
+  listOpenReports,
+  getReportContext,
+  moderateContent,
+  resolveReport,
 } from "../../services/mvpService";

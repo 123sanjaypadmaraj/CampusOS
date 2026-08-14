@@ -2605,8 +2605,18 @@ function Post({ post, notify, authUser, setLoginOpen }) {
         </div>
 
         <button
-          onClick={() => notify("Post options opened")}
-          aria-label="Post options"
+          onClick={async () => {
+            if (!authUser) { setLoginOpen?.(); notify("Sign in to report a post"); return; }
+            const reason = window.prompt("Why are you reporting this post? (spam, harassment, etc.)");
+            if (!reason?.trim()) return;
+            try {
+              await reportContent("post", post.id, reason.trim());
+              notify("Reported to campus moderators");
+            } catch (err) {
+              notify(err.message || "Could not report this post");
+            }
+          }}
+          aria-label="Report post"
         >
           <HiEllipsisHorizontal />
         </button>

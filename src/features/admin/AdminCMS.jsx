@@ -41,6 +41,7 @@ const TABS = [
   ["events", "Events & Clubs"],
   ["verifications", "Student Verifications"],
   ["users", "Users"],
+  ["moderation", "Moderation"],
 ];
 
 export default function AdminCMS({ notify, campusId, authUser }) {
@@ -73,7 +74,123 @@ export default function AdminCMS({ notify, campusId, authUser }) {
       {tab === "events" && <EventsClubsTab notify={notify} campusId={campusId} authUser={authUser} />}
       {tab === "verifications" && <VerificationsTab notify={notify} campusId={campusId} authUser={authUser} />}
       {tab === "users" && <UsersTab notify={notify} campusId={campusId} authUser={authUser} />}
+      {tab === "moderation" && <ModerationTab notify={notify} authUser={authUser} />}
     </section>
+  );
+}
+
+/* =========================================================
+   MODERATION (doc §40-41, §58)
+========================================================= */
+
+function ModerationTab({ notify, authUser }) {
+  const [reports, setReports] = useState([]);
+  const [context, setContext] = useState({}); // reportId -> { owner_id, owner_name, snippet } | 'loading' | 'none'
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busyId, setBusyId] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      const list = await adminApi.listOpenReports();
+      setReports(list);
+      list.forEach((report) => {
+        setContext((current) => ({ ...current, [report.id]: "loading" }));
+        adminApi
+          .getReportContext(report.target_type, report.target_id)
+          .then((ctx) => setContext((current) => ({ ...current, [report.id]: ctx || "none" })))
+          .catch(() => setContext((current) => ({ ...current, [report.id]: "none" })));
+      });
+    } catch (err) {
+      setError(err.message || "Could not load reports");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const canModerateContent = (report) => ["post", "comment"].includes(report.target_type);
+
+  const act = async (report, action) => {
+    try {
+      setBusyId(report.id);
+      if (action === "hide" || action === "remove") {
+        await adminApi.moderateContent(report.target_type, report.target_id, action);
+      }
+      await adminApi.resolveReport(report.id, authUser?.id, action === "dismiss" ? "dismissed" : "resolved");
+      notify(action === "dismiss" ? "Report dismissed" : action === "hide" ? "Content hidden" : "Content removed");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not action this report");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const suspendReportedUser = async (report, ownerId, ownerName) => {
+    const reason = window.prompt(`Reason for suspending ${ownerName}?`, report.reason);
+    if (reason === null) return;
+    try {
+      setBusyId(report.id);
+      await adminApi.setUserStatus(ownerId, "suspended", reason);
+      notify(`${ownerName} suspended`);
+    } catch (err) {
+      notify(err.message || "Could not suspend this user");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (loading) return <LoadingState label="Loading reports…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  return (
+    <div className="resource-list">
+      {reports.length === 0 && (
+        <EmptyState icon={<HiShieldCheck />} title="No open reports" text="Everything students have flagged has been handled." />
+      )}
+      {reports.map((report) => {
+        const ctx = context[report.id];
+        return (
+          <article className="resource-row" key={report.id} style={{ alignItems: "flex-start" }}>
+            <div>
+              <b>{report.target_type} · {report.reason}</b>
+              <small>
+                Reported by {report.profiles?.name || "a student"} · {new Date(report.created_at).toLocaleString()}
+              </small>
+              {report.details && <small>&ldquo;{report.details}&rdquo;</small>}
+              {ctx === "loading" && <small>Loading content…</small>}
+              {ctx === "none" && <small>Original content/profile no longer exists.</small>}
+              {ctx && typeof ctx === "object" && (
+                <small>
+                  By <b>{ctx.owner_name}</b>: {ctx.snippet || "(no text)"}
+                </small>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {canModerateContent(report) && (
+                <>
+                  <button disabled={busyId === report.id} onClick={() => act(report, "hide")}>Hide</button>
+                  <button disabled={busyId === report.id} onClick={() => act(report, "remove")}>Remove</button>
+                </>
+              )}
+              {ctx && typeof ctx === "object" && (
+                <button
+                  disabled={busyId === report.id}
+                  onClick={() => suspendReportedUser(report, ctx.owner_id, ctx.owner_name)}
+                >
+                  Suspend {ctx.owner_name}
+                </button>
+              )}
+              <button disabled={busyId === report.id} onClick={() => act(report, "dismiss")}>Dismiss</button>
+            </div>
+          </article>
+        );
+      })}
+    </div>
   );
 }
 
