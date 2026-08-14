@@ -14,6 +14,7 @@ dist
 coverage
 .env
 .env.local
+.env.*.local
 test-results
 playwright-report
 *.tsbuildinfo
@@ -22,4 +23,10 @@ playwright-report
 scripts/.sessions.json
 scripts/.vendor-credentials.local.json
 scripts/.facilities-credentials.local.json
+scripts/.vapid-keys.local.json
+scripts/.vapid-keys.staging.local.json
+.service_role_key.staging.local
+scripts/.sessions.staging.json
+scripts/.facilities-credentials.staging.local.json
+scripts/.vendor-credentials.staging.local.json
 supabase/.temp/

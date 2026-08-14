@@ -60,6 +60,62 @@ export async function deleteFoodItem(id) {
   throw error;
 }
 
+/* =========================================================================
+   BULK MENU ACTIONS -- doc §16 "bulk menu & inventory". Availability/
+   archive/category are the same value across every selected item, so those
+   go through one .update().in() call each (single round trip, and Postgres
+   applies it atomically). Price adjustment is different per item (it's a
+   relative +/-, not an absolute value), so there's no single query that can
+   express it -- it's computed client-side from the prices already loaded in
+   the UI, then applied as one update per item via Promise.all. Menus here
+   are small (tens of items, not thousands), so this is the right tradeoff:
+   simple and safe over a single clever query. Deliberately NOT built on
+   .upsert() -- upserting a partial row (just id+price) would reset every
+   other column to its default, silently wiping name/category/etc.
+========================================================================= */
+
+export async function bulkSetAvailability(ids, available) {
+  if (!ids.length) return;
+  const { error } = await supabase.from("food_items").update({ available }).in("id", ids);
+  throwIfError(error);
+}
+
+export async function bulkSetCategory(ids, categoryId) {
+  if (!ids.length) return;
+  const { error } = await supabase.from("food_items").update({ category_id: categoryId || null }).in("id", ids);
+  throwIfError(error);
+}
+
+// Same "archive, don't hard-delete" reasoning as deleteFoodItem -- bulk
+// delete would either half-succeed on the first FK-referenced item (23503)
+// or need per-row fallback logic anyway, so bulk archive (hide from the
+// menu) is the one bulk-destructive action offered; hard delete stays
+// single-item only.
+export async function bulkArchiveFoodItems(ids) {
+  if (!ids.length) return;
+  const { error } = await supabase.from("food_items").update({ active: false, available: false }).in("id", ids);
+  throwIfError(error);
+}
+
+// items: [{id, price}] -- the current price of each selected item, read
+// from state the UI already has loaded (avoids an extra fetch). mode is
+// 'amount' (flat ₹) or 'percent'; direction is +1 (increase) or -1
+// (decrease). Price never goes below 0 and is rounded to paise.
+export async function bulkAdjustPrice(items, { mode, value, direction }) {
+  if (!items.length) return;
+  const v = Number(value) || 0;
+  const updates = items.map((it) => {
+    const delta = mode === "percent" ? (Number(it.price) * v) / 100 : v;
+    const nextPrice = Math.max(0, Math.round((Number(it.price) + direction * delta) * 100) / 100);
+    return { id: it.id, price: nextPrice };
+  });
+  const results = await Promise.all(
+    updates.map((u) => supabase.from("food_items").update({ price: u.price }).eq("id", u.id))
+  );
+  const failed = results.find((r) => r.error);
+  if (failed) throw failed.error;
+}
+
 // The print shop vendor manages page pricing (Black & White / Colour)
 // instead of a SKU catalog -- that's what actually drives create_print_job's
 // price calculation. Both rows are provisioned with owner_id set at

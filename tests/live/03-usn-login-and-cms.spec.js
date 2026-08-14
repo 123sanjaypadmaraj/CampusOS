@@ -52,8 +52,12 @@ test('USN sign-up: creates a brand-new account end-to-end', async ({ page }) => 
   await expect(page.getByTestId('sign-in-button')).toHaveCount(0, { timeout: 15000 });
 });
 
-test('Admin CMS: create a food item and see it in the live menu', async ({ page }) => {
-  const marker = `E2E CMS Item ${Date.now()}`;
+test('Admin CMS: Food & Canteens is gone -- canteen menus are vendor-only now', async ({ page }) => {
+  // Canteen menu editing used to live here (doc §16 predecessor); it moved
+  // entirely to each canteen's own vendor login (see
+  // tests/live/13-vendor-bulk-menu.spec.js) once real per-canteen accounts
+  // existed. Confirm the admin-side capability is actually gone, not just
+  // unused -- an admin should see the remaining CMS tabs but no food tab.
   await page.goto('/');
   await page.waitForLoadState('networkidle');
   await page.getByTestId('sign-in-button').click();
@@ -67,17 +71,8 @@ test('Admin CMS: create a food item and see it in the live menu', async ({ page 
   await page.waitForLoadState('networkidle');
   await expect(page.getByRole('heading', { name: 'Admin CMS' })).toBeVisible({ timeout: 10000 });
 
-  await page.getByRole('button', { name: /New item/i }).click();
-  await page.getByLabel('Name').fill(marker);
-  await page.getByLabel(/Price/i).fill('42');
-  await page.getByRole('button', { name: /Save item/i }).click();
-  await expect(page.getByText(marker)).toBeVisible({ timeout: 10000 });
-
-  // Confirm it actually shows up in the real student-facing Food page too.
-  await page.locator('nav.bottom-nav button', { hasText: 'Home' }).click();
-  await page.getByRole('button', { name: /Food/i }).first().click();
-  await page.waitForLoadState('networkidle');
-  await expect(page.getByText(marker)).toBeVisible({ timeout: 10000 });
+  await expect(page.getByRole('button', { name: 'Food & Canteens' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Announcements' })).toBeVisible();
 });
 
 test('Admin CMS: publish an announcement', async ({ page }) => {

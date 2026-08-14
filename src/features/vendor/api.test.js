@@ -24,12 +24,17 @@ import {
   deleteFoodItem,
   getMyPrintRateCard,
   updatePrintRate,
+  bulkSetAvailability,
+  bulkSetCategory,
+  bulkArchiveFoodItems,
+  bulkAdjustPrice,
 } from "./api";
 
 function chain(result) {
   const builder = {
     select: jest.fn(() => builder),
     eq: jest.fn(() => builder),
+    in: jest.fn(() => builder),
     order: jest.fn(() => builder),
     delete: jest.fn(() => builder),
     update: jest.fn(() => builder),
@@ -94,6 +99,82 @@ describe("deleteFoodItem", () => {
     mockFrom.mockReturnValue(deleteBuilder);
 
     await expect(deleteFoodItem("item-1")).rejects.toMatchObject({ code: "42501" });
+  });
+});
+
+describe("bulk menu actions", () => {
+  it("bulkSetAvailability updates every selected id in one call", async () => {
+    const builder = chain({ error: null });
+    mockFrom.mockReturnValue(builder);
+
+    await bulkSetAvailability(["item-1", "item-2"], false);
+
+    expect(mockFrom).toHaveBeenCalledWith("food_items");
+    expect(builder.update).toHaveBeenCalledWith({ available: false });
+    expect(builder.in).toHaveBeenCalledWith("id", ["item-1", "item-2"]);
+  });
+
+  it("bulkSetAvailability is a no-op for an empty selection", async () => {
+    await bulkSetAvailability([], true);
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
+  it("bulkSetCategory moves every selected item, normalising falsy ids to null", async () => {
+    const builder = chain({ error: null });
+    mockFrom.mockReturnValue(builder);
+
+    await bulkSetCategory(["item-1"], null);
+
+    expect(builder.update).toHaveBeenCalledWith({ category_id: null });
+    expect(builder.in).toHaveBeenCalledWith("id", ["item-1"]);
+  });
+
+  it("bulkArchiveFoodItems hides items without hard-deleting them", async () => {
+    const builder = chain({ error: null });
+    mockFrom.mockReturnValue(builder);
+
+    await bulkArchiveFoodItems(["item-1", "item-2"]);
+
+    expect(builder.update).toHaveBeenCalledWith({ active: false, available: false });
+    expect(builder.in).toHaveBeenCalledWith("id", ["item-1", "item-2"]);
+  });
+
+  it("bulkAdjustPrice increases price by a flat amount per item", async () => {
+    const b1 = chain({ error: null });
+    const b2 = chain({ error: null });
+    mockFrom.mockReturnValueOnce(b1).mockReturnValueOnce(b2);
+
+    await bulkAdjustPrice(
+      [{ id: "item-1", price: 50 }, { id: "item-2", price: 100 }],
+      { mode: "amount", value: 10, direction: 1 }
+    );
+
+    expect(b1.update).toHaveBeenCalledWith({ price: 60 });
+    expect(b1.eq).toHaveBeenCalledWith("id", "item-1");
+    expect(b2.update).toHaveBeenCalledWith({ price: 110 });
+    expect(b2.eq).toHaveBeenCalledWith("id", "item-2");
+  });
+
+  it("bulkAdjustPrice decreases price by a percentage, never going below 0", async () => {
+    const b1 = chain({ error: null });
+    mockFrom.mockReturnValueOnce(b1);
+
+    await bulkAdjustPrice([{ id: "item-1", price: 20 }], { mode: "percent", value: 200, direction: -1 });
+
+    expect(b1.update).toHaveBeenCalledWith({ price: 0 });
+  });
+
+  it("bulkAdjustPrice surfaces an error from any one of the per-item updates", async () => {
+    const b1 = chain({ error: null });
+    const b2 = chain({ error: { code: "42501", message: "permission denied" } });
+    mockFrom.mockReturnValueOnce(b1).mockReturnValueOnce(b2);
+
+    await expect(
+      bulkAdjustPrice(
+        [{ id: "item-1", price: 50 }, { id: "item-2", price: 100 }],
+        { mode: "amount", value: 10, direction: 1 }
+      )
+    ).rejects.toMatchObject({ code: "42501" });
   });
 });
 

@@ -69,6 +69,7 @@ jest.mock("./services/mvpService", () => ({
   getMarketplaceListings: jest.fn(() => Promise.resolve([])),
   createMarketplaceListing: jest.fn(() => Promise.resolve(null)),
   markMarketplaceListingSold: jest.fn(() => Promise.resolve(null)),
+  touchActivity: jest.fn(() => Promise.resolve()),
 }));
 
 describe("App button interactions", () => {

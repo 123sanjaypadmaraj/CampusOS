@@ -5,22 +5,12 @@
 // admin) by using the service_role connection directly and toggling the
 // same session-local flag protect_profile_role() checks for.
 //
-// Usage: node scripts/setup-admin-account.mjs
+// Usage: node scripts/setup-admin-account.mjs                       (staging)
+//        node scripts/setup-admin-account.mjs --env=production --yes-production
 
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
+import { resolveTarget, runProjectSql } from "./env-target.mjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(__dirname, "..");
-
-function readEnvVar(name) {
-  return fs.readFileSync(path.join(root, ".env"), "utf8").match(new RegExp(`^${name}=(.+)$`, "m"))?.[1]?.trim();
-}
-
-const SUPABASE_URL = readEnvVar("VITE_SUPABASE_URL");
-const SERVICE_ROLE_KEY = fs.readFileSync(path.join(root, ".service_role_key.local"), "utf8").trim();
+const { SUPABASE_URL, SERVICE_ROLE_KEY, projectRef, root } = resolveTarget();
 
 const ACCOUNT = { name: "Sanjay Padmaraj", usn: "1NH25CS265", password: "Sanjay@123" };
 const email = `${ACCOUNT.usn.toLowerCase()}@usn.campusos.internal`;
@@ -73,10 +63,7 @@ async function main() {
       update public.profiles set role = 'super_admin' where id = '${user.id}';
     end $$;
   `;
-  const sqlPath = path.join(root, "_grant_admin.sql");
-  fs.writeFileSync(sqlPath, sql);
-  execFileSync("npx", ["supabase", "db", "query", "--linked", "--file", sqlPath], { cwd: root, stdio: "inherit", shell: true });
-  fs.unlinkSync(sqlPath);
+  runProjectSql(root, projectRef, sql);
 
   console.log(`\n[done] ${ACCOUNT.name} (USN ${ACCOUNT.usn}) is now super_admin.`);
 }

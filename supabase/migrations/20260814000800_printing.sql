@@ -44,11 +44,18 @@ alter table public.print_jobs add column if not exists file_size_bytes bigint;
 alter table public.print_jobs add column if not exists virus_scan_status text not null default 'pending';
 alter table public.print_jobs add column if not exists updated_at timestamptz not null default now();
 
--- This project's print_jobs predates this migration and used `file_path`
+-- Some installs' print_jobs predates this migration and used `file_path`
 -- (not `file_url`) and a boolean `binding` column (this migration wants
 -- text: 'none'/'staple'/'spiral') -- both are 0-row tables in practice, so
--- fix them outright rather than trying to coerce incompatible data.
-alter table public.print_jobs alter column file_path drop not null;
+-- fix them outright rather than trying to coerce incompatible data. Guarded
+-- because a fresh install's print_jobs never had `file_path` to begin with
+-- (found live applying this migration set to a second, from-scratch project
+-- -- `alter column ... drop not null` unconditionally referencing a column
+-- that was never created is not actually idempotent).
+do $$ begin
+  alter table public.print_jobs alter column file_path drop not null;
+exception when undefined_column then null;
+end $$;
 alter table public.print_jobs add column if not exists file_url text;
 do $$ begin
   alter table public.print_jobs drop column if exists binding;

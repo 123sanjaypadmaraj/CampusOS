@@ -1,9 +1,17 @@
-// CMS data layer for admin-managed content: food menu/canteens,
-// announcements, events/clubs. All writes rely on the RLS policies added
-// in supabase/migrations/0011 + 0018 (admin/current_user_is_admin() bypass)
-// -- there's nothing here that isn't just a scoped table read/write, except
-// announcement creation which goes through publish_announcement() since
-// that's also what fans the announcement out as notifications.
+// CMS data layer for admin-managed content: announcements, events/clubs,
+// plus a couple of food/canteen helpers reused by the vendor dashboard. All
+// writes rely on the RLS policies added in supabase/migrations/0011 + 0018
+// (admin/current_user_is_admin() bypass) -- there's nothing here that isn't
+// just a scoped table read/write, except announcement creation which goes
+// through publish_announcement() since that's also what fans the
+// announcement out as notifications.
+//
+// Canteen/menu editing itself no longer has an admin-side UI -- it moved
+// entirely to each canteen's own vendor login (src/features/vendor/), which
+// is why listCanteensAdmin/listFoodItemsAdmin/archiveFoodItem aren't here
+// anymore. upsertCanteen/upsertFoodItem/listFoodCategories stay -- the
+// vendor data layer (../vendor/api.js) imports and re-exports them rather
+// than duplicating the same payload-shaping logic.
 
 import { supabase } from "../../lib/supabase";
 
@@ -12,16 +20,8 @@ function throwIfError(error) {
 }
 
 /* ========================================================================
-   FOOD / CANTEENS
+   FOOD / CANTEENS (shared with the vendor dashboard -- see note above)
 ======================================================================== */
-
-export async function listCanteensAdmin(campusId) {
-  let query = supabase.from("canteens").select("*").order("name");
-  if (campusId) query = query.eq("campus_id", campusId);
-  const { data, error } = await query;
-  throwIfError(error);
-  return data || [];
-}
 
 export async function upsertCanteen(campusId, canteen) {
   const payload = {
@@ -48,17 +48,6 @@ export async function listFoodCategories() {
   return data || [];
 }
 
-export async function listFoodItemsAdmin(canteenId) {
-  let query = supabase
-    .from("food_items")
-    .select("*, food_categories(id, name)")
-    .order("name");
-  if (canteenId) query = query.eq("canteen_id", canteenId);
-  const { data, error } = await query;
-  throwIfError(error);
-  return data || [];
-}
-
 export async function upsertFoodItem(item) {
   const payload = {
     canteen_id: item.canteen_id,
@@ -66,6 +55,8 @@ export async function upsertFoodItem(item) {
     name: item.name,
     description: item.description || "",
     price: Number(item.price) || 0,
+    image_url: item.image_url || null,
+    preparation_time_min: Number(item.preparation_time_min) || 10,
     is_vegetarian: Boolean(item.is_vegetarian),
     available: item.available !== false,
     active: item.active !== false,
@@ -77,12 +68,6 @@ export async function upsertFoodItem(item) {
   const { data, error } = await query.select().single();
   throwIfError(error);
   return data;
-}
-
-// Never hard-delete a food item with order history (doc §17) -- archive it.
-export async function archiveFoodItem(id) {
-  const { error } = await supabase.from("food_items").update({ active: false, available: false }).eq("id", id);
-  throwIfError(error);
 }
 
 /* ========================================================================

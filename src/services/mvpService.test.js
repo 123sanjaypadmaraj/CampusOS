@@ -27,6 +27,8 @@ import {
   connectLinkedin,
   markLinkedinVerified,
   hasLinkedinIdentity,
+  markMarketplaceListingSold,
+  touchActivity,
 } from "./mvpService";
 
 describe("createFoodOrder", () => {
@@ -311,5 +313,50 @@ describe("startFoodOrderPayment", () => {
     });
 
     await expect(startFoodOrderPayment("order-1")).rejects.toThrow();
+  });
+});
+
+describe("markMarketplaceListingSold", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("passes a null buyer id when none is given (sold off-platform)", async () => {
+    supabase.rpc.mockResolvedValue({ data: { id: "listing-1", status: "sold" }, error: null });
+
+    await markMarketplaceListingSold({ listingId: "listing-1" });
+
+    expect(supabase.rpc).toHaveBeenCalledWith("mark_listing_sold", { p_listing_id: "listing-1", p_buyer_id: null });
+  });
+
+  it("passes the selected buyer id through to the RPC", async () => {
+    supabase.rpc.mockResolvedValue({ data: { id: "listing-1", status: "sold", buyer_id: "buyer-1" }, error: null });
+
+    const result = await markMarketplaceListingSold({ listingId: "listing-1", buyerId: "buyer-1" });
+
+    expect(supabase.rpc).toHaveBeenCalledWith("mark_listing_sold", { p_listing_id: "listing-1", p_buyer_id: "buyer-1" });
+    expect(result.buyer_id).toBe("buyer-1");
+  });
+
+  it("surfaces the RPC's error (e.g. not the seller / already sold)", async () => {
+    supabase.rpc.mockResolvedValue({ data: null, error: new Error("Listing not found or not yours to update") });
+
+    await expect(markMarketplaceListingSold({ listingId: "listing-1" })).rejects.toThrow(/not yours to update/);
+  });
+});
+
+describe("touchActivity", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("calls the touch_activity RPC with no arguments", async () => {
+    supabase.rpc.mockResolvedValue({ data: null, error: null });
+
+    await touchActivity();
+
+    expect(supabase.rpc).toHaveBeenCalledWith("touch_activity");
+  });
+
+  it("swallows RPC errors instead of throwing -- this is a fire-and-forget ping", async () => {
+    supabase.rpc.mockResolvedValue({ data: null, error: { message: "network error" } });
+
+    await expect(touchActivity()).resolves.not.toThrow();
   });
 });

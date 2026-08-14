@@ -923,10 +923,19 @@ export async function createMarketplaceListing({ userId, campusId, title, descri
   return data;
 }
 
-export async function markMarketplaceListingSold({ listingId }) {
-  const { data, error } = await supabase.rpc("mark_listing_sold", { p_listing_id: listingId });
+export async function markMarketplaceListingSold({ listingId, buyerId = null }) {
+  const { data, error } = await supabase.rpc("mark_listing_sold", { p_listing_id: listingId, p_buyer_id: buyerId });
   throwIfError(error);
   return data;
+}
+
+// Records "this user was active today" (supabase/migrations/
+// 20260814005000_analytics.sql) -- powers the admin DAU chart. Fire-and-
+// forget: a failure here should never interrupt the app, so callers just
+// swallow the error (App.jsx calls this once per session load).
+export async function touchActivity() {
+  const { error } = await supabase.rpc("touch_activity");
+  if (error) console.warn("touchActivity warning:", error);
 }
 
 

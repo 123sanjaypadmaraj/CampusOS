@@ -28,6 +28,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
+import { resolveServiceRoleKey } from "./resolveServiceRoleKey.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..", "..", "..");
@@ -41,7 +42,7 @@ function readEnvVar(name) {
 
 const SUPABASE_URL = readEnvVar("VITE_SUPABASE_URL");
 const ANON_KEY = readEnvVar("VITE_SUPABASE_PUBLISHABLE_KEY");
-const SERVICE_ROLE_KEY = fs.readFileSync(path.join(root, ".service_role_key.local"), "utf8").trim();
+const SERVICE_ROLE_KEY = resolveServiceRoleKey(root, SUPABASE_URL);
 const SESSIONS = JSON.parse(fs.readFileSync(path.join(root, "scripts", ".sessions.json"), "utf8"));
 
 export const TEST_ORDER_NOTES = "Live vendor-queue test order";

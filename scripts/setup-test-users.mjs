@@ -3,25 +3,14 @@
 // committed) and signs each in to get a real session, which is then used to
 // seed Playwright browser contexts for live multi-user testing.
 //
-// Usage: node scripts/setup-test-users.mjs
-// Output: ./scripts/.sessions.json (gitignored) -- one real session per user.
+// Usage: node scripts/setup-test-users.mjs                       (staging)
+//        node scripts/setup-test-users.mjs --env=production --yes-production
+// Output: ./scripts/.sessions[.staging].json (gitignored) -- one real session per user.
 
 import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolveTarget } from "./env-target.mjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(__dirname, "..");
-
-function readEnvVar(name) {
-  const contents = fs.readFileSync(path.join(root, ".env"), "utf8");
-  const match = contents.match(new RegExp(`^${name}=(.+)$`, "m"));
-  return match?.[1]?.trim();
-}
-
-const SUPABASE_URL = readEnvVar("VITE_SUPABASE_URL");
-const ANON_KEY = readEnvVar("VITE_SUPABASE_PUBLISHABLE_KEY");
-const SERVICE_ROLE_KEY = fs.readFileSync(path.join(root, ".service_role_key.local"), "utf8").trim();
+const { SUPABASE_URL, ANON_KEY, SERVICE_ROLE_KEY, sessionsFile } = resolveTarget();
 
 const USERS = [
   { email: "e2e.alice@nhce.edu.in", password: "TestPass!2026Alice", name: "Alice Test", usn: "1NH22CS201", course: "Computer Science & Engineering", year: "3rd Year" },
@@ -100,8 +89,8 @@ async function main() {
     console.log(`[signed in] ${u.email} as "${u.name}"`);
   }
 
-  fs.writeFileSync(path.join(__dirname, ".sessions.json"), JSON.stringify(sessions, null, 2));
-  console.log(`\nWrote ${Object.keys(sessions).length} sessions to scripts/.sessions.json`);
+  fs.writeFileSync(sessionsFile, JSON.stringify(sessions, null, 2));
+  console.log(`\nWrote ${Object.keys(sessions).length} sessions to ${sessionsFile}`);
 }
 
 main().catch((err) => {

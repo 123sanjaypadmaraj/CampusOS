@@ -42,19 +42,21 @@ Full detail, including how to get free test-mode keys with no KYC, in
 gone through §3-4 below and are ready for a real launch** — doc §94 is
 explicit that payments/refunds should never be tested against production.
 
-## 3. Set up dev/staging/prod separation (recommended before real students use this)
+## 3. Dev/staging/prod separation -- done
 
-This pass kept the single existing Supabase project (a deliberate scope
-choice for speed). Before real money moves through this:
+As of 2026-08-14 there are two full environments: production
+(`dzjzjlylsfpmymkcavrq`, https://campusos-amber.vercel.app) and staging
+(`qmfmziilgkktwnqoxakk`, https://campusos-staging.vercel.app), same
+migrations/edge functions/RLS on both. Every admin/seed script and the live
+E2E suite target staging by default and refuse to run against production
+without an explicit `--env=production --yes-production`. Full detail,
+including how the two Vercel environments are wired and how to apply a new
+migration to both projects: **`docs/ENVIRONMENTS.md`**.
 
-1. Create two more Supabase projects (staging, production).
-2. Apply the same migrations to each (`supabase db push` per project, or
-   the SQL Editor route).
-3. Give each its own `.env` (`VITE_SUPABASE_URL`/`VITE_SUPABASE_PUBLISHABLE_KEY`)
-   and its own Razorpay key pair (test keys for staging, live keys only for
-   production once you're ready).
-4. Never point production traffic at a project that's ever had test
-   payments/refunds run against it.
+Still open: staging needs its own Razorpay test key pair (separate from
+production's, so test payments stay isolated) -- production's are already
+set, staging's are not yet. Never point production traffic at a project
+that's ever had test payments/refunds run against it.
 
 ## 4. Deploy the frontend
 

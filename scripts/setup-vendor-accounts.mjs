@@ -10,26 +10,19 @@
 // service_role connection directly and toggling the same session-local flag
 // protect_profile_role() checks for.
 //
-// Usage: node scripts/setup-vendor-accounts.mjs
+// Usage: node scripts/setup-vendor-accounts.mjs                       (staging)
+//        node scripts/setup-vendor-accounts.mjs --env=production --yes-production
 // Prints emails/passwords to stdout and writes them to the gitignored
-// scripts/.vendor-credentials.local.json (same pattern as
+// scripts/.vendor-credentials[.staging].local.json (same pattern as
 // scripts/.sessions.json) so they aren't lost after this terminal closes.
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
+import { resolveTarget, runProjectSql } from "./env-target.mjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(__dirname, "..");
-
-function readEnvVar(name) {
-  return fs.readFileSync(path.join(root, ".env"), "utf8").match(new RegExp(`^${name}=(.+)$`, "m"))?.[1]?.trim();
-}
-
-const SUPABASE_URL = readEnvVar("VITE_SUPABASE_URL");
-const SERVICE_ROLE_KEY = fs.readFileSync(path.join(root, ".service_role_key.local"), "utf8").trim();
+const { SUPABASE_URL, SERVICE_ROLE_KEY, projectRef, root, target } = resolveTarget();
+const credentialsFile = target === "production" ? ".vendor-credentials.local.json" : ".vendor-credentials.staging.local.json";
 
 // Domain matches the campus's real email domain (nhce.edu.in) so these read
 // as real institutional shop accounts, not throwaway test addresses.
@@ -104,13 +97,7 @@ async function ensureVendorUser(vendor) {
 }
 
 function runSql(sql) {
-  const sqlPath = path.join(root, "_vendor_setup.sql");
-  fs.writeFileSync(sqlPath, sql);
-  try {
-    execFileSync("npx", ["supabase", "db", "query", "--linked", "--file", sqlPath], { cwd: root, stdio: "inherit", shell: true });
-  } finally {
-    fs.unlinkSync(sqlPath);
-  }
+  runProjectSql(root, projectRef, sql);
 }
 
 async function main() {
@@ -153,7 +140,7 @@ async function main() {
   }));
 
   fs.writeFileSync(
-    path.join(root, "scripts", ".vendor-credentials.local.json"),
+    path.join(root, "scripts", credentialsFile),
     JSON.stringify(credentials, null, 2)
   );
 
@@ -161,7 +148,7 @@ async function main() {
   for (const c of credentials) {
     console.log(`${c.vendor.padEnd(16)} ${c.email.padEnd(28)} ${c.password}`);
   }
-  console.log("\nAlso saved to scripts/.vendor-credentials.local.json (gitignored).");
+  console.log(`\nAlso saved to scripts/${credentialsFile} (gitignored).`);
 }
 
 main().catch((err) => {

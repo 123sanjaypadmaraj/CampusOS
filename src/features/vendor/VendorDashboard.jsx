@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   HiXMark,
   HiPlus,
@@ -11,9 +11,15 @@ import {
   HiTruck,
   HiQrCode,
   HiPrinter,
+  HiMagnifyingGlass,
+  HiPhoto,
+  HiPercentBadge,
+  HiEyeSlash,
+  HiEye,
 } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import * as vendorApi from "./api";
+import VendorAnalytics from "./Analytics";
 
 /* =========================================================
    SHARED SHELL (mirrors App.jsx's ModalShell markup/classes, same
@@ -21,10 +27,10 @@ import * as vendorApi from "./api";
    fragile cross-file import)
 ========================================================= */
 
-function Modal({ title, kicker, onClose, children }) {
+function Modal({ title, kicker, onClose, children, className }) {
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
-      <div className="feature-modal" onMouseDown={(e) => e.stopPropagation()}>
+      <div className={`feature-modal${className ? ` ${className}` : ""}`} onMouseDown={(e) => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose}>
           <HiXMark />
         </button>
@@ -97,6 +103,11 @@ function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
   const [error, setError] = useState("");
   const [canteenModal, setCanteenModal] = useState(false);
   const [itemModal, setItemModal] = useState(null); // {} for new, {...item} to edit
+  const [selected, setSelected] = useState(() => new Set());
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all"); // all | available | unavailable | archived
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const reload = async () => {
     try {
@@ -108,6 +119,7 @@ function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
       ]);
       setItems(i);
       setCategories(cat);
+      setSelected(new Set());
     } catch (err) {
       setError(err.message || "Could not load your menu");
     } finally {
@@ -116,6 +128,56 @@ function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
   };
 
   useEffect(() => { reload(); }, [canteen.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const visibleItems = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return items.filter((item) => {
+      if (q && !item.name.toLowerCase().includes(q)) return false;
+      if (categoryFilter !== "all" && item.category_id !== categoryFilter) return false;
+      if (statusFilter === "archived" && item.active) return false;
+      if (statusFilter === "available" && !(item.active && item.available)) return false;
+      if (statusFilter === "unavailable" && !(item.active && !item.available)) return false;
+      return true;
+    });
+  }, [items, search, categoryFilter, statusFilter]);
+
+  const toggleSelect = (id) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const allVisibleSelected = visibleItems.length > 0 && visibleItems.every((i) => selected.has(i.id));
+  const toggleSelectAllVisible = () => {
+    setSelected((prev) => {
+      if (allVisibleSelected) {
+        const next = new Set(prev);
+        visibleItems.forEach((i) => next.delete(i.id));
+        return next;
+      }
+      const next = new Set(prev);
+      visibleItems.forEach((i) => next.add(i.id));
+      return next;
+    });
+  };
+
+  const selectedIds = [...selected];
+  const selectedItems = items.filter((i) => selected.has(i.id));
+
+  const runBulk = async (fn, successMsg) => {
+    try {
+      setBulkBusy(true);
+      await fn();
+      notify(successMsg);
+      await reload();
+    } catch (err) {
+      notify(err.message || "Bulk action failed");
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   return (
     <section className="page-section admin-cms">
@@ -140,9 +202,12 @@ function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
       <div className="socialize-filter-row">
         <button className={tab === "orders" ? "chip active" : "chip"} onClick={() => setTab("orders")}>Orders</button>
         <button className={tab === "menu" ? "chip active" : "chip"} onClick={() => setTab("menu")}>Menu</button>
+        <button className={tab === "analytics" ? "chip active" : "chip"} onClick={() => setTab("analytics")}>Analytics</button>
       </div>
 
       {tab === "orders" && <OrderQueue canteen={canteen} notify={notify} />}
+
+      {tab === "analytics" && <VendorAnalytics />}
 
       {tab === "menu" && (
         <>
@@ -158,36 +223,86 @@ function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
                 </button>
               </div>
 
-              <div className="resource-list">
+              {items.length > 0 && (
+                <div className="vendor-menu-toolbar">
+                  <label className="vendor-search-box">
+                    <HiMagnifyingGlass />
+                    <input
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder="Search items…"
+                      aria-label="Search menu items"
+                    />
+                  </label>
+                  <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} aria-label="Filter by category">
+                    <option value="all">All categories</option>
+                    {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                  <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filter by status">
+                    <option value="all">All statuses</option>
+                    <option value="available">Available</option>
+                    <option value="unavailable">Unavailable</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700 }}>
+                    <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} />
+                    Select all ({visibleItems.length})
+                  </label>
+                </div>
+              )}
+
+              {selected.size > 0 && (
+                <BulkActionsBar
+                  count={selected.size}
+                  categories={categories}
+                  busy={bulkBusy}
+                  onClear={() => setSelected(new Set())}
+                  onAvailable={(available) => runBulk(
+                    () => vendorApi.bulkSetAvailability(selectedIds, available),
+                    `${selectedIds.length} item(s) marked ${available ? "available" : "unavailable"}`
+                  )}
+                  onArchive={() => {
+                    if (!window.confirm(`Archive ${selectedIds.length} item(s)? They'll be hidden from students but past orders stay intact.`)) return;
+                    runBulk(() => vendorApi.bulkArchiveFoodItems(selectedIds), `${selectedIds.length} item(s) archived`);
+                  }}
+                  onCategory={(categoryId) => runBulk(
+                    () => vendorApi.bulkSetCategory(selectedIds, categoryId),
+                    `${selectedIds.length} item(s) moved`
+                  )}
+                  onPriceAdjust={(opts) => runBulk(
+                    () => vendorApi.bulkAdjustPrice(selectedItems, opts),
+                    `Price updated on ${selectedIds.length} item(s)`
+                  )}
+                />
+              )}
+
+              <div className="vendor-item-grid">
                 {items.length === 0 && <EmptyState title="No items yet" text="Add your first menu item to get started." />}
-                {items.map((item) => (
-                  <article className="resource-row" key={item.id}>
-                    <div>
-                      <b>{item.name}</b>
-                      <small>
-                        ₹{item.price} · {item.food_categories?.name || "Uncategorised"} ·{" "}
-                        {item.is_vegetarian ? "Veg" : "Non-veg"} ·{" "}
-                        {item.active ? (item.available ? "Available" : "Unavailable") : "Archived"}
-                      </small>
-                    </div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button onClick={() => setItemModal(item)}><HiPencilSquare /> Edit</button>
-                      <button
-                        onClick={async () => {
-                          if (!window.confirm(`Delete "${item.name}"? Items with past orders are archived instead of deleted.`)) return;
-                          try {
-                            const result = await vendorApi.deleteFoodItem(item.id);
-                            notify(result.hardDeleted ? "Item deleted" : "Item has order history — archived instead");
-                            reload();
-                          } catch (err) {
-                            notify(err.message || "Could not delete item");
-                          }
-                        }}
-                      >
-                        {item.active ? <><HiTrash /> Delete</> : <><HiArchiveBoxArrowDown /> Archived</>}
-                      </button>
-                    </div>
-                  </article>
+                {items.length > 0 && visibleItems.length === 0 && (
+                  <EmptyState title="No items match" text="Try clearing your search or filters." />
+                )}
+                {visibleItems.map((item) => (
+                  <ItemCard
+                    key={item.id}
+                    item={item}
+                    selected={selected.has(item.id)}
+                    onToggleSelect={() => toggleSelect(item.id)}
+                    onEdit={() => setItemModal(item)}
+                    onDelete={async () => {
+                      if (!window.confirm(`Delete "${item.name}"? Items with past orders are archived instead of deleted.`)) return;
+                      try {
+                        const result = await vendorApi.deleteFoodItem(item.id);
+                        notify(result.hardDeleted ? "Item deleted" : "Item has order history — archived instead");
+                        reload();
+                      } catch (err) {
+                        notify(err.message || "Could not delete item");
+                      }
+                    }}
+                    onToggleAvailable={() => runBulk(
+                      () => vendorApi.bulkSetAvailability([item.id], !item.available),
+                      item.available ? "Marked unavailable" : "Marked available"
+                    )}
+                  />
                 ))}
               </div>
             </>
@@ -484,47 +599,215 @@ function CanteenDetailsForm({ canteen, onClose, onSaved, notify }) {
   );
 }
 
+/* =========================================================
+   MENU ITEM CARD (grid view, doc §16 bulk menu & inventory)
+========================================================= */
+
+function statusLabel(item) {
+  if (!item.active) return { text: "Archived", cls: "archived" };
+  return item.available ? { text: "Available", cls: "available" } : { text: "Unavailable", cls: "unavailable" };
+}
+
+function ItemCard({ item, selected, onToggleSelect, onEdit, onDelete, onToggleAvailable }) {
+  const status = statusLabel(item);
+  return (
+    <article className={`vendor-item-card${selected ? " selected" : ""}${!item.active ? " archived" : ""}`}>
+      <input
+        type="checkbox"
+        className="vendor-item-select"
+        checked={selected}
+        onChange={onToggleSelect}
+        aria-label={`Select ${item.name}`}
+      />
+      <div className="vendor-item-thumb">
+        {item.image_url ? <img src={item.image_url} alt="" /> : <HiPhoto />}
+      </div>
+      <div className="vendor-item-title-row">
+        <b>{item.name}</b>
+        <span className="vendor-item-price">₹{item.price}</span>
+      </div>
+      <div className="vendor-item-meta">
+        <span className={`veg-dot${item.is_vegetarian ? "" : " non-veg"}`} />
+        {item.food_categories?.name || "Uncategorised"}
+        <span className={`status-pill ${status.cls}`}>{status.text}</span>
+      </div>
+      <div className="vendor-item-actions">
+        <button onClick={onEdit}><HiPencilSquare /> Edit</button>
+        {item.active && (
+          <button onClick={onToggleAvailable} title={item.available ? "Mark unavailable" : "Mark available"}>
+            {item.available ? <HiEyeSlash /> : <HiEye />}
+          </button>
+        )}
+        <button onClick={onDelete}>
+          {item.active ? <><HiTrash /> Delete</> : <><HiArchiveBoxArrowDown /> Archived</>}
+        </button>
+      </div>
+    </article>
+  );
+}
+
+/* =========================================================
+   BULK ACTIONS BAR (doc §16 bulk menu & inventory)
+========================================================= */
+
+function BulkActionsBar({ count, categories, busy, onClear, onAvailable, onArchive, onCategory, onPriceAdjust }) {
+  const [priceMode, setPriceMode] = useState("percent"); // 'percent' | 'amount'
+  const [priceDirection, setPriceDirection] = useState("1"); // '1' increase, '-1' decrease
+  const [priceValue, setPriceValue] = useState("");
+
+  return (
+    <div className="bulk-action-bar">
+      <strong>{count} selected</strong>
+      <div className="bulk-actions">
+        <button disabled={busy} onClick={() => onAvailable(true)}><HiEye /> Mark available</button>
+        <button disabled={busy} onClick={() => onAvailable(false)}><HiEyeSlash /> Mark unavailable</button>
+
+        <select
+          disabled={busy}
+          defaultValue="__placeholder__"
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === "__placeholder__") return;
+            onCategory(v === "__none__" ? null : v);
+            e.target.value = "__placeholder__";
+          }}
+          aria-label="Move selected items to category"
+        >
+          <option value="__placeholder__" disabled>Move to category…</option>
+          <option value="__none__">Uncategorised</option>
+          {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+
+        <div className="bulk-price-form">
+          <HiPercentBadge />
+          <select value={priceDirection} onChange={(e) => setPriceDirection(e.target.value)} aria-label="Increase or decrease price">
+            <option value="1">Increase</option>
+            <option value="-1">Decrease</option>
+          </select>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={priceValue}
+            onChange={(e) => setPriceValue(e.target.value)}
+            placeholder="0"
+            aria-label="Price adjustment value"
+          />
+          <select value={priceMode} onChange={(e) => setPriceMode(e.target.value)} aria-label="Adjust by percent or amount">
+            <option value="percent">%</option>
+            <option value="amount">₹</option>
+          </select>
+          <button
+            disabled={busy || !priceValue || Number(priceValue) <= 0}
+            onClick={() => { onPriceAdjust({ mode: priceMode, value: priceValue, direction: Number(priceDirection) }); setPriceValue(""); }}
+          >
+            Apply
+          </button>
+        </div>
+
+        <button disabled={busy} onClick={onArchive}><HiArchiveBoxArrowDown /> Archive</button>
+        <button disabled={busy} onClick={onClear}><HiXMark /> Clear</button>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   TOGGLE SWITCH (better UI for the item editor's on/off fields)
+========================================================= */
+
+function ToggleSwitch({ checked, onChange, label }) {
+  return (
+    <div className="toggle-row">
+      <span>{label}</span>
+      <label className="toggle-switch">
+        <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+        <span />
+      </label>
+    </div>
+  );
+}
+
+/* =========================================================
+   MENU ITEM EDITOR -- redesigned: sectioned form + live preview
+========================================================= */
+
 function FoodItemForm({ item, canteenId, categories, onClose, onSaved, notify }) {
   const [form, setForm] = useState({
     category_id: item.category_id || "",
     name: item.name || "", description: item.description || "", price: item.price ?? 0,
+    image_url: item.image_url || "", preparation_time_min: item.preparation_time_min ?? 10,
     is_vegetarian: item.is_vegetarian !== false, available: item.available !== false,
     active: item.active !== false, featured: Boolean(item.featured),
   });
   const [saving, setSaving] = useState(false);
   const change = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const categoryName = categories.find((c) => c.id === form.category_id)?.name;
 
   return (
-    <Modal kicker="MENU" title={item.id ? "Edit menu item" : "New menu item"} onClose={onClose}>
-      <label>Category
-        <select value={form.category_id} onChange={(e) => change("category_id", e.target.value)}>
-          <option value="">Uncategorised</option>
-          {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-      </label>
-      <label>Name<input value={form.name} onChange={(e) => change("name", e.target.value)} /></label>
-      <label>Description<textarea value={form.description} onChange={(e) => change("description", e.target.value)} /></label>
-      <label>Price (₹)<input type="number" min="0" step="0.01" value={form.price} onChange={(e) => change("price", e.target.value)} /></label>
-      <div className="form-grid">
-        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input type="checkbox" checked={form.is_vegetarian} onChange={(e) => change("is_vegetarian", e.target.checked)} /> Vegetarian
-        </label>
-        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input type="checkbox" checked={form.available} onChange={(e) => change("available", e.target.checked)} /> Available now
-        </label>
-        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input type="checkbox" checked={form.active} onChange={(e) => change("active", e.target.checked)} /> Active (on menu)
-        </label>
-        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input type="checkbox" checked={form.featured} onChange={(e) => change("featured", e.target.checked)} /> Featured
-        </label>
+    <Modal kicker="MENU" title={item.id ? "Edit menu item" : "New menu item"} onClose={onClose} className="item-form-modal">
+      <div className="item-form-layout">
+        <div>
+          <div className="item-form-section-label">Basics</div>
+          <label>Name<input value={form.name} onChange={(e) => change("name", e.target.value)} autoFocus /></label>
+          <label>Category
+            <select value={form.category_id} onChange={(e) => change("category_id", e.target.value)}>
+              <option value="">Uncategorised</option>
+              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </label>
+          <label>Description<textarea value={form.description} onChange={(e) => change("description", e.target.value)} placeholder="What's in it, how it's made…" /></label>
+          <label>Photo URL<input value={form.image_url} onChange={(e) => change("image_url", e.target.value)} placeholder="https://…" /></label>
+
+          <div className="item-form-section-label">Pricing &amp; prep</div>
+          <div className="form-grid">
+            <label>Price
+              <div className="price-input-wrap">
+                <span>₹</span>
+                <input type="number" min="0" step="0.01" value={form.price} onChange={(e) => change("price", e.target.value)} />
+              </div>
+            </label>
+            <label>Prep time (min)<input type="number" min="1" value={form.preparation_time_min} onChange={(e) => change("preparation_time_min", e.target.value)} /></label>
+          </div>
+
+          <div className="item-form-section-label">Visibility</div>
+          <ToggleSwitch label="Vegetarian" checked={form.is_vegetarian} onChange={(v) => change("is_vegetarian", v)} />
+          <ToggleSwitch label="Available now" checked={form.available} onChange={(v) => change("available", v)} />
+          <ToggleSwitch label="Active (on menu)" checked={form.active} onChange={(v) => change("active", v)} />
+          <ToggleSwitch label="Featured" checked={form.featured} onChange={(v) => change("featured", v)} />
+
+          <button
+            className="primary wide"
+            style={{ marginTop: 20 }}
+            disabled={saving || !form.name.trim() || Number(form.price) < 0}
+            onClick={async () => {
+              try { setSaving(true); await vendorApi.upsertFoodItem({ ...item, ...form, canteen_id: canteenId }); notify("Menu item saved"); onSaved(); }
+              catch (err) { notify(err.message || "Could not save item"); } finally { setSaving(false); }
+            }}
+          >
+            {saving ? "Saving…" : "Save item"}
+          </button>
+        </div>
+
+        <div className="item-form-preview">
+          <div className="item-form-section-label">Preview</div>
+          <div className="item-preview-card">
+            <div className="item-preview-thumb">
+              {form.image_url ? <img src={form.image_url} alt="" /> : <HiPhoto />}
+            </div>
+            <div className="vendor-item-title-row">
+              <b>{form.name || "Item name"}</b>
+              <span className="vendor-item-price">₹{form.price || 0}</span>
+            </div>
+            <div className="vendor-item-meta" style={{ marginTop: 6 }}>
+              <span className={`veg-dot${form.is_vegetarian ? "" : " non-veg"}`} />
+              {categoryName || "Uncategorised"}
+            </div>
+            <small>{form.description || "No description yet."}</small>
+            <small>{form.preparation_time_min || 10} min prep · {form.available ? "Available" : "Unavailable"} to students</small>
+          </div>
+        </div>
       </div>
-      <button className="primary wide" disabled={saving || !form.name.trim() || Number(form.price) < 0} onClick={async () => {
-        try { setSaving(true); await vendorApi.upsertFoodItem({ ...item, ...form, canteen_id: canteenId }); notify("Menu item saved"); onSaved(); }
-        catch (err) { notify(err.message || "Could not save item"); } finally { setSaving(false); }
-      }}>
-        {saving ? "Saving…" : "Save item"}
-      </button>
     </Modal>
   );
 }
@@ -551,9 +834,12 @@ function PrintPricingManager({ rates, notify, onChanged }) {
       <div className="socialize-filter-row">
         <button className={tab === "jobs" ? "chip active" : "chip"} onClick={() => setTab("jobs")}>Print Queue</button>
         <button className={tab === "pricing" ? "chip active" : "chip"} onClick={() => setTab("pricing")}>Pricing</button>
+        <button className={tab === "analytics" ? "chip active" : "chip"} onClick={() => setTab("analytics")}>Analytics</button>
       </div>
 
       {tab === "jobs" && <PrintJobQueue notify={notify} />}
+
+      {tab === "analytics" && <VendorAnalytics />}
 
       {tab === "pricing" && (
         <div className="resource-list">

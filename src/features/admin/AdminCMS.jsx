@@ -3,7 +3,6 @@ import {
   HiXMark,
   HiPlus,
   HiPencilSquare,
-  HiArchiveBoxArrowDown,
   HiMegaphone,
   HiTrash,
   HiCalendarDays,
@@ -14,6 +13,7 @@ import {
 } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import * as adminApi from "./api";
+import AdminAnalytics from "./Analytics";
 
 /* =========================================================
    SHARED SHELL (mirrors App.jsx's ModalShell markup/classes so
@@ -36,7 +36,7 @@ function Modal({ title, kicker, onClose, children }) {
 }
 
 const TABS = [
-  ["food", "Food & Canteens"],
+  ["analytics", "Analytics"],
   ["announcements", "Announcements"],
   ["events", "Events & Clubs"],
   ["verifications", "Student Verifications"],
@@ -46,7 +46,7 @@ const TABS = [
 ];
 
 export default function AdminCMS({ notify, campusId, authUser }) {
-  const [tab, setTab] = useState("food");
+  const [tab, setTab] = useState("announcements");
 
   return (
     <section className="page-section admin-cms">
@@ -54,7 +54,7 @@ export default function AdminCMS({ notify, campusId, authUser }) {
         <div>
           <span className="section-kicker">CONTROL CENTER</span>
           <h1>Admin CMS</h1>
-          <p>Manage the food menu, announcements, events and clubs for your campus.</p>
+          <p>Manage announcements, events and clubs for your campus. Canteen menus are managed by each canteen&rsquo;s own vendor login.</p>
         </div>
       </div>
 
@@ -70,7 +70,7 @@ export default function AdminCMS({ notify, campusId, authUser }) {
         ))}
       </div>
 
-      {tab === "food" && <FoodTab notify={notify} campusId={campusId} />}
+      {tab === "analytics" && <AdminAnalytics campusId={campusId} />}
       {tab === "announcements" && <AnnouncementsTab notify={notify} campusId={campusId} />}
       {tab === "events" && <EventsClubsTab notify={notify} campusId={campusId} authUser={authUser} />}
       {tab === "verifications" && <VerificationsTab notify={notify} campusId={campusId} authUser={authUser} />}
@@ -487,224 +487,14 @@ function VerificationsTab({ notify, campusId, authUser }) {
   );
 }
 
-/* =========================================================
-   FOOD & CANTEENS
-========================================================= */
-
-function FoodTab({ notify, campusId }) {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [canteens, setCanteens] = useState([]);
-  const [items, setItems] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [canteenModal, setCanteenModal] = useState(null); // {} for new, {...canteen} to edit
-  const [itemModal, setItemModal] = useState(null);
-  const [selectedCanteen, setSelectedCanteen] = useState("all");
-
-  const reload = async () => {
-    try {
-      setLoading(true);
-      setError("");
-      const [c, i, cat] = await Promise.all([
-        adminApi.listCanteensAdmin(campusId),
-        adminApi.listFoodItemsAdmin(),
-        adminApi.listFoodCategories(),
-      ]);
-      setCanteens(c);
-      setItems(i);
-      setCategories(cat);
-    } catch (err) {
-      setError(err.message || "Could not load food data");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { reload(); }, [campusId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  if (loading) return <LoadingState label="Loading food menu…" />;
-  if (error) return <ErrorState text={error} onRetry={reload} />;
-
-  const visibleItems = selectedCanteen === "all" ? items : items.filter((i) => i.canteen_id === selectedCanteen);
-
-  return (
-    <div className="admin-panel">
-      <div className="section-head">
-        <h2>Canteens</h2>
-        <button className="primary" onClick={() => setCanteenModal({})}>
-          <HiPlus /> New canteen
-        </button>
-      </div>
-
-      <div className="resource-list">
-        {canteens.length === 0 && <EmptyState title="No canteens yet" />}
-        {canteens.map((c) => (
-          <article className="resource-row" key={c.id}>
-            <div>
-              <b>{c.name}</b>
-              <small>{c.subtitle} · {c.status} · {c.active ? "Active" : "Archived"}</small>
-            </div>
-            <button onClick={() => setCanteenModal(c)}><HiPencilSquare /> Edit</button>
-          </article>
-        ))}
-      </div>
-
-      <div className="section-head" style={{ marginTop: 32 }}>
-        <h2>Menu items</h2>
-        <div style={{ display: "flex", gap: 10 }}>
-          <select value={selectedCanteen} onChange={(e) => setSelectedCanteen(e.target.value)}>
-            <option value="all">All canteens</option>
-            {canteens.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <button className="primary" onClick={() => setItemModal({ canteen_id: canteens[0]?.id })} disabled={!canteens.length}>
-            <HiPlus /> New item
-          </button>
-        </div>
-      </div>
-
-      <div className="resource-list">
-        {visibleItems.length === 0 && <EmptyState title="No items" text="Add a canteen first, then add menu items to it." />}
-        {visibleItems.map((item) => (
-          <article className="resource-row" key={item.id}>
-            <div>
-              <b>{item.name}</b>
-              <small>
-                ₹{item.price} · {item.food_categories?.name || "Uncategorised"} ·{" "}
-                {item.is_vegetarian ? "Veg" : "Non-veg"} ·{" "}
-                {item.active ? (item.available ? "Available" : "Unavailable") : "Archived"}
-              </small>
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => setItemModal(item)}><HiPencilSquare /> Edit</button>
-              {item.active && (
-                <button onClick={async () => {
-                  try { await adminApi.archiveFoodItem(item.id); notify("Item archived"); reload(); }
-                  catch (err) { notify(err.message || "Could not archive item"); }
-                }}>
-                  <HiArchiveBoxArrowDown /> Archive
-                </button>
-              )}
-            </div>
-          </article>
-        ))}
-      </div>
-
-      {canteenModal && (
-        <CanteenForm
-          canteen={canteenModal}
-          onClose={() => setCanteenModal(null)}
-          onSaved={() => { setCanteenModal(null); reload(); }}
-          notify={notify}
-          campusId={campusId}
-        />
-      )}
-
-      {itemModal && (
-        <FoodItemForm
-          item={itemModal}
-          canteens={canteens}
-          categories={categories}
-          onClose={() => setItemModal(null)}
-          onSaved={() => { setItemModal(null); reload(); }}
-          notify={notify}
-        />
-      )}
-    </div>
-  );
-}
-
-function CanteenForm({ canteen, campusId, onClose, onSaved, notify }) {
-  const [form, setForm] = useState({
-    name: canteen.name || "", subtitle: canteen.subtitle || "",
-    status: canteen.status || "Open", eta_min: canteen.eta_min || 8, eta_max: canteen.eta_max || 15,
-    color: canteen.color || "green", active: canteen.active !== false,
-  });
-  const [saving, setSaving] = useState(false);
-  const change = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-
-  return (
-    <Modal kicker="FOOD" title={canteen.id ? "Edit canteen" : "New canteen"} onClose={onClose}>
-      <label>Name<input value={form.name} onChange={(e) => change("name", e.target.value)} /></label>
-      <label>Subtitle<input value={form.subtitle} onChange={(e) => change("subtitle", e.target.value)} /></label>
-      <div className="form-grid">
-        <label>Status
-          <select value={form.status} onChange={(e) => change("status", e.target.value)}>
-            <option>Open</option><option>Busy</option><option>Closed</option>
-          </select>
-        </label>
-        <label>Queue color
-          <select value={form.color} onChange={(e) => change("color", e.target.value)}>
-            <option value="green">Quiet (green)</option>
-            <option value="moderate">Moderate</option>
-            <option value="busy">Busy</option>
-          </select>
-        </label>
-        <label>ETA min<input type="number" min="1" value={form.eta_min} onChange={(e) => change("eta_min", e.target.value)} /></label>
-        <label>ETA max<input type="number" min="1" value={form.eta_max} onChange={(e) => change("eta_max", e.target.value)} /></label>
-      </div>
-      <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <input type="checkbox" checked={form.active} onChange={(e) => change("active", e.target.checked)} /> Active
-      </label>
-      <button className="primary wide" disabled={saving || !form.name.trim()} onClick={async () => {
-        try { setSaving(true); await adminApi.upsertCanteen(campusId, { ...canteen, ...form }); notify("Canteen saved"); onSaved(); }
-        catch (err) { notify(err.message || "Could not save canteen"); } finally { setSaving(false); }
-      }}>
-        {saving ? "Saving…" : "Save canteen"}
-      </button>
-    </Modal>
-  );
-}
-
-function FoodItemForm({ item, canteens, categories, onClose, onSaved, notify }) {
-  const [form, setForm] = useState({
-    canteen_id: item.canteen_id || canteens[0]?.id || "",
-    category_id: item.category_id || "",
-    name: item.name || "", description: item.description || "", price: item.price || 0,
-    is_vegetarian: item.is_vegetarian !== false, available: item.available !== false,
-    active: item.active !== false, featured: Boolean(item.featured),
-  });
-  const [saving, setSaving] = useState(false);
-  const change = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-
-  return (
-    <Modal kicker="FOOD" title={item.id ? "Edit menu item" : "New menu item"} onClose={onClose}>
-      <label>Canteen
-        <select value={form.canteen_id} onChange={(e) => change("canteen_id", e.target.value)}>
-          {canteens.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-      </label>
-      <label>Category
-        <select value={form.category_id} onChange={(e) => change("category_id", e.target.value)}>
-          <option value="">Uncategorised</option>
-          {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-      </label>
-      <label>Name<input value={form.name} onChange={(e) => change("name", e.target.value)} /></label>
-      <label>Description<textarea value={form.description} onChange={(e) => change("description", e.target.value)} /></label>
-      <label>Price (₹)<input type="number" min="0" value={form.price} onChange={(e) => change("price", e.target.value)} /></label>
-      <div className="form-grid">
-        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input type="checkbox" checked={form.is_vegetarian} onChange={(e) => change("is_vegetarian", e.target.checked)} /> Vegetarian
-        </label>
-        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input type="checkbox" checked={form.available} onChange={(e) => change("available", e.target.checked)} /> Available now
-        </label>
-        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input type="checkbox" checked={form.active} onChange={(e) => change("active", e.target.checked)} /> Active (on menu)
-        </label>
-        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input type="checkbox" checked={form.featured} onChange={(e) => change("featured", e.target.checked)} /> Featured
-        </label>
-      </div>
-      <button className="primary wide" disabled={saving || !form.name.trim() || !form.canteen_id} onClick={async () => {
-        try { setSaving(true); await adminApi.upsertFoodItem({ ...item, ...form }); notify("Menu item saved"); onSaved(); }
-        catch (err) { notify(err.message || "Could not save item"); } finally { setSaving(false); }
-      }}>
-        {saving ? "Saving…" : "Save item"}
-      </button>
-    </Modal>
-  );
-}
+// Food & Canteens management used to live here as its own admin tab, gated
+// only by 'food.menu.write' back when only admins held that permission. Now
+// every canteen has its own vendor login (VendorDashboard.jsx) with real
+// bulk menu tools, scoped by canteens.owner_id RLS -- see
+// supabase/migrations/20260814002200_vendor_dashboard.sql. Keeping a second,
+// parallel "edit any canteen" surface here was redundant once real
+// per-canteen accounts existed, so it was removed; canteen menu editing now
+// only happens via that canteen's own vendor account.
 
 /* =========================================================
    ANNOUNCEMENTS

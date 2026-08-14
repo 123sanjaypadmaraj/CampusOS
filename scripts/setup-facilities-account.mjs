@@ -5,24 +5,17 @@
 // change bypasses admin_set_user_role()'s own permission check by using
 // the service_role connection directly.
 //
-// Usage: node scripts/setup-facilities-account.mjs
+// Usage: node scripts/setup-facilities-account.mjs                       (staging)
+//        node scripts/setup-facilities-account.mjs --env=production --yes-production
 // Prints the email/password to stdout and writes them to the gitignored
-// scripts/.facilities-credentials.local.json.
+// scripts/.facilities-credentials[.staging].local.json.
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
+import { resolveTarget, runProjectSql } from "./env-target.mjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(__dirname, "..");
-
-function readEnvVar(name) {
-  return fs.readFileSync(path.join(root, ".env"), "utf8").match(new RegExp(`^${name}=(.+)$`, "m"))?.[1]?.trim();
-}
-
-const SUPABASE_URL = readEnvVar("VITE_SUPABASE_URL");
-const SERVICE_ROLE_KEY = fs.readFileSync(path.join(root, ".service_role_key.local"), "utf8").trim();
+const { SUPABASE_URL, SERVICE_ROLE_KEY, projectRef, root, target } = resolveTarget();
+const credentialsFile = target === "production" ? ".facilities-credentials.local.json" : ".facilities-credentials.staging.local.json";
 
 const ACCOUNT = { email: "facilities.staff@nhce.edu.in", label: "Facilities Staff", password: "FacilitiesTest@2026" };
 
@@ -69,23 +62,18 @@ async function main() {
     body: JSON.stringify({ name: ACCOUNT.label }),
   });
 
-  const sqlPath = path.join(root, "_facilities_setup.sql");
-  fs.writeFileSync(
-    sqlPath,
+  runProjectSql(
+    root,
+    projectRef,
     `do $$ begin
       perform set_config('campusos.allow_role_change', 'true', true);
       update public.profiles set role = 'facilities_staff' where id = '${user.id}';
     end $$;`
   );
-  try {
-    execFileSync("npx", ["supabase", "db", "query", "--linked", "--file", sqlPath], { cwd: root, stdio: "inherit", shell: true });
-  } finally {
-    fs.unlinkSync(sqlPath);
-  }
   console.log("[done] promoted to role='facilities_staff'");
 
   fs.writeFileSync(
-    path.join(root, "scripts", ".facilities-credentials.local.json"),
+    path.join(root, "scripts", credentialsFile),
     JSON.stringify({ ...ACCOUNT, userId: user.id }, null, 2)
   );
   console.log(`email: ${ACCOUNT.email}\npassword: ${ACCOUNT.password}`);

@@ -62,12 +62,11 @@ import {
   createLostFoundItem,
   claimLostFoundItem,
   getMarketplaceListings,
-  createMarketplaceListing,
-  markMarketplaceListingSold,
   reportContent,
   getMyVerification,
   submitStudentVerification,
   submitOrgRequest,
+  touchActivity,
 } from "./services/mvpService";
 import { openRazorpayCheckout } from "./features/payments/razorpay";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
@@ -75,6 +74,23 @@ import { LoadingState, EmptyState, ErrorState, OfflineBanner } from "./component
 import AdminCMS from "./features/admin/AdminCMS";
 import VendorDashboard from "./features/vendor/VendorDashboard";
 import FacilitiesDashboard from "./features/facilities/FacilitiesDashboard";
+import ClubManage from "./features/clubs/ClubManage";
+import * as clubApi from "./features/clubs/api";
+import Marketplace from "./features/marketplace/Marketplace";
+import {
+  startConversation,
+  sendMessage,
+  markConversationRead,
+  listConversations,
+  getUnreadMessageCount,
+  getConversationMessages,
+  subscribeToConversationList,
+  subscribeToConversationMessages,
+} from "./services/messagingService";
+import { globalSearch, SEARCH_ENTITY_DESTINATIONS, SEARCH_ENTITY_LABELS } from "./services/searchService";
+import { mintCampusPass } from "./services/campusPassService";
+import { subscribeToPush, unsubscribeFromPush, getPushSubscriptionStatus, isPushSupported } from "./services/pushService";
+import QRCode from "qrcode";
 
 import {
   HiHome,
@@ -156,6 +172,7 @@ const navItems = [
   ["events", <HiCalendarDays />, "Events"],
   ["services", <HiWrenchScrewdriver />, "Services"],
   ["socialize", <HiUserGroup />, "Connect"],
+  ["messages", <HiChatBubbleLeftRight />, "Messages"],
   ["profile", <HiUserCircle />, "Profile"],
 ];
 /* eslint-enable react/jsx-key */
@@ -1052,6 +1069,9 @@ function App() {
   const [lostItems, setLostItems] = useState([]);
   const [marketListings, setMarketListings] = useState([]);
   const [verification, setVerification] = useState(null);
+  const [unreadMessageCount, setUnreadMessageCount] = useState(0);
+  const [openConversationId, setOpenConversationId] = useState(null);
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
 
   const toastTimer = useRef(null);
 
@@ -1100,6 +1120,14 @@ function App() {
     setActive(key);
     setModal(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  // Shared by "Message seller" (Marketplace), "Message" (Connect/People) and
+  // a tapped message notification -- all three just need "open the
+  // Messages tab with this specific thread already selected."
+  const goToConversation = (conversationId) => {
+    setOpenConversationId(conversationId);
+    go("messages");
   };
 
   const toggleTheme = () => {
@@ -1477,6 +1505,11 @@ function App() {
 
             setAuthUser(currentUser);
             setProfile(currentProfile);
+            // Fire-and-forget DAU ping (see mvpService.js) -- wrapped so a
+            // failure here (e.g. an incomplete mock in tests) can never
+            // abort the rest of this init flow.
+            try { touchActivity(); } catch (pingError) { console.warn("touchActivity warning:", pingError); }
+
             setUser({
               name:
                 currentProfile?.name ||
@@ -1624,6 +1657,8 @@ function App() {
                     ? new Date(item.created_at).toLocaleString()
                     : "Recently",
                   unread: !item.read,
+                  actionType: item.action_type || null,
+                  actionId: item.action_id || null,
                 }))
               );
             }
@@ -1644,6 +1679,19 @@ function App() {
         unsubscribeOrders?.();
       };
     }, [authUser?.id]);
+
+    const reloadUnreadMessages = () => {
+      if (!authUser?.id) { setUnreadMessageCount(0); return; }
+      getUnreadMessageCount().then(setUnreadMessageCount).catch(() => {});
+    };
+
+    useEffect(() => {
+      reloadUnreadMessages();
+      if (!authUser?.id) return;
+
+      const unsubMessages = subscribeToConversationList(() => reloadUnreadMessages());
+      return () => unsubMessages?.();
+    }, [authUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const reloadVerification = () => {
       if (!profile?.id) { setVerification(null); return; }
@@ -1787,7 +1835,27 @@ function App() {
     }
 
     if (active === "socialize") {
-      return <Socialize notify={notify} people={people} profile={profile} campusId={campusId} />;
+      return <Socialize notify={notify} people={people} profile={profile} campusId={campusId} authUser={authUser} openLogin={() => setLoginOpen(true)} onOpenConversation={goToConversation} />;
+    }
+
+    if (active === "messages") {
+      if (!authUser) {
+        return (
+          <ErrorState
+            title="Sign in to view messages"
+            text="Messages are only available to signed-in students."
+          />
+        );
+      }
+      return (
+        <Messages
+          notify={notify}
+          authUser={authUser}
+          openConversationId={openConversationId}
+          onConversationOpened={() => setOpenConversationId(null)}
+          onUnreadChange={setUnreadMessageCount}
+        />
+      );
     }
 
     if (active === "profile") {
@@ -1819,7 +1887,7 @@ function App() {
 
     if (active === "people") {
       return (
-        <People notify={notify} people={people} openModal={setModal} />
+        <People notify={notify} people={people} openModal={setModal} authUser={authUser} openLogin={() => setLoginOpen(true)} onOpenConversation={goToConversation} />
       );
     }
 
@@ -1909,6 +1977,8 @@ function App() {
           notifications={notifications}
           markRead={markNotificationsRead}
           notify={notify}
+          onOpenConversation={goToConversation}
+          authUser={authUser}
         />
       );
     }
@@ -1945,6 +2015,7 @@ function App() {
           onRequestsChange={setServiceRequests}
           onLostItemsChange={setLostItems}
           onMarketListingsChange={setMarketListings}
+          onOpenConversation={goToConversation}
         />
       );
     }
@@ -1978,6 +2049,17 @@ function App() {
         </div>
 
         <div className="top-actions">
+          {authUser && (
+            <button
+              className="icon-btn"
+              onClick={() => setGlobalSearchOpen(true)}
+              aria-label="Search CampusOS"
+              data-testid="global-search-button"
+            >
+              <HiMagnifyingGlass />
+            </button>
+          )}
+
           <button
             className="icon-btn"
             onClick={() => {
@@ -2039,7 +2121,14 @@ function App() {
             onClick={() => go(key)}
             data-testid={`nav-${key}-button`}
           >
-            <span>{icon}</span>
+            <span style={key === "messages" ? { position: "relative" } : undefined}>
+              {icon}
+              {key === "messages" && unreadMessageCount > 0 && (
+                <i style={{ position: "absolute", top: -6, right: -10, width: 16, height: 16, borderRadius: "50%", fontSize: 9, background: "var(--purple)", color: "#fff", fontStyle: "normal", display: "grid", placeItems: "center" }}>
+                  {unreadMessageCount > 9 ? "9+" : unreadMessageCount}
+                </i>
+              )}
+            </span>
             <small>{label}</small>
           </button>
         ))}
@@ -2078,6 +2167,17 @@ function App() {
       {loginOpen && (
         <LoginModal
           onClose={() => setLoginOpen(false)}
+          notify={notify}
+        />
+      )}
+
+      {globalSearchOpen && (
+        <GlobalSearchOverlay
+          onClose={() => setGlobalSearchOpen(false)}
+          go={go}
+          setSearch={setSearch}
+          authUser={authUser}
+          openLogin={() => setLoginOpen(true)}
           notify={notify}
         />
       )}
@@ -2707,7 +2807,7 @@ function Post({ post, notify, authUser, setLoginOpen }) {
    PEOPLE / CLUBS
 ========================================================= */
 
-function People({ notify, people, openModal }) {
+function People({ notify, people, openModal, authUser, openLogin, onOpenConversation }) {
   const [q, setQ] = useState("");
 
   const filtered = people.filter((person) =>
@@ -2740,7 +2840,7 @@ function People({ notify, people, openModal }) {
 
       <div className="people-grid">
         {filtered.map((person) => (
-          <PersonCard key={person.id} person={person} notify={notify} />
+          <PersonCard key={person.id} person={person} notify={notify} authUser={authUser} openLogin={openLogin} onOpenConversation={onOpenConversation} />
         ))}
       </div>
 
@@ -2761,7 +2861,23 @@ function People({ notify, people, openModal }) {
   );
 }
 
-function PersonCard({ person, notify }) {
+function PersonCard({ person, notify, authUser, openLogin, onOpenConversation }) {
+  const [messaging, setMessaging] = useState(false);
+
+  const messagePerson = async () => {
+    if (!authUser) { openLogin?.(); notify("Sign in to send a message"); return; }
+    if (person.id === authUser.id) { notify("That's you!"); return; }
+    try {
+      setMessaging(true);
+      const conversationId = await startConversation(person.id);
+      onOpenConversation?.(conversationId);
+    } catch (error) {
+      notify(error.message || "Could not start a conversation");
+    } finally {
+      setMessaging(false);
+    }
+  };
+
   return (
     <article className="person-card">
       <div className="person-top">
@@ -2787,11 +2903,8 @@ function PersonCard({ person, notify }) {
         <button onClick={() => notify(`Connection request sent to ${person.name}`)}>
           <HiUserPlus /> Connect
         </button>
-        <button
-          className="ghost"
-          onClick={() => notify(`Profile opened for ${person.name}`)}
-        >
-          View profile
+        <button className="ghost" disabled={messaging} onClick={messagePerson}>
+          <HiChatBubbleLeftRight /> {messaging ? "Starting…" : "Message"}
         </button>
       </div>
     </article>
@@ -2802,9 +2915,11 @@ function Clubs({ notify, clubs: clubList, authUser, setLoginOpen, campusId }) {
   const [selectedClub, setSelectedClub] = useState(null);
   const [joinedClubs, setJoinedClubs] = useState({});
   const [requestModalOpen, setRequestModalOpen] = useState(false);
+  const [leadership, setLeadership] = useState({});
+  const [managingClubId, setManagingClubId] = useState(null);
 
   useEffect(() => {
-    if (!authUser?.id) return;
+    if (!authUser?.id) { setLeadership({}); return; }
     getMyClubs(authUser.id).then((myClubs) => {
       const map = {};
       (myClubs || []).forEach((item) => {
@@ -2812,7 +2927,24 @@ function Clubs({ notify, clubs: clubList, authUser, setLoginOpen, campusId }) {
       });
       setJoinedClubs(map);
     });
+    clubApi.getMyClubLeadership().then((rows) => {
+      const map = {};
+      (rows || []).forEach((row) => { map[row.club_id] = row.role; });
+      setLeadership(map);
+    }).catch(() => {});
   }, [authUser?.id]);
+
+  if (managingClubId) {
+    return (
+      <ClubManage
+        clubId={managingClubId}
+        campusId={campusId}
+        authUser={authUser}
+        notify={notify}
+        onBack={() => setManagingClubId(null)}
+      />
+    );
+  }
 
   const handleToggleJoin = async (club) => {
     if (!authUser) {
@@ -2873,7 +3005,7 @@ function Clubs({ notify, clubs: clubList, authUser, setLoginOpen, campusId }) {
                 <span>{club.events} events</span>
               </div>
 
-              <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
+              <div style={{ display: "flex", gap: "8px", marginTop: "12px", flexWrap: "wrap" }}>
                 <button
                   className="ghost"
                   onClick={() => setSelectedClub(club)}
@@ -2886,6 +3018,11 @@ function Clubs({ notify, clubs: clubList, authUser, setLoginOpen, campusId }) {
                 >
                   {isMember ? "Leave" : "Join"}
                 </button>
+                {leadership[club.id] && (
+                  <button className="primary" onClick={() => setManagingClubId(club.id)}>
+                    Manage club
+                  </button>
+                )}
               </div>
             </article>
           );
@@ -4305,7 +4442,7 @@ function VerifyIdModal({ profile, campusId, onClose, onSubmitted, notify }) {
    CONNECT (classmate directory — nee "Socialize")
 ========================================================= */
 
-function Socialize({ notify, people = [], profile, campusId }) {
+function Socialize({ notify, people = [], profile, campusId, authUser, openLogin, onOpenConversation }) {
   const [tab, setTab] = useState("directory"); // 'directory' | 'suggestions' | 'groups'
   const [query, setQuery] = useState("");
   const [courseFilter, setCourseFilter] = useState("All");
@@ -4383,7 +4520,7 @@ function Socialize({ notify, people = [], profile, campusId }) {
         </button>
       </div>
 
-      {tab === "suggestions" && <SuggestedForYou notify={notify} />}
+      {tab === "suggestions" && <SuggestedForYou notify={notify} authUser={authUser} openLogin={openLogin} onOpenConversation={onOpenConversation} />}
       {tab === "groups" && <CohortGroups notify={notify} campusId={campusId} profile={profile} />}
 
       {tab === "directory" && (
@@ -4466,7 +4603,7 @@ function Socialize({ notify, people = [], profile, campusId }) {
             />
           )}
           {filtered.map((person) => (
-            <ClassmateCard key={person.id} person={person} notify={notify} />
+            <ClassmateCard key={person.id} person={person} notify={notify} authUser={authUser} openLogin={openLogin} onOpenConversation={onOpenConversation} />
           ))}
         </div>
 
@@ -4505,7 +4642,7 @@ function Socialize({ notify, people = [], profile, campusId }) {
    PEOPLE YOU MAY KNOW
 ========================================================= */
 
-function SuggestedForYou({ notify }) {
+function SuggestedForYou({ notify, authUser, openLogin, onOpenConversation }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [suggestions, setSuggestions] = useState([]);
@@ -4539,13 +4676,14 @@ function SuggestedForYou({ notify }) {
   return (
     <div className="socialize-feed people-grid">
       {suggestions.map((person) => (
-        <SuggestedPersonCard key={person.id} person={person} notify={notify} />
+        <SuggestedPersonCard key={person.id} person={person} notify={notify} authUser={authUser} openLogin={openLogin} onOpenConversation={onOpenConversation} />
       ))}
     </div>
   );
 }
 
-function SuggestedPersonCard({ person, notify }) {
+function SuggestedPersonCard({ person, notify, authUser, openLogin, onOpenConversation }) {
+  const [messaging, setMessaging] = useState(false);
   const reasons = [];
   if (person.course) reasons.push(`Same branch (${person.course})`);
   if (person.year) reasons.push(person.year);
@@ -4576,6 +4714,24 @@ function SuggestedPersonCard({ person, notify }) {
       <div className="person-actions">
         <button onClick={() => notify(`Connection request sent to ${person.name}`)}>
           <HiUserPlus /> Connect
+        </button>
+        <button
+          className="ghost"
+          disabled={messaging}
+          onClick={async () => {
+            if (!authUser) { openLogin?.(); notify("Sign in to send a message"); return; }
+            try {
+              setMessaging(true);
+              const conversationId = await startConversation(person.id);
+              onOpenConversation?.(conversationId);
+            } catch (error) {
+              notify(error.message || "Could not start a conversation");
+            } finally {
+              setMessaging(false);
+            }
+          }}
+        >
+          <HiChatBubbleLeftRight /> {messaging ? "Starting…" : "Message"}
         </button>
       </div>
     </article>
@@ -4678,7 +4834,22 @@ function CohortMembersModal({ group, campusId, onClose, notify }) {
   );
 }
 
-function ClassmateCard({ person, notify }) {
+function ClassmateCard({ person, notify, authUser, openLogin, onOpenConversation }) {
+  const [messaging, setMessaging] = useState(false);
+
+  const messagePerson = async () => {
+    if (!authUser) { openLogin?.(); notify("Sign in to send a message"); return; }
+    try {
+      setMessaging(true);
+      const conversationId = await startConversation(person.id);
+      onOpenConversation?.(conversationId);
+    } catch (error) {
+      notify(error.message || "Could not start a conversation");
+    } finally {
+      setMessaging(false);
+    }
+  };
+
   return (
     <article className="person-card">
       <div className="person-top">
@@ -4717,6 +4888,9 @@ function ClassmateCard({ person, notify }) {
       <div className="person-actions">
         <button onClick={() => notify(`Connection request sent to ${person.name}`)}>
           <HiUserPlus /> Connect
+        </button>
+        <button className="ghost" disabled={messaging} onClick={messagePerson}>
+          <HiChatBubbleLeftRight /> {messaging ? "Starting…" : "Message"}
         </button>
         {person.linkedin_url && (
           <a className="ghost" href={person.linkedin_url} target="_blank" rel="noreferrer">
@@ -4788,7 +4962,7 @@ const serviceDetailData = {
   },
 };
 
-function ServiceDetail({ serviceId, notify, go, openModal, openLogin, authUser, user, campusId, resources, bookings, serviceRequests, printJobs, lostItems, marketListings, onBookingsChange, onRequestsChange, onLostItemsChange, onMarketListingsChange }) {
+function ServiceDetail({ serviceId, notify, go, openModal, openLogin, authUser, user, campusId, resources, bookings, serviceRequests, printJobs, lostItems, marketListings, onBookingsChange, onRequestsChange, onLostItemsChange, onMarketListingsChange, onOpenConversation }) {
   const data = serviceDetailData[serviceId];
 
   return (
@@ -4852,11 +5026,11 @@ function ServiceDetail({ serviceId, notify, go, openModal, openLogin, authUser, 
       )}
 
       {serviceId === "market" && (
-        <MarketplaceService notify={notify} authUser={authUser} openLogin={openLogin} campusId={campusId} listings={marketListings} onChange={onMarketListingsChange} />
+        <Marketplace notify={notify} authUser={authUser} openLogin={openLogin} campusId={campusId} listings={marketListings} onChange={onMarketListingsChange} onOpenConversation={onOpenConversation} />
       )}
 
       {serviceId === "pass" && (
-        <PassService notify={notify} user={user} />
+        <PassService notify={notify} user={user} authUser={authUser} openLogin={openLogin} />
       )}
 
       {serviceId === "hostel" && (
@@ -4986,51 +5160,69 @@ function LostService({ notify, authUser, openLogin, campusId, items: dbItems = [
   );
 }
 
-function MarketplaceService({ notify, authUser, openLogin, campusId, listings: dbListings = [], onChange }) {
-  const [creating, setCreating] = useState(false);
-  const [title, setTitle] = useState("");
-  const [price, setPrice] = useState("");
-  const listings = dbListings.length ? dbListings.map((item) => [item.title, `₹${item.price}`, item.profiles?.name || "Campus seller", item.id, item.seller_id]) : [
-    ["MacBook sleeve", "₹450", "CSE 3rd Year"],
-    ["Scientific calculator", "₹420", "ECE 2nd Year"],
-    ["Arduino Uno", "₹500", "Robotics Club"],
-  ];
-
-  return (
-    <div className="resource-list">
-      {listings.map(([name, price, seller, listingId, sellerId]) => (
-        <article className="resource-row" key={listingId || name}>
-          <div className="resource-icon"><HiShoppingCart /></div>
-          <div>
-            <b>{name}</b>
-            <small>{seller}</small>
-          </div>
-          <strong>{price}</strong>
-          {sellerId === authUser?.id ? <button onClick={async () => { try { await markMarketplaceListingSold({ listingId, userId: authUser.id }); onChange?.((items) => items.filter((item) => item.id !== listingId)); notify("Listing marked sold"); } catch (error) { notify(error.message || "Could not update listing"); } }}>Mark sold</button> : <button onClick={() => notify("Contact details are shared after seller approval")}>Contact</button>}
-        </article>
-      ))}
-      <button className="primary" onClick={() => setCreating(true)}><HiPlus /> Create listing</button>
-      {creating && <ModalShell kicker="MARKETPLACE" title="Create listing" onClose={() => setCreating(false)}>
-        <label>Title<input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
-        <label>Price<input type="number" min="0" value={price} onChange={(event) => setPrice(event.target.value)} /></label>
-        <button className="primary wide" onClick={async () => {
-          if (!authUser) { openLogin?.(); notify("Sign in to create a listing"); return; }
-          try {
-            const listing = await createMarketplaceListing({ userId: authUser.id, campusId, title, price });
-            onChange?.((items) => [listing, ...items]);
-            setCreating(false);
-            notify("Listing published");
-          } catch (error) { notify(error.message || "Could not publish listing"); }
-        }}>Publish listing</button>
-      </ModalShell>}
-    </div>
-  );
-}
-
-function PassService({ notify, user }) {
+// Real signed, short-lived pass -- mint_campus_pass()/verify_campus_pass()
+// (supabase/migrations/20260814004400_digital_campus_pass.sql) HMAC-sign a
+// ~90s token entirely in Postgres. This used to be a static <HiQrCode/>
+// icon with a hardcoded fallback name/USN and a "Download" button that only
+// fired a toast -- nothing here was real. Now the QR is a real token that
+// visibly rotates while the modal is open, so a screenshot of it is
+// worthless a minute later.
+function PassService({ notify, user, authUser, openLogin }) {
   const [showPassModal, setShowPassModal] = useState(false);
-  const studentName = user?.name || "Sanjay Padmaraj";
-  const studentUsn = user?.usn || "1NH22CS101";
+  const [pass, setPass] = useState(null);
+  const [qrDataUrl, setQrDataUrl] = useState("");
+  const [secondsLeft, setSecondsLeft] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const mintingRef = useRef(false);
+  const tickTimer = useRef(null);
+
+  const refreshPass = async () => {
+    if (mintingRef.current) return;
+    mintingRef.current = true;
+    try {
+      setLoading(true);
+      setError("");
+      const row = await mintCampusPass();
+      setPass(row);
+    } catch (err) {
+      setError(err.message || "Could not generate your pass");
+    } finally {
+      setLoading(false);
+      mintingRef.current = false;
+    }
+  };
+
+  useEffect(() => {
+    if (!showPassModal) return;
+    refreshPass();
+    return () => clearInterval(tickTimer.current);
+  }, [showPassModal]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!pass?.token) { setQrDataUrl(""); return; }
+    let cancelled = false;
+    QRCode.toDataURL(pass.token, { width: 240, margin: 1, color: { dark: "#17151f", light: "#ffffff" } })
+      .then((url) => { if (!cancelled) setQrDataUrl(url); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [pass?.token]);
+
+  useEffect(() => {
+    if (!pass?.expires_at) return;
+    clearInterval(tickTimer.current);
+    const tick = () => {
+      const secs = Math.max(0, Math.round((new Date(pass.expires_at).getTime() - Date.now()) / 1000));
+      setSecondsLeft(secs);
+      if (secs <= 4) refreshPass();
+    };
+    tick();
+    tickTimer.current = setInterval(tick, 1000);
+    return () => clearInterval(tickTimer.current);
+  }, [pass?.expires_at]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const displayName = pass?.holder_name || user?.name || "";
+  const displayUsn = pass?.holder_usn || user?.usn || "";
 
   return (
     <div className="digital-pass-card">
@@ -5039,9 +5231,15 @@ function PassService({ notify, user }) {
       </div>
       <div>
         <span className="section-kicker">STUDENT PASS</span>
-        <h2>NHCE · {studentName.toUpperCase()}</h2>
-        <p>Valid for events, workshops, pickups and approved campus workflows.</p>
-        <button className="primary" onClick={() => setShowPassModal(true)}>
+        <h2>NHCE{displayName ? ` · ${displayName.toUpperCase()}` : ""}</h2>
+        <p>A signed pass that refreshes every few seconds -- valid for events, workshops, pickups and facilities check-ins.</p>
+        <button
+          className="primary"
+          onClick={() => {
+            if (!authUser) { openLogin?.(); notify("Sign in to get your campus pass"); return; }
+            setShowPassModal(true);
+          }}
+        >
           Display QR <HiQrCode />
         </button>
       </div>
@@ -5049,15 +5247,28 @@ function PassService({ notify, user }) {
       {showPassModal && (
         <ModalShell kicker="VERIFIED CAMPUS PASS" title="Digital Identity Pass" onClose={() => setShowPassModal(false)}>
           <div style={{ textAlign: "center", padding: "16px 0" }}>
-            <div style={{ width: "160px", height: "160px", margin: "0 auto 16px", background: "#f0ecff", borderRadius: "16px", display: "grid", placeItems: "center", border: "2px dashed #6e48ed" }}>
-              <HiQrCode style={{ fontSize: "110px", color: "#6e48ed" }} />
-            </div>
-            <h3 style={{ margin: "4px 0", font: "800 20px Manrope" }}>{studentName}</h3>
-            <p style={{ margin: "0 0 12px", color: "var(--muted)", fontSize: "13px" }}>USN: {studentUsn} · NHCE CSE</p>
-            <span style={{ background: "#e4f7ef", color: "#13845b", padding: "6px 14px", borderRadius: "999px", fontSize: "11px", fontWeight: "800" }}>ACTIVE · VERIFIED</span>
+            {loading && !pass && <p style={{ color: "var(--muted)" }}>Generating your pass…</p>}
+            {error && !pass && <p style={{ color: "#c23a3a" }}>{error}</p>}
+            {qrDataUrl && (
+              <div style={{ width: "180px", height: "180px", margin: "0 auto 16px", background: "#fff", borderRadius: "16px", display: "grid", placeItems: "center", border: "2px solid #6e48ed", padding: "10px" }}>
+                <img src={qrDataUrl} alt="Campus pass QR code" style={{ width: "100%", height: "100%" }} />
+              </div>
+            )}
+            <h3 style={{ margin: "4px 0", font: "800 20px Manrope" }}>{displayName}</h3>
+            <p style={{ margin: "0 0 12px", color: "var(--muted)", fontSize: "13px" }}>
+              {displayUsn ? `USN: ${displayUsn} · ` : ""}NHCE
+            </p>
+            <span style={{ background: "#e4f7ef", color: "#13845b", padding: "6px 14px", borderRadius: "999px", fontSize: "11px", fontWeight: "800" }}>
+              ACTIVE · VERIFIED
+            </span>
+            {pass && (
+              <p style={{ marginTop: "14px", fontSize: "11px", color: "var(--muted)" }}>
+                <HiArrowPath style={{ verticalAlign: "-2px" }} /> Refreshes in {secondsLeft}s -- this code changes automatically, a screenshot won&apos;t work for long.
+              </p>
+            )}
           </div>
-          <button className="primary wide" onClick={() => { notify("Pass image saved to downloads"); setShowPassModal(false); }}>
-            Download Pass QR <HiArrowRight />
+          <button className="primary wide" disabled={loading} onClick={refreshPass}>
+            {loading ? "Refreshing…" : "Refresh now"} <HiArrowPath />
           </button>
         </ModalShell>
       )}
@@ -5734,7 +5945,60 @@ function MyCalendar({ notify, events }) {
    NOTIFICATIONS
 ========================================================= */
 
-function NotificationsPage({ notifications, markRead, notify }) {
+// The real delivery channel behind push_subscriptions/notification_preferences
+// .channel_push -- both existed since the 0010 migration with nothing ever
+// writing a subscription row. See src/services/pushService.js.
+function PushToggle({ authUser, notify }) {
+  const [status, setStatus] = useState("checking"); // checking | unsupported | denied | subscribed | not-subscribed
+  const [busy, setBusy] = useState(false);
+
+  const refreshStatus = () => {
+    getPushSubscriptionStatus().then(setStatus).catch(() => setStatus("unsupported"));
+  };
+
+  useEffect(() => { refreshStatus(); }, []);
+
+  if (!isPushSupported()) return null;
+
+  const toggle = async () => {
+    if (!authUser) { notify("Sign in to enable push notifications"); return; }
+    try {
+      setBusy(true);
+      if (status === "subscribed") {
+        await unsubscribeFromPush(authUser.id);
+        notify("Push notifications turned off");
+      } else {
+        await subscribeToPush(authUser.id);
+        notify("Push notifications enabled");
+      }
+      refreshStatus();
+    } catch (error) {
+      notify(error.message || "Could not update push notification settings");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="push-toggle-row">
+      <div>
+        <b>Push notifications</b>
+        <small>
+          {status === "denied"
+            ? "Blocked in your browser settings -- enable notifications for this site to turn this on."
+            : status === "subscribed"
+            ? "You'll get a push on this device for new messages, orders and announcements."
+            : "Get a push on this device for new messages, order updates and announcements."}
+        </small>
+      </div>
+      <button className={status === "subscribed" ? "chip active" : "chip"} disabled={busy || status === "denied" || status === "checking"} onClick={toggle}>
+        {busy ? "…" : status === "subscribed" ? "On" : "Off"}
+      </button>
+    </div>
+  );
+}
+
+function NotificationsPage({ notifications, markRead, notify, onOpenConversation, authUser }) {
   return (
     <section className="page-section">
       <PageHeader
@@ -5754,36 +6018,316 @@ function NotificationsPage({ notifications, markRead, notify }) {
         }
       />
 
+      <PushToggle authUser={authUser} notify={notify} />
+
       <div className="notification-list">
-        {notifications.map((notification) => (
-          <article
-            className={`notification-card ${
-              notification.unread ? "unread" : ""
-            }`}
-            key={notification.id}
-          >
-            <span>
-              {notification.type === "event" ? (
-                <HiCalendarDays />
-              ) : notification.type === "service" ? (
-                <HiWrenchScrewdriver />
-              ) : notification.type === "official" ? (
-                <HiMegaphone />
-              ) : (
-                <HiChatBubbleOvalLeft />
-              )}
-            </span>
+        {notifications.map((notification) => {
+          const isMessage = notification.type === "message" && notification.actionType === "conversation" && notification.actionId;
+          return (
+            <article
+              className={`notification-card ${
+                notification.unread ? "unread" : ""
+              } ${isMessage ? "clickable" : ""}`}
+              key={notification.id}
+              style={isMessage ? { cursor: "pointer" } : undefined}
+              onClick={isMessage ? () => onOpenConversation?.(notification.actionId) : undefined}
+            >
+              <span>
+                {notification.type === "event" ? (
+                  <HiCalendarDays />
+                ) : notification.type === "service" ? (
+                  <HiWrenchScrewdriver />
+                ) : notification.type === "official" ? (
+                  <HiMegaphone />
+                ) : notification.type === "message" ? (
+                  <HiChatBubbleLeftRight />
+                ) : (
+                  <HiChatBubbleOvalLeft />
+                )}
+              </span>
 
-            <div>
-              <b>{notification.title}</b>
-              <small>{notification.time}</small>
-            </div>
+              <div>
+                <b>{notification.title}</b>
+                <small>{notification.time}</small>
+              </div>
 
-            {notification.unread && <i />}
-          </article>
-        ))}
+              {notification.unread && <i />}
+            </article>
+          );
+        })}
       </div>
     </section>
+  );
+}
+
+/* =========================================================
+   MESSAGES
+========================================================= */
+
+function Messages({ notify, authUser, openConversationId, onConversationOpened, onUnreadChange }) {
+  const [conversations, setConversations] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [activeId, setActiveId] = useState(null);
+  const [msgs, setMsgs] = useState([]);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const threadEndRef = useRef(null);
+
+  const reloadConversations = async () => {
+    try {
+      const rows = await listConversations();
+      setConversations(rows);
+      const total = rows.reduce((sum, r) => sum + Number(r.unread_count || 0), 0);
+      onUnreadChange?.(total);
+    } catch (error) {
+      notify(error.message || "Could not load conversations");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    reloadConversations();
+    const unsub = subscribeToConversationList(() => reloadConversations());
+    return () => unsub?.();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A "Message seller"/"Message" click or a tapped message notification
+  // hands over a conversation id to jump straight into.
+  useEffect(() => {
+    if (openConversationId) {
+      setActiveId(openConversationId);
+      onConversationOpened?.();
+    }
+  }, [openConversationId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const openThread = async (conversationId) => {
+    setActiveId(conversationId);
+    try {
+      await markConversationRead(conversationId);
+      reloadConversations();
+    } catch {
+      // Non-fatal -- the thread still opens even if marking-read fails.
+    }
+  };
+
+  useEffect(() => {
+    if (!activeId) { setMsgs([]); return; }
+    let mounted = true;
+
+    getConversationMessages(activeId).then((rows) => { if (mounted) setMsgs(rows); }).catch(() => {});
+
+    const unsub = subscribeToConversationMessages(activeId, () => {
+      getConversationMessages(activeId).then((rows) => { if (mounted) setMsgs(rows); }).catch(() => {});
+      markConversationRead(activeId).then(reloadConversations).catch(() => {});
+    });
+
+    return () => { mounted = false; unsub?.(); };
+  }, [activeId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    threadEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [msgs.length]);
+
+  const activeConversation = conversations.find((c) => c.conversation_id === activeId);
+
+  const send = async () => {
+    const body = draft.trim();
+    if (!body || !activeId) return;
+    try {
+      setSending(true);
+      setDraft("");
+      await sendMessage(activeId, body);
+      const rows = await getConversationMessages(activeId);
+      setMsgs(rows);
+    } catch (error) {
+      notify(error.message || "Could not send message");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (loading) return <LoadingState label="Loading your messages…" />;
+
+  return (
+    <section className="page-section">
+      <PageHeader kicker="MESSAGES" title="Messages" text="Marketplace conversations and classmate DMs, in one place." />
+
+      {conversations.length === 0 && !activeId && (
+        <EmptyState
+          icon={<HiChatBubbleLeftRight />}
+          title="No conversations yet"
+          text="Message a seller from Marketplace or a classmate from Connect to start one."
+        />
+      )}
+
+      {(conversations.length > 0 || activeId) && (
+        <div className="messages-layout">
+          <div className="messages-list">
+            {conversations.map((c) => (
+              <button
+                key={c.conversation_id}
+                className={`message-thread-row ${c.conversation_id === activeId ? "active" : ""}`}
+                onClick={() => openThread(c.conversation_id)}
+              >
+                <div className="big-avatar small">{c.other_user_name?.[0] || "?"}</div>
+                <div>
+                  <b>{c.other_user_name || "Campus member"}</b>
+                  {c.listing_title && <small className="listing-tag">Re: {c.listing_title}</small>}
+                  <small>{c.last_message_body ? c.last_message_body.slice(0, 60) : "Say hello…"}</small>
+                </div>
+                {Number(c.unread_count) > 0 && <i>{c.unread_count}</i>}
+              </button>
+            ))}
+          </div>
+
+          <div className="messages-thread">
+            {!activeId && <EmptyState icon={<HiChatBubbleLeftRight />} title="Select a conversation" text="Pick a thread on the left to read and reply." />}
+
+            {activeId && (
+              <>
+                <div className="messages-thread-head">
+                  <b>{activeConversation?.other_user_name || "Conversation"}</b>
+                  {activeConversation?.listing_title && <small>About: {activeConversation.listing_title}</small>}
+                </div>
+
+                <div className="messages-thread-body">
+                  {msgs.map((m) => (
+                    <div key={m.id} className={`message-bubble ${m.sender_id === authUser?.id ? "mine" : "theirs"}`}>
+                      <p>{m.body}</p>
+                      <small>{new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</small>
+                    </div>
+                  ))}
+                  <div ref={threadEndRef} />
+                </div>
+
+                <div className="messages-compose">
+                  <input
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+                    placeholder="Type a message…"
+                    disabled={sending}
+                  />
+                  <button className="primary" disabled={sending || !draft.trim()} onClick={send}>
+                    <HiPaperAirplane />
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* =========================================================
+   GLOBAL SEARCH
+========================================================= */
+
+const SEARCH_TYPE_ICON = {
+  post: <HiChatBubbleOvalLeft />,
+  event: <HiCalendarDays />,
+  club: <HiUserGroup />,
+  listing: <HiShoppingCart />,
+  food_item: <HiShoppingBag />,
+  service: <HiWrenchScrewdriver />,
+  lost_found: <HiMagnifyingGlassCircle />,
+  announcement: <HiMegaphone />,
+  person: <HiUserCircle />,
+};
+
+function GlobalSearchOverlay({ onClose, go, setSearch, authUser, openLogin, notify }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const inputRef = useRef(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) { setResults([]); setError(""); return; }
+
+    const handle = setTimeout(async () => {
+      try {
+        setLoading(true);
+        setError("");
+        setResults(await globalSearch(q, 8));
+      } catch (err) {
+        setError(err.message || "Search failed");
+      } finally {
+        setLoading(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(handle);
+  }, [query]);
+
+  const grouped = useMemo(() => {
+    const groups = {};
+    for (const r of results) {
+      groups[r.entity_type] = groups[r.entity_type] || [];
+      groups[r.entity_type].push(r);
+    }
+    return groups;
+  }, [results]);
+
+  const openResult = (result) => {
+    const dest = SEARCH_ENTITY_DESTINATIONS[result.entity_type];
+    if (!dest) return;
+
+    if (result.entity_type === "person") {
+      if (!authUser) { openLogin?.(); notify("Sign in to view classmates"); onClose(); return; }
+    }
+
+    if (dest.prefill) setSearch(result.title);
+    go(dest.tab);
+    onClose();
+  };
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <div className="login-modal global-search-modal" onMouseDown={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose}><HiXMark /></button>
+        <span className="section-kicker">SEARCH CAMPUSOS</span>
+        <div className="searchbar" style={{ marginTop: 10, marginBottom: 4 }}>
+          <HiMagnifyingGlass />
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search posts, events, clubs, marketplace, food, people…"
+          />
+        </div>
+
+        {loading && <p style={{ color: "var(--muted)", fontSize: 12, padding: "10px 2px" }}>Searching…</p>}
+        {error && <p style={{ color: "#c23a3a", fontSize: 12, padding: "10px 2px" }}>{error}</p>}
+        {!loading && !error && query.trim().length >= 2 && results.length === 0 && (
+          <p style={{ color: "var(--muted)", fontSize: 12, padding: "10px 2px" }}>No results for &ldquo;{query}&rdquo;.</p>
+        )}
+
+        <div className="global-search-results">
+          {Object.entries(grouped).map(([type, items]) => (
+            <div key={type} className="global-search-group">
+              <small className="global-search-group-label">{SEARCH_ENTITY_LABELS[type] || type}</small>
+              {items.map((item) => (
+                <button key={`${type}-${item.entity_id}`} className="global-search-result" onClick={() => openResult(item)}>
+                  <span>{SEARCH_TYPE_ICON[type] || <HiSparkles />}</span>
+                  <div>
+                    <b>{item.title}</b>
+                    <small>{item.subtitle}</small>
+                  </div>
+                  <HiChevronRight />
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
