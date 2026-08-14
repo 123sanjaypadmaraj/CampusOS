@@ -5,6 +5,11 @@ import {
   HiPencilSquare,
   HiTrash,
   HiArchiveBoxArrowDown,
+  HiCheck,
+  HiXCircle,
+  HiClock,
+  HiTruck,
+  HiQrCode,
 } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import * as vendorApi from "./api";
@@ -84,6 +89,7 @@ export default function VendorDashboard({ notify, authUser }) {
 ========================================================= */
 
 function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
+  const [tab, setTab] = useState("orders");
   const [items, setItems] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -130,50 +136,61 @@ function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
         </div>
       </div>
 
-      {loading && <LoadingState label="Loading menu…" />}
-      {error && <ErrorState text={error} onRetry={reload} />}
+      <div className="socialize-filter-row">
+        <button className={tab === "orders" ? "chip active" : "chip"} onClick={() => setTab("orders")}>Orders</button>
+        <button className={tab === "menu" ? "chip active" : "chip"} onClick={() => setTab("menu")}>Menu</button>
+      </div>
 
-      {!loading && !error && (
+      {tab === "orders" && <OrderQueue canteen={canteen} notify={notify} />}
+
+      {tab === "menu" && (
         <>
-          <div className="section-head">
-            <h2>Menu items</h2>
-            <button className="primary" onClick={() => setItemModal({ canteen_id: canteen.id })}>
-              <HiPlus /> New item
-            </button>
-          </div>
+          {loading && <LoadingState label="Loading menu…" />}
+          {error && <ErrorState text={error} onRetry={reload} />}
 
-          <div className="resource-list">
-            {items.length === 0 && <EmptyState title="No items yet" text="Add your first menu item to get started." />}
-            {items.map((item) => (
-              <article className="resource-row" key={item.id}>
-                <div>
-                  <b>{item.name}</b>
-                  <small>
-                    ₹{item.price} · {item.food_categories?.name || "Uncategorised"} ·{" "}
-                    {item.is_vegetarian ? "Veg" : "Non-veg"} ·{" "}
-                    {item.active ? (item.available ? "Available" : "Unavailable") : "Archived"}
-                  </small>
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => setItemModal(item)}><HiPencilSquare /> Edit</button>
-                  <button
-                    onClick={async () => {
-                      if (!window.confirm(`Delete "${item.name}"? Items with past orders are archived instead of deleted.`)) return;
-                      try {
-                        const result = await vendorApi.deleteFoodItem(item.id);
-                        notify(result.hardDeleted ? "Item deleted" : "Item has order history — archived instead");
-                        reload();
-                      } catch (err) {
-                        notify(err.message || "Could not delete item");
-                      }
-                    }}
-                  >
-                    {item.active ? <><HiTrash /> Delete</> : <><HiArchiveBoxArrowDown /> Archived</>}
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
+          {!loading && !error && (
+            <>
+              <div className="section-head">
+                <h2>Menu items</h2>
+                <button className="primary" onClick={() => setItemModal({ canteen_id: canteen.id })}>
+                  <HiPlus /> New item
+                </button>
+              </div>
+
+              <div className="resource-list">
+                {items.length === 0 && <EmptyState title="No items yet" text="Add your first menu item to get started." />}
+                {items.map((item) => (
+                  <article className="resource-row" key={item.id}>
+                    <div>
+                      <b>{item.name}</b>
+                      <small>
+                        ₹{item.price} · {item.food_categories?.name || "Uncategorised"} ·{" "}
+                        {item.is_vegetarian ? "Veg" : "Non-veg"} ·{" "}
+                        {item.active ? (item.available ? "Available" : "Unavailable") : "Archived"}
+                      </small>
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={() => setItemModal(item)}><HiPencilSquare /> Edit</button>
+                      <button
+                        onClick={async () => {
+                          if (!window.confirm(`Delete "${item.name}"? Items with past orders are archived instead of deleted.`)) return;
+                          try {
+                            const result = await vendorApi.deleteFoodItem(item.id);
+                            notify(result.hardDeleted ? "Item deleted" : "Item has order history — archived instead");
+                            reload();
+                          } catch (err) {
+                            notify(err.message || "Could not delete item");
+                          }
+                        }}
+                      >
+                        {item.active ? <><HiTrash /> Delete</> : <><HiArchiveBoxArrowDown /> Archived</>}
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </>
+          )}
         </>
       )}
 
@@ -197,6 +214,230 @@ function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
         />
       )}
     </section>
+  );
+}
+
+/* =========================================================
+   ORDER QUEUE (doc §13, §16)
+   RECEIVED -> ACCEPTED -> PREPARING -> READY -> (OUT_FOR_DELIVERY ->) COMPLETED/DELIVERED
+========================================================= */
+
+const NEXT_STEP = {
+  RECEIVED: { label: "Accept", to: "ACCEPTED" },
+  ACCEPTED: { label: "Start preparing", to: "PREPARING" },
+  PREPARING: { label: "Mark ready", to: "READY" },
+};
+
+function timeAgo(iso) {
+  const diffMin = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000));
+  if (diffMin < 1) return "just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  return `${Math.floor(diffMin / 60)}h ${diffMin % 60}m ago`;
+}
+
+function OrderQueue({ canteen, notify }) {
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busyId, setBusyId] = useState(null);
+  const [history, setHistory] = useState(null); // null until "View recent history" is opened
+
+  const reload = async () => {
+    try {
+      setError("");
+      const active = await vendorApi.listActiveCanteenOrders(canteen.id);
+      setOrders(active);
+    } catch (err) {
+      setError(err.message || "Could not load orders");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    reload();
+    const unsubscribe = vendorApi.subscribeToCanteenOrders(canteen.id, reload);
+    return unsubscribe;
+  }, [canteen.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const act = async (order, toStatus, reason) => {
+    try {
+      setBusyId(order.id);
+      await vendorApi.transitionOrderStatus(order.id, toStatus, reason);
+      notify(`Order #${order.id.slice(0, 8)} → ${toStatus}`);
+      // Don't wait on the realtime round-trip for feedback on your own
+      // action -- reload immediately; the subscription is still there to
+      // pick up changes made by someone else (another staff device).
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not update order");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (loading) return <LoadingState label="Loading order queue…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  return (
+    <>
+      <div className="resource-list">
+        {orders.length === 0 && (
+          <EmptyState icon={<HiClock />} title="No active orders" text="New orders will appear here the moment a student pays." />
+        )}
+        {orders.map((order) => (
+          <OrderCard key={order.id} order={order} busy={busyId === order.id} onAct={act} onChanged={reload} notify={notify} />
+        ))}
+      </div>
+
+      <button className="ghost" style={{ marginTop: 16 }} onClick={async () => {
+        if (history !== null) { setHistory(null); return; }
+        try { setHistory(await vendorApi.listCanteenOrderHistory(canteen.id)); }
+        catch (err) { notify(err.message || "Could not load history"); }
+      }}>
+        {history === null ? "View recent history" : "Hide history"}
+      </button>
+
+      {history !== null && (
+        <div className="resource-list" style={{ marginTop: 12 }}>
+          {history.length === 0 && <EmptyState title="No past orders yet" />}
+          {history.map((order) => (
+            <article className="resource-row" key={order.id}>
+              <div>
+                <b>#{order.id.slice(0, 8)} · {order.status}</b>
+                <small>
+                  {order.order_items.map((i) => `${i.quantity}× ${i.item_name}`).join(", ")} · {timeAgo(order.created_at)}
+                </small>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function OrderCard({ order, busy, onAct, onChanged, notify }) {
+  const [pickupModal, setPickupModal] = useState(false);
+  const next = NEXT_STEP[order.status];
+
+  return (
+    <article className="resource-row" style={{ alignItems: "flex-start" }}>
+      <div>
+        <b>
+          #{order.id.slice(0, 8)} · {order.status}{" "}
+          <span className="social-type" style={{ marginLeft: 6 }}>{order.fulfillment_type}</span>
+        </b>
+        <small>
+          {order.order_items.map((i) => (
+            <span key={i.id}>
+              {i.quantity}× {i.item_name}
+              {i.special_instructions ? ` (${i.special_instructions})` : ""}
+              {"; "}
+            </span>
+          ))}
+        </small>
+        {order.notes && <small>Note: {order.notes}</small>}
+        <small>{timeAgo(order.created_at)} · Order code {order.pickup_code}</small>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {order.status === "RECEIVED" && (
+          <button disabled={busy} onClick={() => {
+            const reason = window.prompt("Reason for rejecting this order? (shown to the student)");
+            if (reason === null) return; // cancelled the prompt
+            onAct(order, "REJECTED", reason || undefined);
+          }}>
+            <HiXCircle /> Reject
+          </button>
+        )}
+        {next && (
+          <button className="primary" disabled={busy} onClick={() => onAct(order, next.to)}>
+            <HiCheck /> {next.label}
+          </button>
+        )}
+        {order.status === "READY" && order.fulfillment_type === "pickup" && (
+          <button className="primary" disabled={busy} onClick={() => setPickupModal(true)}>
+            <HiQrCode /> Complete pickup
+          </button>
+        )}
+        {order.status === "READY" && order.fulfillment_type === "delivery" && (
+          <button className="primary" disabled={busy} onClick={() => onAct(order, "OUT_FOR_DELIVERY")}>
+            <HiTruck /> Out for delivery
+          </button>
+        )}
+        {order.status === "OUT_FOR_DELIVERY" && (
+          <button className="primary" disabled={busy} onClick={() => onAct(order, "DELIVERED")}>
+            <HiCheck /> Mark delivered
+          </button>
+        )}
+        {["ACCEPTED", "PREPARING"].includes(order.status) && (
+          <button disabled={busy} onClick={() => onAct(order, "CANCEL_REQUESTED", "Cancelled by vendor")}>
+            <HiXCircle /> Cancel
+          </button>
+        )}
+      </div>
+
+      {pickupModal && (
+        <PickupCodeModal
+          order={order}
+          onClose={() => setPickupModal(false)}
+          onCompleted={() => { setPickupModal(false); onChanged(); }}
+          notify={notify}
+        />
+      )}
+    </article>
+  );
+}
+
+// Asks the vendor to type the code the student reads out loud, verifying it
+// against the real pickup token server issued when the order went READY --
+// a bare "mark completed" button would let staff complete an order without
+// the student actually being present to collect it.
+function PickupCodeModal({ order, onClose, onCompleted, notify }) {
+  const [tokenRow, setTokenRow] = useState(null);
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    vendorApi.getOrderPickupToken(order.id).then(setTokenRow).catch((err) => notify(err.message || "Could not load pickup code"));
+  }, [order.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const submit = async () => {
+    if (!tokenRow) return;
+    if (code.trim() !== tokenRow.short_code) {
+      notify("That code doesn't match — ask the student to read it again.");
+      return;
+    }
+    try {
+      setBusy(true);
+      await vendorApi.redeemPickupToken(tokenRow.token);
+      notify(`Order #${order.id.slice(0, 8)} completed`);
+      onCompleted();
+    } catch (err) {
+      notify(err.message || "Could not complete pickup");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal kicker="PICKUP" title={`Complete order #${order.id.slice(0, 8)}`} onClose={onClose}>
+      <p>Ask the student for their 6-digit pickup code and enter it below.</p>
+      <label>
+        Pickup code
+        <input
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          placeholder="123456"
+          maxLength={6}
+          autoFocus
+        />
+      </label>
+      <button className="primary wide" disabled={busy || !tokenRow || code.trim().length !== 6} onClick={submit}>
+        {busy ? "Completing…" : "Complete pickup"}
+      </button>
+    </Modal>
   );
 }
 

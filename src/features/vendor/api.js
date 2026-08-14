@@ -9,8 +9,9 @@
 
 import { supabase } from "../../lib/supabase";
 import { listFoodCategories, upsertCanteen, upsertFoodItem } from "../admin/api";
+import { transitionOrderStatus, redeemPickupToken, getOrderPickupToken } from "../../services/mvpService";
 
-export { listFoodCategories, upsertCanteen, upsertFoodItem };
+export { listFoodCategories, upsertCanteen, upsertFoodItem, transitionOrderStatus, redeemPickupToken, getOrderPickupToken };
 
 function throwIfError(error) {
   if (error) throw error;
@@ -83,4 +84,53 @@ export async function updatePrintRate(id, pricePerPage) {
     .single();
   throwIfError(error);
   return data;
+}
+
+/* =========================================================================
+   ORDER QUEUE (doc §13, §16) -- RECEIVED -> ACCEPTED -> PREPARING -> READY.
+   Every write goes through transition_order_status(), which re-checks
+   canteens.owner_id server-side (20260814002400_vendor_order_queue.sql) --
+   the client never trusts its own canteenId filter for authorization,
+   only for which rows to *show*.
+========================================================================= */
+
+// Active queue: everything from the moment payment clears to the moment
+// it's picked up/delivered. Older terminal orders (COMPLETED/CANCELLED/...)
+// are deliberately excluded here -- see listCanteenOrderHistory for those.
+const ACTIVE_STATUSES = ["RECEIVED", "ACCEPTED", "PREPARING", "READY", "OUT_FOR_DELIVERY"];
+
+export async function listActiveCanteenOrders(canteenId) {
+  const { data, error } = await supabase
+    .from("orders")
+    .select("*, order_items(id, item_name, quantity, unit_price, special_instructions)")
+    .eq("canteen_id", canteenId)
+    .in("status", ACTIVE_STATUSES)
+    .order("created_at", { ascending: true });
+  throwIfError(error);
+  return data || [];
+}
+
+export async function listCanteenOrderHistory(canteenId, { limit = 30 } = {}) {
+  const { data, error } = await supabase
+    .from("orders")
+    .select("*, order_items(id, item_name, quantity, unit_price)")
+    .eq("canteen_id", canteenId)
+    .not("status", "in", `(${ACTIVE_STATUSES.join(",")})`)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  throwIfError(error);
+  return data || [];
+}
+
+export function subscribeToCanteenOrders(canteenId, callback) {
+  if (!canteenId) return () => {};
+  const channel = supabase
+    .channel(`vendor-orders:${canteenId}`)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "orders", filter: `canteen_id=eq.${canteenId}` },
+      callback
+    )
+    .subscribe();
+  return () => supabase.removeChannel(channel);
 }
