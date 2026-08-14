@@ -142,9 +142,9 @@ export async function signOut() {
 }
 
 /*
- * signInWithPassword — email+password auth option (doc §6). Not currently
- * wired into the UI (magic link is the default flow) but kept available for
- * institutions that want password-based login alongside it.
+ * signInWithPassword — plain email+password auth, used by the vendor login
+ * tab (vendor accounts have no USN, so the USN&password flow doesn't apply
+ * to them).
  */
 export async function signInWithPassword(email, password) {
   const { data, error } = await supabase.auth.signInWithPassword({
@@ -153,6 +153,51 @@ export async function signInWithPassword(email, password) {
   });
   if (error) throw error;
   return data;
+}
+
+/*
+ * signInWithGoogle — OAuth login via Google. Redirects the browser to
+ * Google's consent screen and back; subscribeToAuthChanges() picks up the
+ * resulting session exactly like every other login method, no separate
+ * handling needed. Does nothing on its own until the 'google' provider is
+ * enabled with real credentials in the Supabase project's Auth settings --
+ * until then this surfaces Supabase's "Unsupported provider" error.
+ */
+export async function signInWithGoogle() {
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: { redirectTo: `${window.location.origin}/` },
+  });
+  if (error) throw error;
+}
+
+/*
+ * connectGithub — links a real GitHub account to the *currently signed-in*
+ * user via OAuth (as opposed to signInWithOAuth, which would sign in/up as
+ * a new session). Redirects the browser to GitHub's consent screen and
+ * back; deriveGithubUrlFromIdentities() then turns the returned identity
+ * into a real github.com/<username> link once the user's back. Requires
+ * both the 'github' provider to be enabled (real GitHub OAuth app
+ * credentials in Supabase) AND "Allow manual linking" turned on in the
+ * project's Auth settings -- absent either, this surfaces a clear Supabase
+ * error rather than silently doing nothing.
+ */
+export async function connectGithub() {
+  const { error } = await supabase.auth.linkIdentity({
+    provider: "github",
+    options: { redirectTo: `${window.location.origin}/` },
+  });
+  if (error) throw error;
+}
+
+// GitHub OAuth identities carry the GitHub username as user_name (or,
+// depending on API version, preferred_username) in identity_data -- that's
+// enough to build a real profile URL. Pure function so it's testable
+// without a live Supabase session.
+export function deriveGithubUrlFromIdentities(identities) {
+  const github = (identities || []).find((identity) => identity.provider === "github");
+  const username = github?.identity_data?.user_name || github?.identity_data?.preferred_username;
+  return username ? `https://github.com/${username}` : null;
 }
 
 /*
@@ -393,6 +438,8 @@ export async function updateProfile(
     avatar_url: updates.avatar_url,
     bio: updates.bio,
     ...(updates.phone !== undefined ? { phone: updates.phone } : {}),
+    ...(updates.roll_number !== undefined ? { roll_number: updates.roll_number } : {}),
+    ...(updates.department !== undefined ? { department: updates.department } : {}),
     ...(typeof updates.open_to_projects === "boolean"
       ? { open_to_projects: updates.open_to_projects }
       : {}),
@@ -460,6 +507,137 @@ export async function getPeople({
     console.warn("getPeople error:", err);
     return [];
   }
+}
+
+// "People you may know" -- ranked by shared branch/year, club overlap, and
+// shared community-activity tags. See get_people_you_may_know() (0024).
+export async function getPeopleYouMayKnow({ limit = 12 } = {}) {
+  try {
+    const { data, error } = await supabase.rpc("get_people_you_may_know", { p_limit: limit });
+    if (error) console.warn("getPeopleYouMayKnow warning:", error);
+    return data || [];
+  } catch (err) {
+    console.warn("getPeopleYouMayKnow error:", err);
+    return [];
+  }
+}
+
+// Auto cohort groups -- one per (campus, course, year), membership derived
+// automatically from profiles, nothing to create or join.
+export async function getCohortGroups(campusId) {
+  try {
+    const { data, error } = await supabase.rpc("list_cohort_groups", { p_campus_id: campusId });
+    if (error) console.warn("getCohortGroups warning:", error);
+    return data || [];
+  } catch (err) {
+    console.warn("getCohortGroups error:", err);
+    return [];
+  }
+}
+
+export async function getCohortGroupMembers({ campusId, course, year, limit = 30, cursor = null }) {
+  const { data, error } = await supabase.rpc("get_cohort_group_members", {
+    p_campus_id: campusId,
+    p_course: course,
+    p_year: year,
+    p_limit: limit,
+    p_cursor: cursor,
+  });
+  throwIfError(error);
+  return data || [];
+}
+
+/* =========================================================================
+   STUDENT ID VERIFICATION (doc §7)
+   student_verifications is a real table with real RLS (own row read/insert,
+   admin read/update-any -- see 0011) but had no frontend code at all before
+   this. document_path points into the private 'documents' storage bucket
+   (owner + admin read/write, see 0015) -- never public.
+========================================================================= */
+
+export async function getMyVerification(userId) {
+  if (!userId) return null;
+  const { data, error } = await supabase
+    .from("student_verifications")
+    .select("*")
+    .eq("user_id", userId)
+    .maybeSingle();
+  throwIfError(error);
+  return data;
+}
+
+// Re-submitting after a rejection reuses the same row (unique(user_id,
+// campus_id)) and resets it back to 'pending' -- admins only ever see one
+// live request per student, not an ever-growing history of attempts.
+export async function submitStudentVerification({ userId, campusId, usn, file }) {
+  if (!userId) throw new Error("Please sign in first.");
+  if (!file) throw new Error("Choose a photo of your student ID card.");
+
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const path = `${userId}/id-card-${Date.now()}-${safeName}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from("documents")
+    .upload(path, file, { cacheControl: "3600", upsert: false, contentType: file.type || "application/octet-stream" });
+  throwIfError(uploadError);
+
+  const { data, error } = await supabase
+    .from("student_verifications")
+    .upsert(
+      {
+        user_id: userId,
+        campus_id: campusId,
+        usn: usn || null,
+        verification_method: "document_upload",
+        document_path: path,
+        status: "pending",
+        verified_at: null,
+        verified_by: null,
+        rejection_reason: null,
+      },
+      { onConflict: "user_id,campus_id" }
+    )
+    .select()
+    .single();
+  throwIfError(error);
+  return data;
+}
+
+// Admin: a signed URL into the private bucket, valid briefly, so reviewing
+// a submission doesn't require making student ID photos public.
+export async function getVerificationDocumentUrl(path) {
+  const { data, error } = await supabase.storage.from("documents").createSignedUrl(path, 300);
+  throwIfError(error);
+  return data?.signedUrl;
+}
+
+export async function listPendingVerifications(campusId) {
+  let query = supabase
+    .from("student_verifications")
+    .select("*, profiles!student_verifications_user_id_fkey(name, course, year, usn, email)")
+    .eq("status", "pending")
+    .order("created_at", { ascending: true });
+  if (campusId) query = query.eq("campus_id", campusId);
+  const { data, error } = await query;
+  throwIfError(error);
+  return data || [];
+}
+
+export async function reviewStudentVerification(id, status, reason, reviewerId) {
+  if (!["verified", "rejected"].includes(status)) throw new Error("Invalid review status");
+  const { data, error } = await supabase
+    .from("student_verifications")
+    .update({
+      status,
+      verified_at: status === "verified" ? new Date().toISOString() : null,
+      verified_by: reviewerId || null,
+      rejection_reason: status === "rejected" ? (reason || "Not specified") : null,
+    })
+    .eq("id", id)
+    .select()
+    .single();
+  throwIfError(error);
+  return data;
 }
 
 export async function getLostFoundItems(campusId, { limit = 30, cursor = null } = {}) {
@@ -1246,13 +1424,18 @@ export function isValidPhone(phone) {
 // Capacity enforcement + waitlisting now happens atomically inside
 // register_for_event() (doc §35/§38) -- direct inserts into
 // event_registrations are no longer permitted (no client insert policy).
-// The registration confirmation dialog (name/USN/email come straight from
-// the signed-in profile; only phone is client-entered) is validated here
-// and again inside the RPC, which is the actual source of truth.
+// The registration confirmation dialog lets the student edit their display
+// name and add a roll number/department per-registration; phone/name are
+// validated here, USN/email still come from the signed-in profile inside
+// the RPC (unspoofable) -- roll number/department are free text, no format
+// to validate client-side.
 export async function registerEvent({
   eventId,
   userId,
   contactPhone,
+  contactName,
+  rollNumber,
+  department,
 }) {
   if (!userId) {
     throw new Error(
@@ -1268,12 +1451,19 @@ export async function registerEvent({
     throw new Error("Enter a valid phone number to register.");
   }
 
+  if (!contactName || !contactName.trim()) {
+    throw new Error("Enter a name to register.");
+  }
+
   const {
     data,
     error,
   } = await supabase.rpc("register_for_event", {
     p_event_id: eventId,
     p_contact_phone: contactPhone.trim(),
+    p_contact_name: contactName.trim(),
+    p_roll_number: rollNumber?.trim() || null,
+    p_department: department?.trim() || null,
   });
 
   throwIfError(error);

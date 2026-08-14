@@ -11,6 +11,7 @@ jest.mock("../lib/supabase", () => ({
   supabase: {
     rpc: jest.fn(),
     functions: { invoke: jest.fn() },
+    auth: { linkIdentity: jest.fn() },
   },
 }));
 
@@ -21,6 +22,8 @@ import {
   isValidPhone,
   transitionOrderStatus,
   startFoodOrderPayment,
+  connectGithub,
+  deriveGithubUrlFromIdentities,
 } from "./mvpService";
 
 describe("createFoodOrder", () => {
@@ -81,18 +84,43 @@ describe("createFoodOrder", () => {
 describe("registerEvent", () => {
   beforeEach(() => jest.clearAllMocks());
 
-  it("sends the confirmed contact phone number along with the event id", async () => {
+  it("sends the contact phone, name, roll number and department along with the event id", async () => {
     supabase.rpc.mockResolvedValue({ data: { status: "confirmed", registration_id: "reg-1" }, error: null });
 
     await registerEvent({
       eventId: "11111111-1111-4111-8111-111111111111",
       userId: "user-1",
       contactPhone: "9876543210",
+      contactName: "Alice Test",
+      rollNumber: "42",
+      department: "CSE",
     });
 
     expect(supabase.rpc).toHaveBeenCalledWith("register_for_event", {
       p_event_id: "11111111-1111-4111-8111-111111111111",
       p_contact_phone: "9876543210",
+      p_contact_name: "Alice Test",
+      p_roll_number: "42",
+      p_department: "CSE",
+    });
+  });
+
+  it("sends null for roll number/department when left blank", async () => {
+    supabase.rpc.mockResolvedValue({ data: { status: "confirmed" }, error: null });
+
+    await registerEvent({
+      eventId: "11111111-1111-4111-8111-111111111111",
+      userId: "user-1",
+      contactPhone: "9876543210",
+      contactName: "Alice Test",
+    });
+
+    expect(supabase.rpc).toHaveBeenCalledWith("register_for_event", {
+      p_event_id: "11111111-1111-4111-8111-111111111111",
+      p_contact_phone: "9876543210",
+      p_contact_name: "Alice Test",
+      p_roll_number: null,
+      p_department: null,
     });
   });
 
@@ -103,6 +131,7 @@ describe("registerEvent", () => {
       eventId: "11111111-1111-4111-8111-111111111111",
       userId: "user-1",
       contactPhone: "9876543210",
+      contactName: "Alice Test",
     });
 
     expect(result).toEqual({ status: "waitlisted", position: 4 });
@@ -110,19 +139,26 @@ describe("registerEvent", () => {
 
   it("rejects locally without calling the RPC when the phone number is missing or invalid", async () => {
     await expect(
-      registerEvent({ eventId: "11111111-1111-4111-8111-111111111111", userId: "user-1", contactPhone: "" })
+      registerEvent({ eventId: "11111111-1111-4111-8111-111111111111", userId: "user-1", contactPhone: "", contactName: "Alice" })
     ).rejects.toThrow(/valid phone number/i);
 
     await expect(
-      registerEvent({ eventId: "11111111-1111-4111-8111-111111111111", userId: "user-1", contactPhone: "abc123" })
+      registerEvent({ eventId: "11111111-1111-4111-8111-111111111111", userId: "user-1", contactPhone: "abc123", contactName: "Alice" })
     ).rejects.toThrow(/valid phone number/i);
 
     expect(supabase.rpc).not.toHaveBeenCalled();
   });
 
+  it("rejects locally without calling the RPC when the name is blank", async () => {
+    await expect(
+      registerEvent({ eventId: "11111111-1111-4111-8111-111111111111", userId: "user-1", contactPhone: "9876543210", contactName: "  " })
+    ).rejects.toThrow(/enter a name/i);
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
   it("requires sign-in before ever touching the network", async () => {
     await expect(
-      registerEvent({ eventId: "11111111-1111-4111-8111-111111111111", userId: null, contactPhone: "9876543210" })
+      registerEvent({ eventId: "11111111-1111-4111-8111-111111111111", userId: null, contactPhone: "9876543210", contactName: "Alice" })
     ).rejects.toThrow(/sign in/i);
     expect(supabase.rpc).not.toHaveBeenCalled();
   });
@@ -142,6 +178,48 @@ describe("isValidPhone", () => {
     expect(isValidPhone("")).toBe(false);
     expect(isValidPhone(null)).toBe(false);
     expect(isValidPhone(undefined)).toBe(false);
+  });
+});
+
+describe("connectGithub", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("calls linkIdentity with the github provider and a redirect back to the app", async () => {
+    supabase.auth.linkIdentity.mockResolvedValue({ error: null });
+
+    await connectGithub();
+
+    expect(supabase.auth.linkIdentity).toHaveBeenCalledWith({
+      provider: "github",
+      options: { redirectTo: expect.stringContaining("http") },
+    });
+  });
+
+  it("throws Supabase's error (e.g. provider not configured) instead of swallowing it", async () => {
+    supabase.auth.linkIdentity.mockResolvedValue({ error: { message: "Unsupported provider" } });
+
+    await expect(connectGithub()).rejects.toThrow("Unsupported provider");
+  });
+});
+
+describe("deriveGithubUrlFromIdentities", () => {
+  it("builds a github.com URL from the linked identity's username", () => {
+    const identities = [
+      { provider: "email", identity_data: {} },
+      { provider: "github", identity_data: { user_name: "octocat" } },
+    ];
+    expect(deriveGithubUrlFromIdentities(identities)).toBe("https://github.com/octocat");
+  });
+
+  it("falls back to preferred_username when user_name is absent", () => {
+    const identities = [{ provider: "github", identity_data: { preferred_username: "octocat2" } }];
+    expect(deriveGithubUrlFromIdentities(identities)).toBe("https://github.com/octocat2");
+  });
+
+  it("returns null when there's no linked github identity", () => {
+    expect(deriveGithubUrlFromIdentities([{ provider: "email", identity_data: {} }])).toBeNull();
+    expect(deriveGithubUrlFromIdentities([])).toBeNull();
+    expect(deriveGithubUrlFromIdentities(null)).toBeNull();
   });
 });
 

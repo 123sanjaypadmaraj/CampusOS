@@ -207,3 +207,9 @@ export async function setClubMemberRole(memberId, role) {
   const { error } = await supabase.from("club_members").update({ role }).eq("id", memberId);
   throwIfError(error);
 }
+
+export {
+  listPendingVerifications,
+  reviewStudentVerification,
+  getVerificationDocumentUrl,
+} from "../../services/mvpService";

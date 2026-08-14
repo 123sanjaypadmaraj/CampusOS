@@ -20,6 +20,9 @@ import {
   signUpWithUsn,
   signInWithUsn,
   signInWithPassword,
+  signInWithGoogle,
+  connectGithub,
+  deriveGithubUrlFromIdentities,
   uploadPrintJob,
   subscribeToAuthChanges,
   subscribeToUserNotifications,
@@ -38,6 +41,9 @@ import {
   getMyClubs,
   signOut,
   getPeople,
+  getPeopleYouMayKnow,
+  getCohortGroups,
+  getCohortGroupMembers,
   updateProfile,
   getMyPrintJobs,
   getMyServiceRequests,
@@ -56,6 +62,8 @@ import {
   createMarketplaceListing,
   markMarketplaceListingSold,
   reportContent,
+  getMyVerification,
+  submitStudentVerification,
 } from "./services/mvpService";
 import { openRazorpayCheckout } from "./features/payments/razorpay";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
@@ -127,7 +135,7 @@ import {
   HiChatBubbleLeftRight,
   HiCog6Tooth,
 } from "react-icons/hi2";
-import { FaLinkedin, FaGithub } from "react-icons/fa6";
+import { FaLinkedin, FaGithub, FaGoogle } from "react-icons/fa6";
 
 /* =========================================================
    NAVIGATION
@@ -1037,6 +1045,7 @@ function App() {
   const [bookings, setBookings] = useState([]);
   const [lostItems, setLostItems] = useState([]);
   const [marketListings, setMarketListings] = useState([]);
+  const [verification, setVerification] = useState(null);
 
   const toastTimer = useRef(null);
 
@@ -1630,6 +1639,13 @@ function App() {
       };
     }, [authUser?.id]);
 
+    const reloadVerification = () => {
+      if (!profile?.id) { setVerification(null); return; }
+      getMyVerification(profile.id).then(setVerification).catch((error) => console.error("Verification status loading failed", error));
+    };
+
+    useEffect(() => { reloadVerification(); }, [profile?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
     useEffect(() => {
       if (!campusId) return;
 
@@ -1666,6 +1682,21 @@ function App() {
         setServiceRequests(requests); setBookings(myBookings); setOrders(myOrders);
       }).catch((error) => console.error("Personal workspace loading failed", error));
     }, [authUser?.id]);
+
+    // Once a GitHub identity is linked (via the profile page's "Connect
+    // GitHub" button), derive a real github.com/<username> link from it and
+    // save it to the profile -- runs on every auth/profile change so it's
+    // self-healing (catches a link completed in a previous session too),
+    // and is a no-op once profile.github_url already matches.
+    useEffect(() => {
+      if (!authUser?.identities || !profile?.id) return;
+      const derived = deriveGithubUrlFromIdentities(authUser.identities);
+      if (derived && derived !== profile.github_url) {
+        updateProfile(profile.id, { github_url: derived })
+          .then(applyProfileUpdate)
+          .catch((error) => console.error("GitHub link sync failed", error));
+      }
+    }, [authUser?.identities, profile?.id, profile?.github_url]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const renderPage = () => {
     if (active === "home") {
@@ -1738,7 +1769,7 @@ function App() {
     }
 
     if (active === "socialize") {
-      return <Socialize notify={notify} people={people} profile={profile} />;
+      return <Socialize notify={notify} people={people} profile={profile} campusId={campusId} />;
     }
 
     if (active === "profile") {
@@ -1752,6 +1783,9 @@ function App() {
           profile={profile}
           onProfileUpdated={applyProfileUpdate}
           stats={{ posts: posts.length, events: registeredEventIds.length, clubs: 0 }}
+          verification={verification}
+          onVerificationChanged={reloadVerification}
+          campusId={campusId}
         />
       );
     }
@@ -3011,22 +3045,30 @@ function Events({
   );
 }
 
-// Secondary confirmation dialog shown when "Register" is clicked. Name/USN/
-// email come read-only from the signed-in profile (already collected at
-// login) -- only the phone number, which nothing has captured before now,
-// is entered here. Confirming calls the same registerEvent() RPC path as
-// before, now carrying that phone number along.
+// Secondary confirmation dialog shown when "Register" is clicked. Name is
+// editable (a preferred name for this registration); USN/email stay
+// read-only, sourced from the signed-in profile server-side (unspoofable).
+// Phone/roll number/department are entered here and, once submitted,
+// remembered on the profile so they're prefilled again next time.
 function EventRegistrationConfirmModal({ event, profile, authUser, onClose, onConfirmed, onProfileUpdated }) {
+  const [name, setName] = useState(profile?.name || authUser?.user_metadata?.name || "");
   const [phone, setPhone] = useState(profile?.phone || "");
+  const [rollNumber, setRollNumber] = useState(profile?.roll_number || "");
+  const [department, setDepartment] = useState(profile?.department || "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  const name = profile?.name || authUser?.user_metadata?.name || "";
   const usn = profile?.usn || authUser?.user_metadata?.usn || "";
   const email = profile?.email || authUser?.email || "";
 
   const handleConfirm = async () => {
+    const trimmedName = name.trim();
     const trimmedPhone = phone.trim();
+
+    if (!trimmedName) {
+      setError("Enter a name.");
+      return;
+    }
     if (!isValidPhone(trimmedPhone)) {
       setError("Enter a valid phone number (7-15 digits).");
       return;
@@ -3039,10 +3081,16 @@ function EventRegistrationConfirmModal({ event, profile, authUser, onClose, onCo
         eventId: event.id,
         userId: authUser.id,
         contactPhone: trimmedPhone,
+        contactName: trimmedName,
+        rollNumber,
+        department,
       });
 
-      if (profile && profile.phone !== trimmedPhone) {
-        onProfileUpdated?.({ ...profile, phone: trimmedPhone });
+      if (profile) {
+        const next = { ...profile, phone: trimmedPhone };
+        if (rollNumber.trim()) next.roll_number = rollNumber.trim();
+        if (department.trim()) next.department = department.trim();
+        onProfileUpdated?.(next);
       }
 
       onConfirmed(result);
@@ -3063,7 +3111,13 @@ function EventRegistrationConfirmModal({ event, profile, authUser, onClose, onCo
       <div className="form-grid">
         <label>
           Name
-          <input value={name} disabled readOnly />
+          <input
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+              if (error) setError("");
+            }}
+          />
         </label>
         <label>
           USN
@@ -3076,16 +3130,35 @@ function EventRegistrationConfirmModal({ event, profile, authUser, onClose, onCo
         <input value={email} disabled readOnly />
       </label>
 
+      <div className="form-grid">
+        <label>
+          Phone number
+          <input
+            type="tel"
+            value={phone}
+            placeholder="e.g. 9876543210"
+            onChange={(e) => {
+              setPhone(e.target.value);
+              if (error) setError("");
+            }}
+          />
+        </label>
+        <label>
+          Roll number
+          <input
+            value={rollNumber}
+            placeholder="Optional"
+            onChange={(e) => setRollNumber(e.target.value)}
+          />
+        </label>
+      </div>
+
       <label>
-        Phone number
+        Department
         <input
-          type="tel"
-          value={phone}
-          placeholder="e.g. 9876543210"
-          onChange={(e) => {
-            setPhone(e.target.value);
-            if (error) setError("");
-          }}
+          value={department}
+          placeholder="Optional — e.g. Computer Science & Engineering"
+          onChange={(e) => setDepartment(e.target.value)}
         />
       </label>
 
@@ -3784,7 +3857,8 @@ function Store({ items, cart, addStore, openModal }) {
    LINKEDIN-STYLE PROFILE
 ========================================================= */
 
-function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfileUpdated, stats = {} }) {
+function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfileUpdated, stats = {}, verification, onVerificationChanged, campusId }) {
+  const [verifyModalOpen, setVerifyModalOpen] = useState(false);
   if (!user) {
     return (
       <section className="page-section profile-page">
@@ -3815,9 +3889,16 @@ function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfil
 
         <div className="linkedin-intro">
           <div>
-            <span className="verified-pill">
-              <HiShieldCheck /> VERIFIED STUDENT
-            </span>
+            {verification?.status === "verified" ? (
+              <span className="verified-pill">
+                <HiShieldCheck /> VERIFIED STUDENT
+              </span>
+            ) : (
+              <button className="verified-pill unverified" onClick={() => setVerifyModalOpen(true)}>
+                <HiShieldCheck />
+                {verification?.status === "pending" ? "VERIFICATION PENDING" : "GET VERIFIED"}
+              </button>
+            )}
             <h1>{user.name}</h1>
             <p>
               {user.course} · {user.year} · New Horizon College of Engineering
@@ -3835,20 +3916,39 @@ function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfil
           </button>
         </div>
 
-        {(profile?.linkedin_url || profile?.github_url) && (
-          <div className="linkedin-social-links">
-            {profile?.linkedin_url && (
-              <a href={profile.linkedin_url} target="_blank" rel="noreferrer">
-                <FaLinkedin /> LinkedIn
-              </a>
-            )}
-            {profile?.github_url && (
-              <a href={profile.github_url} target="_blank" rel="noreferrer">
-                <FaGithub /> GitHub
-              </a>
-            )}
-          </div>
-        )}
+        {/* Always visible on the profile's landing view, not just inside
+            Edit profile -- a connected account is a clickable pill, an
+            unconnected one is a one-click "Connect" prompt right here. */}
+        <div className="linkedin-social-links">
+          {profile?.linkedin_url ? (
+            <a href={profile.linkedin_url} target="_blank" rel="noreferrer">
+              <FaLinkedin /> LinkedIn
+            </a>
+          ) : (
+            <button className="ghost" onClick={() => openModal("edit-profile")}>
+              <FaLinkedin /> Connect LinkedIn
+            </button>
+          )}
+          {profile?.github_url ? (
+            <a href={profile.github_url} target="_blank" rel="noreferrer">
+              <FaGithub /> GitHub
+            </a>
+          ) : (
+            <button
+              className="ghost"
+              onClick={async () => {
+                try {
+                  await connectGithub(); // redirects the browser away on success
+                } catch (error) {
+                  console.error("Connect GitHub:", error);
+                  notify(error.message || "Unable to connect GitHub");
+                }
+              }}
+            >
+              <FaGithub /> Connect GitHub
+            </button>
+          )}
+        </div>
 
         <div className="linkedin-actions">
           <button className="primary" onClick={() => { navigator.clipboard?.writeText(window.location.href); notify("Profile link copied"); }}>
@@ -3888,6 +3988,28 @@ function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfil
             <b>{profile?.open_to_projects ? "Open" : "Closed"}<span>Projects</span></b>
           </div>
         </div>
+      </div>
+
+      <div className="profile-box profile-wide-box">
+        <span className="section-kicker">STUDENT VERIFICATION</span>
+        {verification?.status === "verified" && (
+          <p><HiShieldCheck /> Verified — approved {new Date(verification.verified_at).toLocaleDateString()}.</p>
+        )}
+        {verification?.status === "pending" && (
+          <p>Your student ID is under review. This usually takes a day or two.</p>
+        )}
+        {verification?.status === "rejected" && (
+          <>
+            <p>Your last submission was rejected{verification.rejection_reason ? `: ${verification.rejection_reason}` : "."}</p>
+            <button className="primary" onClick={() => setVerifyModalOpen(true)}>Resubmit ID</button>
+          </>
+        )}
+        {!verification && (
+          <>
+            <p>Upload a photo of your college ID card so classmates and staff know you&apos;re a real, verified student.</p>
+            <button className="primary" onClick={() => setVerifyModalOpen(true)}>Verify my student ID</button>
+          </>
+        )}
       </div>
 
       <div className="profile-box profile-wide-box">
@@ -3942,7 +4064,56 @@ function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfil
           )}
         </div>
       </div>
+
+      {verifyModalOpen && (
+        <VerifyIdModal
+          profile={profile}
+          campusId={campusId}
+          onClose={() => setVerifyModalOpen(false)}
+          onSubmitted={() => { setVerifyModalOpen(false); onVerificationChanged(); notify("ID submitted for review"); }}
+          notify={notify}
+        />
+      )}
     </section>
+  );
+}
+
+function VerifyIdModal({ profile, campusId, onClose, onSubmitted, notify }) {
+  const [file, setFile] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  return (
+    <ModalShell kicker="VERIFICATION" title="Verify your student ID" onClose={onClose}>
+      <p>
+        Upload a clear photo of your college ID card (front side, USN and name
+        visible). A campus admin reviews it — this is never shown publicly.
+      </p>
+      <label>
+        ID card photo
+        <input
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          onChange={(e) => setFile(e.target.files?.[0] || null)}
+        />
+      </label>
+      <button
+        className="primary wide"
+        disabled={submitting || !file}
+        onClick={async () => {
+          try {
+            setSubmitting(true);
+            await submitStudentVerification({ userId: profile.id, campusId, usn: profile.usn, file });
+            onSubmitted();
+          } catch (error) {
+            notify(error.message || "Could not submit for verification");
+          } finally {
+            setSubmitting(false);
+          }
+        }}
+      >
+        {submitting ? "Uploading…" : "Submit for review"}
+      </button>
+    </ModalShell>
   );
 }
 
@@ -3950,7 +4121,8 @@ function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfil
    CONNECT (classmate directory — nee "Socialize")
 ========================================================= */
 
-function Socialize({ notify, people = [], profile }) {
+function Socialize({ notify, people = [], profile, campusId }) {
+  const [tab, setTab] = useState("directory"); // 'directory' | 'suggestions' | 'groups'
   const [query, setQuery] = useState("");
   const [courseFilter, setCourseFilter] = useState("All");
   const [yearFilter, setYearFilter] = useState("All");
@@ -4015,6 +4187,23 @@ function Socialize({ notify, people = [], profile }) {
         }
       />
 
+      <div className="chips" style={{ marginBottom: 20 }}>
+        <button className={tab === "directory" ? "chip active" : "chip"} onClick={() => setTab("directory")}>
+          Directory
+        </button>
+        <button className={tab === "suggestions" ? "chip active" : "chip"} onClick={() => setTab("suggestions")}>
+          <HiSparkles /> Suggested for you
+        </button>
+        <button className={tab === "groups" ? "chip active" : "chip"} onClick={() => setTab("groups")}>
+          <HiUserGroup /> Groups
+        </button>
+      </div>
+
+      {tab === "suggestions" && <SuggestedForYou notify={notify} />}
+      {tab === "groups" && <CohortGroups notify={notify} campusId={campusId} profile={profile} />}
+
+      {tab === "directory" && (
+      <>
       <div className="socialize-hero">
         <div>
           <span className="section-kicker">CLASSMATE DIRECTORY</span>
@@ -4122,7 +4311,186 @@ function Socialize({ notify, people = [], profile }) {
           </div>
         </aside>
       </div>
+      </>
+      )}
     </section>
+  );
+}
+
+/* =========================================================
+   PEOPLE YOU MAY KNOW
+========================================================= */
+
+function SuggestedForYou({ notify }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [suggestions, setSuggestions] = useState([]);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      setSuggestions(await getPeopleYouMayKnow({ limit: 12 }));
+    } catch (err) {
+      setError(err.message || "Could not load suggestions");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading) return <LoadingState label="Finding people you may know…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+  if (suggestions.length === 0) {
+    return (
+      <EmptyState
+        icon={<HiSparkles />}
+        title="No suggestions yet"
+        text="Join a club, post something, or fill in your branch and year — the more the campus knows about you, the better these get."
+      />
+    );
+  }
+
+  return (
+    <div className="socialize-feed people-grid">
+      {suggestions.map((person) => (
+        <SuggestedPersonCard key={person.id} person={person} notify={notify} />
+      ))}
+    </div>
+  );
+}
+
+function SuggestedPersonCard({ person, notify }) {
+  const reasons = [];
+  if (person.course) reasons.push(`Same branch (${person.course})`);
+  if (person.year) reasons.push(person.year);
+  if (person.shared_clubs > 0) reasons.push(`${person.shared_clubs} club${person.shared_clubs > 1 ? "s" : ""} in common`);
+  if (person.shared_tags > 0) reasons.push(`${person.shared_tags} shared interest${person.shared_tags > 1 ? "s" : ""}`);
+
+  return (
+    <article className="person-card">
+      <div className="person-top">
+        <div className="big-avatar small">{person.name?.[0] || "?"}</div>
+        <div>
+          <h3>{person.name}</h3>
+          <p>{person.course} · {person.year}</p>
+        </div>
+        <span className="match">{person.score}%</span>
+      </div>
+
+      {reasons.length > 0 && (
+        <p className="classmate-bio">{reasons.join(" · ")}</p>
+      )}
+
+      {person.skills?.length > 0 && (
+        <div className="skill-list">
+          {person.skills.map((skill) => <span key={skill}>{skill}</span>)}
+        </div>
+      )}
+
+      <div className="person-actions">
+        <button onClick={() => notify(`Connection request sent to ${person.name}`)}>
+          <HiUserPlus /> Connect
+        </button>
+      </div>
+    </article>
+  );
+}
+
+/* =========================================================
+   AUTO COHORT GROUPS
+========================================================= */
+
+function CohortGroups({ notify, campusId, profile }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [groups, setGroups] = useState([]);
+  const [openGroup, setOpenGroup] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      setGroups(await getCohortGroups(campusId));
+    } catch (err) {
+      setError(err.message || "Could not load groups");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, [campusId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading) return <LoadingState label="Forming cohort groups…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+  if (groups.length === 0) {
+    return <EmptyState icon={<HiUserGroup />} title="No groups yet" text="Groups form automatically once at least two students share a branch and year." />;
+  }
+
+  return (
+    <div>
+      <p className="modal-subtext" style={{ marginBottom: 16 }}>
+        Formed automatically from branch + year — no one has to create or join these.
+      </p>
+      <div className="resource-list">
+        {groups.map((group) => (
+          <article className="resource-row" key={`${group.course}-${group.year}`}>
+            <div className="resource-icon"><HiUserGroup /></div>
+            <div>
+              <b>{group.course} · {group.year}</b>
+              <small>
+                {group.member_count} students
+                {profile?.course === group.course && profile?.year === group.year ? " · this is your cohort" : ""}
+              </small>
+            </div>
+            <button onClick={() => setOpenGroup(group)}>
+              View members <HiArrowRight />
+            </button>
+          </article>
+        ))}
+      </div>
+
+      {openGroup && (
+        <CohortMembersModal
+          group={openGroup}
+          campusId={campusId}
+          onClose={() => setOpenGroup(null)}
+          notify={notify}
+        />
+      )}
+    </div>
+  );
+}
+
+function CohortMembersModal({ group, campusId, onClose, notify }) {
+  const [members, setMembers] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    getCohortGroupMembers({ campusId, course: group.course, year: group.year })
+      .then(setMembers)
+      .catch((err) => setError(err.message || "Could not load members"));
+  }, [campusId, group.course, group.year]);
+
+  return (
+    <ModalShell kicker="COHORT GROUP" title={`${group.course} · ${group.year}`} onClose={onClose}>
+      {error && <ErrorState text={error} />}
+      {!error && !members && <LoadingState label="Loading members…" />}
+      {members && members.length === 0 && <EmptyState title="No members visible" />}
+      {members && members.map((m) => (
+        <div key={m.id} className="resource-row">
+          <div className="resource-icon">{m.name?.[0] || "?"}</div>
+          <div>
+            <b>{m.name}</b>
+            <small>{m.department || m.course}{m.open_to_projects ? " · Open to projects" : ""}</small>
+          </div>
+          <button onClick={() => notify(`Connection request sent to ${m.name}`)}>
+            <HiUserPlus />
+          </button>
+        </div>
+      ))}
+    </ModalShell>
   );
 }
 
@@ -5205,6 +5573,7 @@ function PostComposer({ onClose, onCreate, user }) {
 
 function LoginModal({ onClose, notify }) {
   const [mode, setMode] = useState("magic-link"); // 'magic-link' | 'usn' | 'vendor'
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   return (
     <ModalShell
@@ -5212,6 +5581,25 @@ function LoginModal({ onClose, notify }) {
       title="Welcome to Campus OS"
       onClose={onClose}
     >
+      <button
+        className="ghost wide google-signin-button"
+        disabled={googleLoading}
+        onClick={async () => {
+          try {
+            setGoogleLoading(true);
+            await signInWithGoogle(); // redirects the browser away on success
+          } catch (error) {
+            console.error("Google sign-in:", error);
+            notify(error.message || "Unable to sign in with Google");
+            setGoogleLoading(false);
+          }
+        }}
+      >
+        <FaGoogle /> {googleLoading ? "Redirecting…" : "Continue with Google"}
+      </button>
+
+      <div className="login-divider"><span>or</span></div>
+
       <div className="chips" style={{ marginBottom: 16 }}>
         <button
           className={mode === "magic-link" ? "chip active" : "chip"}
@@ -5515,6 +5903,8 @@ function EditProfileModal({ profile, onClose, onSaved, notify }) {
     course: profile.course || "",
     year: profile.year || "",
     usn: profile.usn || "",
+    roll_number: profile.roll_number || "",
+    department: profile.department || "",
     bio: profile.bio || "",
     skills: (profile.skills || []).join(", "),
     achievements: (profile.achievements || []).join(", "),
@@ -5530,6 +5920,8 @@ function EditProfileModal({ profile, onClose, onSaved, notify }) {
       <label>USN<input value={form.usn} onChange={(e) => change("usn", e.target.value)} /></label>
       <label>Course<input value={form.course} onChange={(e) => change("course", e.target.value)} /></label>
       <label>Year<input value={form.year} onChange={(e) => change("year", e.target.value)} /></label>
+      <label>Roll number<input value={form.roll_number} onChange={(e) => change("roll_number", e.target.value)} placeholder="Optional" /></label>
+      <label>Department<input value={form.department} onChange={(e) => change("department", e.target.value)} placeholder="e.g. Computer Science & Engineering" /></label>
     </div>
     <label>Bio<textarea value={form.bio} onChange={(e) => change("bio", e.target.value)} placeholder="What are you building or learning?" /></label>
     <label>Skills (comma separated)<input value={form.skills} onChange={(e) => change("skills", e.target.value)} placeholder="React, Python, Design" /></label>

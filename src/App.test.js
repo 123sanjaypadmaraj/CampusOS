@@ -21,6 +21,10 @@ jest.mock("./services/mvpService", () => ({
   publishPost: jest.fn(() => Promise.resolve(null)),
   markAllNotificationsRead: jest.fn(() => Promise.resolve(null)),
   registerEvent: jest.fn(() => Promise.resolve(null)),
+  signInWithGoogle: jest.fn(() => Promise.resolve(undefined)),
+  connectGithub: jest.fn(() => Promise.resolve(undefined)),
+  deriveGithubUrlFromIdentities: jest.fn(() => null),
+  getMyVerification: jest.fn(() => Promise.resolve(null)),
   isValidPhone: jest.fn((value) => typeof value === "string" && /^\+?[0-9]{7,15}$/.test(value.trim())),
   sendMagicLink: jest.fn(() => Promise.resolve(true)),
   uploadPrintJob: jest.fn(() => Promise.resolve(null)),
@@ -126,6 +130,18 @@ describe("App button interactions", () => {
     expect(campusButton).toHaveClass("active");
   });
 
+  test("starts Google OAuth sign-in from the login modal", async () => {
+    const { signInWithGoogle } = require("./services/mvpService");
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("sign-in-button"));
+
+    fireEvent.click(await screen.findByRole("button", { name: /Continue with Google/i }));
+
+    await waitFor(() => {
+      expect(signInWithGoogle).toHaveBeenCalled();
+    });
+  });
+
   describe("event registration confirmation dialog", () => {
     const signInAs = (overrides = {}) => {
       const { getCurrentUser, getOrCreateProfile } = require("./services/mvpService");
@@ -169,10 +185,43 @@ describe("App button interactions", () => {
           eventId: "00000000-0000-4000-a000-000000000001",
           userId: "user-1",
           contactPhone: "9876543210",
+          contactName: "Sanjay",
+          rollNumber: "",
+          department: "",
         });
       });
 
       expect(await screen.findByText(/registration confirmed/i)).toBeInTheDocument();
+    });
+
+    test("lets the name be edited and submits roll number/department", async () => {
+      const { registerEvent } = require("./services/mvpService");
+      registerEvent.mockResolvedValueOnce({ status: "confirmed", registration_id: "reg-1" });
+      signInAs();
+
+      render(<App />);
+      fireEvent.click(await screen.findByTestId("nav-events-button"));
+
+      const registerButtons = await screen.findAllByRole("button", { name: "Register" });
+      fireEvent.click(registerButtons[0]);
+
+      await screen.findByText(/Review your details/i);
+      fireEvent.change(screen.getByDisplayValue("Sanjay"), { target: { value: "Sanjay P" } });
+      fireEvent.change(screen.getByPlaceholderText(/9876543210/), { target: { value: "9876543210" } });
+      fireEvent.change(screen.getByPlaceholderText(/Optional$/), { target: { value: "42" } }); // roll number
+      fireEvent.change(screen.getByPlaceholderText(/Computer Science/), { target: { value: "CSE" } }); // department
+      fireEvent.click(screen.getByRole("button", { name: /Confirm registration/i }));
+
+      await waitFor(() => {
+        expect(registerEvent).toHaveBeenCalledWith({
+          eventId: "00000000-0000-4000-a000-000000000001",
+          userId: "user-1",
+          contactPhone: "9876543210",
+          contactName: "Sanjay P",
+          rollNumber: "42",
+          department: "CSE",
+        });
+      });
     });
 
     test("blocks confirmation and never calls registerEvent when the phone number is missing", async () => {

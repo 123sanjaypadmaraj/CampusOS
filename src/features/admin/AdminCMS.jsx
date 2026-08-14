@@ -8,6 +8,9 @@ import {
   HiTrash,
   HiCalendarDays,
   HiUserGroup,
+  HiShieldCheck,
+  HiXCircle,
+  HiDocumentText,
 } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import * as adminApi from "./api";
@@ -36,6 +39,7 @@ const TABS = [
   ["food", "Food & Canteens"],
   ["announcements", "Announcements"],
   ["events", "Events & Clubs"],
+  ["verifications", "Student Verifications"],
 ];
 
 export default function AdminCMS({ notify, campusId, authUser }) {
@@ -66,7 +70,94 @@ export default function AdminCMS({ notify, campusId, authUser }) {
       {tab === "food" && <FoodTab notify={notify} campusId={campusId} />}
       {tab === "announcements" && <AnnouncementsTab notify={notify} campusId={campusId} />}
       {tab === "events" && <EventsClubsTab notify={notify} campusId={campusId} authUser={authUser} />}
+      {tab === "verifications" && <VerificationsTab notify={notify} campusId={campusId} authUser={authUser} />}
     </section>
+  );
+}
+
+/* =========================================================
+   STUDENT VERIFICATIONS (doc §7)
+========================================================= */
+
+function VerificationsTab({ notify, campusId, authUser }) {
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busyId, setBusyId] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      setRequests(await adminApi.listPendingVerifications(campusId));
+    } catch (err) {
+      setError(err.message || "Could not load verification requests");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, [campusId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const review = async (request, status) => {
+    let reason;
+    if (status === "rejected") {
+      reason = window.prompt("Reason for rejecting this ID? (shown to the student)");
+      if (reason === null) return;
+    }
+    try {
+      setBusyId(request.id);
+      await adminApi.reviewStudentVerification(request.id, status, reason, authUser?.id);
+      notify(status === "verified" ? "Student verified" : "Verification rejected");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not review this request");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (loading) return <LoadingState label="Loading verification requests…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  return (
+    <div className="resource-list">
+      {requests.length === 0 && (
+        <EmptyState icon={<HiShieldCheck />} title="No pending requests" text="New student ID submissions will show up here." />
+      )}
+      {requests.map((request) => (
+        <article className="resource-row" key={request.id}>
+          <div>
+            <b>{request.profiles?.name || "Unknown student"}</b>
+            <small>
+              {request.profiles?.course} · {request.profiles?.year} · USN {request.profiles?.usn || request.usn || "—"}
+            </small>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {request.document_path && (
+              <button
+                onClick={async () => {
+                  try {
+                    const url = await adminApi.getVerificationDocumentUrl(request.document_path);
+                    window.open(url, "_blank", "noopener,noreferrer");
+                  } catch (err) {
+                    notify(err.message || "Could not open document");
+                  }
+                }}
+              >
+                <HiDocumentText /> View ID
+              </button>
+            )}
+            <button className="primary" disabled={busyId === request.id} onClick={() => review(request, "verified")}>
+              <HiShieldCheck /> Approve
+            </button>
+            <button disabled={busyId === request.id} onClick={() => review(request, "rejected")}>
+              <HiXCircle /> Reject
+            </button>
+          </div>
+        </article>
+      ))}
+    </div>
   );
 }
 

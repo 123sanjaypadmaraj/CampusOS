@@ -11,11 +11,24 @@
 
 import { test, expect } from '@playwright/test';
 import { seedRealSession } from './helpers/realSession.js';
+import { seedFreshVendorTestOrder } from './helpers/seedVendorOrder.js';
 
 const UDUPI_VENDOR = 'udupi.canteen@nhce.edu.in';
 const TANGO_VENDOR = 'tango.canteen@nhce.edu.in';
 
 test.describe.serial('Vendor order queue', () => {
+  // Clears out any order left behind by a previous run and seeds exactly
+  // one fresh "Rava Idli" order in RECEIVED. Udupi's real queue also
+  // contains genuine (non-test) "Rava Idli" orders from earlier multi-user
+  // testing, so `.first()` filtered on the *marker notes* rather than the
+  // dish name is what actually guarantees a single match -- filtering on
+  // "Rava Idli" alone was the root cause of the flake (see
+  // helpers/seedVendorOrder.js for the full story).
+  test.beforeAll(async () => {
+    await seedFreshVendorTestOrder();
+  });
+
+
   test('Tango (a different canteen) cannot see Udupi\'s order', async ({ page, context }) => {
     await seedRealSession(context, TANGO_VENDOR);
     await page.goto('/');
@@ -37,11 +50,11 @@ test.describe.serial('Vendor order queue', () => {
     await page.getByTestId('nav-vendor-button').click();
     await page.waitForLoadState('networkidle');
 
-    const orderCard = page.locator('.resource-row', { hasText: 'Rava Idli' }).first();
+    const orderCard = page.locator('.resource-row', { hasText: 'Live vendor-queue test order' }).first();
     await expect(orderCard).toBeVisible({ timeout: 15000 });
     await expect(orderCard).toContainText('RECEIVED');
+    await expect(orderCard).toContainText('Rava Idli');
     await expect(orderCard).toContainText('Extra chutney please');
-    await expect(orderCard).toContainText('Live vendor-queue test order');
 
     await orderCard.getByRole('button', { name: /Accept/i }).click();
     await expect(orderCard).toContainText('ACCEPTED', { timeout: 10000 });
@@ -77,7 +90,7 @@ test.describe.serial('Vendor order queue', () => {
     await page.waitForLoadState('networkidle');
     await page.getByTestId('nav-vendor-button').click();
     await page.waitForLoadState('networkidle');
-    const orderCard = page.locator('.resource-row', { hasText: 'Rava Idli' }).first();
+    const orderCard = page.locator('.resource-row', { hasText: 'Live vendor-queue test order' }).first();
     await expect(orderCard).toBeVisible({ timeout: 15000 });
     await expect(orderCard).toContainText('READY');
   });
