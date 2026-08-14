@@ -21,4 +21,5 @@ playwright-report
 .service_role_key.local
 scripts/.sessions.json
 scripts/.vendor-credentials.local.json
+scripts/.facilities-credentials.local.json
 supabase/.temp/

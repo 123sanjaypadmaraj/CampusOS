@@ -74,6 +74,7 @@ import { useOnlineStatus } from "./hooks/useOnlineStatus";
 import { LoadingState, EmptyState, ErrorState, OfflineBanner } from "./components/ui/States";
 import AdminCMS from "./features/admin/AdminCMS";
 import VendorDashboard from "./features/vendor/VendorDashboard";
+import FacilitiesDashboard from "./features/facilities/FacilitiesDashboard";
 
 import {
   HiHome,
@@ -1876,6 +1877,18 @@ function App() {
       return <VendorDashboard notify={notify} authUser={authUser} />;
     }
 
+    if (active === "facilities") {
+      if (profile?.role !== "facilities_staff" && !(profile?.role === "college_admin" || profile?.role === "super_admin")) {
+        return (
+          <ErrorState
+            title="Facilities staff access only"
+            text="This area is restricted to facilities staff accounts."
+          />
+        );
+      }
+      return <FacilitiesDashboard notify={notify} campusId={campusId} />;
+    }
+
     if (active === "autonomous") {
       return <AutonomousCampus notify={notify} devices={autonomousDevices} />;
     }
@@ -2042,6 +2055,16 @@ function App() {
           >
             <span><HiShoppingBag /></span>
             <small>Dashboard</small>
+          </button>
+        )}
+        {profile?.role === "facilities_staff" && (
+          <button
+            className={active === "facilities" ? "active" : ""}
+            onClick={() => go("facilities")}
+            data-testid="nav-facilities-button"
+          >
+            <span><HiWrenchScrewdriver /></span>
+            <small>Tickets</small>
           </button>
         )}
       </nav>

@@ -10,6 +10,7 @@ import {
   HiClock,
   HiTruck,
   HiQrCode,
+  HiPrinter,
 } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import * as vendorApi from "./api";
@@ -535,22 +536,107 @@ function FoodItemForm({ item, canteenId, categories, onClose, onSaved, notify })
 const RATE_LABELS = { black_white: "Black & White (per page)", colour: "Colour (per page)" };
 
 function PrintPricingManager({ rates, notify, onChanged }) {
+  const [tab, setTab] = useState("jobs");
+
   return (
     <section className="page-section admin-cms">
       <div className="section-head">
         <div>
           <span className="section-kicker">VENDOR DASHBOARD</span>
           <h1>Print Shop</h1>
-          <p>Set the per-page price used to quote every print job the moment it&apos;s uploaded.</p>
+          <p>Manage the print queue and the per-page price quoted on upload.</p>
         </div>
       </div>
 
-      <div className="resource-list">
-        {rates.map((rate) => (
-          <PrintRateRow key={rate.id} rate={rate} notify={notify} onChanged={onChanged} />
-        ))}
+      <div className="socialize-filter-row">
+        <button className={tab === "jobs" ? "chip active" : "chip"} onClick={() => setTab("jobs")}>Print Queue</button>
+        <button className={tab === "pricing" ? "chip active" : "chip"} onClick={() => setTab("pricing")}>Pricing</button>
       </div>
+
+      {tab === "jobs" && <PrintJobQueue notify={notify} />}
+
+      {tab === "pricing" && (
+        <div className="resource-list">
+          {rates.map((rate) => (
+            <PrintRateRow key={rate.id} rate={rate} notify={notify} onChanged={onChanged} />
+          ))}
+        </div>
+      )}
     </section>
+  );
+}
+
+const PRINT_NEXT_STEP = {
+  UPLOADED: { label: "Start processing", to: "PROCESSING" },
+  PROCESSING: { label: "Queue for printing", to: "QUEUED" },
+  QUEUED: { label: "Start printing", to: "PRINTING" },
+  PRINTING: { label: "Mark ready", to: "READY" },
+  READY: { label: "Mark collected", to: "COLLECTED" },
+};
+
+function PrintJobQueue({ notify }) {
+  const [jobs, setJobs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busyId, setBusyId] = useState(null);
+
+  const reload = async () => {
+    try {
+      setError("");
+      setJobs(await vendorApi.listActivePrintJobs());
+    } catch (err) {
+      setError(err.message || "Could not load print jobs");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    reload();
+    const unsubscribe = vendorApi.subscribeToPrintJobs(reload);
+    return unsubscribe;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const act = async (job, status) => {
+    try {
+      setBusyId(job.id);
+      await vendorApi.setPrintJobStatus(job.id, status);
+      notify(`Job ${job.file_name} → ${status}`);
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not update this job");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (loading) return <LoadingState label="Loading print queue…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  return (
+    <div className="resource-list">
+      {jobs.length === 0 && <EmptyState icon={<HiPrinter />} title="No active jobs" text="New uploads will appear here." />}
+      {jobs.map((job) => {
+        const next = PRINT_NEXT_STEP[job.status];
+        return (
+          <article className="resource-row" key={job.id}>
+            <div>
+              <b>{job.file_name} · {job.status}</b>
+              <small>
+                {job.profiles?.name || "Student"} · {job.pages}pg × {job.copies} · {job.color_mode === "colour" ? "Colour" : "B&W"} ·{" "}
+                {job.binding !== "none" ? job.binding : "No binding"} · Pickup {job.pickup_code}
+              </small>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {next && (
+                <button className="primary" disabled={busyId === job.id} onClick={() => act(job, next.to)}>{next.label}</button>
+              )}
+              <button disabled={busyId === job.id} onClick={() => act(job, "FAILED")}>Mark failed</button>
+            </div>
+          </article>
+        );
+      })}
+    </div>
   );
 }
 

@@ -134,3 +134,53 @@ export function subscribeToCanteenOrders(canteenId, callback) {
     .subscribe();
   return () => supabase.removeChannel(channel);
 }
+
+/* =========================================================================
+   PRINT JOB QUEUE -- print_jobs has no state-machine RPC like orders/
+   tickets (just a CHECK constraint + print_jobs_update_manage RLS, see
+   0011), so a plain update is the correct, intended write path here, not a
+   gap to fix.
+========================================================================= */
+
+const ACTIVE_PRINT_STATUSES = ["UPLOADED", "PROCESSING", "QUEUED", "PRINTING", "READY"];
+
+export async function listActivePrintJobs() {
+  const { data, error } = await supabase
+    .from("print_jobs")
+    .select("*")
+    .in("status", ACTIVE_PRINT_STATUSES)
+    .order("created_at", { ascending: true });
+  throwIfError(error);
+
+  const jobs = data || [];
+  if (jobs.length === 0) return jobs;
+
+  // A direct `profiles!...(name)` embed resolves to null here -- print.manage
+  // doesn't extend to profiles RLS (same reason as the facilities dashboard's
+  // ticket/booking queues). get_profile_snippets() is the safe, RLS-bypassing
+  // way every other feature already shows "who did this".
+  const uploaderIds = [...new Set(jobs.map((j) => j.user_id))];
+  const { data: profiles } = await supabase.rpc("get_profile_snippets", { p_ids: uploaderIds });
+  const profileMap = {};
+  (profiles || []).forEach((p) => { profileMap[p.id] = p; });
+  return jobs.map((j) => ({ ...j, profiles: profileMap[j.user_id] || null }));
+}
+
+export async function setPrintJobStatus(jobId, status) {
+  const { data, error } = await supabase
+    .from("print_jobs")
+    .update({ status })
+    .eq("id", jobId)
+    .select()
+    .single();
+  throwIfError(error);
+  return data;
+}
+
+export function subscribeToPrintJobs(callback) {
+  const channel = supabase
+    .channel("vendor-print-jobs")
+    .on("postgres_changes", { event: "*", schema: "public", table: "print_jobs" }, callback)
+    .subscribe();
+  return () => supabase.removeChannel(channel);
+}
