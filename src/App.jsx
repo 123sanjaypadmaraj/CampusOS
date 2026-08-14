@@ -139,6 +139,7 @@ import {
   HiOutlineBuildingLibrary,
   HiChatBubbleLeftRight,
   HiCog6Tooth,
+  HiArrowLeft,
 } from "react-icons/hi2";
 import { FaLinkedin, FaGithub, FaGoogle } from "react-icons/fa6";
 
@@ -1803,12 +1804,17 @@ function App() {
           verification={verification}
           onVerificationChanged={reloadVerification}
           campusId={campusId}
+          go={go}
         />
       );
     }
 
     if (active === "map") {
       return <CampusMap notify={notify} openModal={setModal} />;
+    }
+
+    if (active === "legal") {
+      return <LegalPage go={go} />;
     }
 
     if (active === "people") {
@@ -3987,7 +3993,7 @@ function Store({ items, cart, addStore, openModal }) {
    LINKEDIN-STYLE PROFILE
 ========================================================= */
 
-function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfileUpdated, stats = {}, verification, onVerificationChanged, campusId }) {
+function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfileUpdated, stats = {}, verification, onVerificationChanged, campusId, go }) {
   const [verifyModalOpen, setVerifyModalOpen] = useState(false);
   const [vendorModalOpen, setVendorModalOpen] = useState(false);
   if (!user) {
@@ -4122,6 +4128,11 @@ function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfil
         <button className="logout-btn" onClick={onLogout}>
         <HiArrowLeftOnRectangle /> Logout
         </button>
+        {go && (
+          <button className="link-btn" style={{ marginTop: 10 }} onClick={() => go("legal")}>
+            Privacy Policy &amp; Terms of Service
+          </button>
+        )}
       </div>
 
       <div className="profile-grid linkedin-grid">
@@ -5133,6 +5144,121 @@ function DeliveryService({ notify }) {
    MAP
 ========================================================= */
 
+/* =========================================================
+   PRIVACY POLICY & TERMS OF SERVICE (doc §102)
+   Written specifically for what CampusOS actually collects/does today, not
+   generic boilerplate -- but this is a starting draft, not legal advice.
+   Have your institution's counsel review it before relying on it for real.
+========================================================= */
+
+function LegalContent() {
+  return (
+    <div className="legal-content">
+      <h2>Privacy Policy</h2>
+      <p><em>Last updated 14 August 2026.</em></p>
+
+      <h3>What we collect</h3>
+      <p>
+        Account info (name, USN, course, year, college email), anything you
+        add to your profile (bio, skills, achievements, LinkedIn/GitHub
+        links), and activity you generate using CampusOS: food orders,
+        event registrations, club memberships, marketplace listings, lost
+        &amp; found reports, facilities tickets, resource bookings, print
+        jobs, and posts/comments/likes. If you submit your student ID for
+        verification, that photo is stored privately and reviewed by campus
+        admin staff only.
+      </p>
+
+      <h3>How it&apos;s used</h3>
+      <p>
+        To run the features you use — placing orders, registering for
+        events, connecting you with classmates in your branch/year, routing
+        tickets to facilities staff, and processing payments through
+        Razorpay for anything you pay for. Your name/branch/year/skills are
+        visible to other verified students on this campus (see Connect);
+        your email and phone number are never shown to other students.
+      </p>
+
+      <h3>Who it&apos;s shared with</h3>
+      <p>
+        Never sold. Vendors (canteens, the print shop) see the order/job
+        details needed to fulfill what you ordered. Campus admins and
+        facilities staff can see what&apos;s needed to moderate content, review
+        reports, and resolve tickets — every privileged action is logged.
+        Payments are processed by Razorpay; we don&apos;t store your card
+        details.
+      </p>
+
+      <h3>Your choices</h3>
+      <p>
+        You can edit or remove most profile info yourself at any time. You
+        can set your profile to be hidden from the classmate directory in
+        Edit Profile. To request a copy of your data or ask us to delete
+        your account, contact your campus admin.
+      </p>
+
+      <h2>Terms of Service</h2>
+
+      <h3>Your account</h3>
+      <p>
+        One account per student, tied to a valid USN or college email.
+        You&apos;re responsible for what happens under your account — don&apos;t
+        share your password. Accounts can be suspended for violating these
+        terms (spam, harassment, fraudulent orders/listings, impersonation,
+        or abuse of any campus service); a suspended account cannot place
+        orders, post, register for events, book resources, or use any
+        other feature until reactivated by a campus admin.
+      </p>
+
+      <h3>Payments &amp; orders</h3>
+      <p>
+        Prices shown at checkout are final at the time of payment. Refunds
+        for cancelled or failed orders are processed back to your original
+        payment method — contact the vendor or a campus admin if a refund
+        doesn&apos;t appear within a reasonable time. Vendors are responsible
+        for the accuracy of their own menu/pricing.
+      </p>
+
+      <h3>Marketplace &amp; lost &amp; found</h3>
+      <p>
+        Listings and reports must be accurate. CampusOS is a venue
+        connecting students directly — we aren&apos;t a party to any sale and
+        don&apos;t guarantee the condition or existence of listed items.
+      </p>
+
+      <h3>Content you post</h3>
+      <p>
+        Don&apos;t post anything illegal, harassing, or that violates someone
+        else&apos;s privacy or rights. Reported content is reviewed by campus
+        moderators, who can hide or remove it and take action on the
+        account that posted it.
+      </p>
+
+      <h3>Changes</h3>
+      <p>
+        We may update these terms as CampusOS adds features; continuing to
+        use the app after a change means you accept the update.
+      </p>
+    </div>
+  );
+}
+
+function LegalPage({ go }) {
+  return (
+    <section className="page-section">
+      <PageHeader kicker="LEGAL" title="Privacy & Terms" text="How CampusOS handles your data, and what's expected of you." />
+      <div className="profile-box profile-wide-box">
+        <LegalContent />
+      </div>
+      {go && (
+        <button className="ghost" style={{ marginTop: 16 }} onClick={() => go("profile")}>
+          <HiArrowLeft /> Back to profile
+        </button>
+      )}
+    </section>
+  );
+}
+
 function CampusMap({ notify, openModal }) {
   const [selected, setSelected] = useState(null);
   const [q, setQ] = useState("");
@@ -5952,6 +6078,8 @@ function UsnPasswordLogin({ onClose, notify }) {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [showLegal, setShowLegal] = useState(false);
 
   const handleSubmit = async () => {
     const cleanUsn = usn.trim().toUpperCase();
@@ -5970,6 +6098,10 @@ function UsnPasswordLogin({ onClose, notify }) {
     }
     if (signingUp && password !== confirmPassword) {
       notify("Passwords don't match");
+      return;
+    }
+    if (signingUp && !agreedToTerms) {
+      notify("Please agree to the Privacy Policy and Terms of Service");
       return;
     }
 
@@ -6046,9 +6178,28 @@ function UsnPasswordLogin({ onClose, notify }) {
         </label>
       )}
 
+      {signingUp && (
+        <>
+          <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input type="checkbox" checked={agreedToTerms} onChange={(e) => setAgreedToTerms(e.target.checked)} />
+            <span>
+              I agree to the{" "}
+              <button type="button" className="link-btn" onClick={() => setShowLegal((v) => !v)}>
+                Privacy Policy &amp; Terms of Service
+              </button>
+            </span>
+          </label>
+          {showLegal && (
+            <div className="legal-inline-preview">
+              <LegalContent />
+            </div>
+          )}
+        </>
+      )}
+
       <button
         className="primary wide"
-        disabled={loading}
+        disabled={loading || (signingUp && !agreedToTerms)}
         onClick={handleSubmit}
         data-testid="usn-login-button"
       >

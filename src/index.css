@@ -2496,6 +2496,37 @@
   font-size: inherit;
 }
 
+.legal-content h2 {
+  font: 800 20px Manrope;
+  margin: 20px 0 8px;
+}
+
+.legal-content h2:first-child {
+  margin-top: 0;
+}
+
+.legal-content h3 {
+  font: 700 14px Manrope;
+  margin: 16px 0 6px;
+}
+
+.legal-content p {
+  color: var(--muted);
+  line-height: 1.6;
+  font-size: 13px;
+  margin: 0;
+}
+
+.legal-inline-preview {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin: 4px 0 8px;
+  background: var(--bg);
+}
+
 .verified-pill {
   display: inline-flex;
   align-items: center;

@@ -46,6 +46,7 @@ test('USN sign-up: creates a brand-new account end-to-end', async ({ page }) => 
   await page.getByLabel('USN').fill(usn);
   await page.getByLabel('Password', { exact: true }).fill('TestPass123');
   await page.getByLabel('Confirm password').fill('TestPass123');
+  await page.getByRole('checkbox').check();
   await page.getByTestId('usn-login-button').click();
 
   await expect(page.getByTestId('sign-in-button')).toHaveCount(0, { timeout: 15000 });
