@@ -1,5 +1,6 @@
 import { supabase } from "../lib/supabase";
 import { calculatePrintJobPrice, hasValidBookingRange, isUuid } from "../utils/mvpHelpers";
+import { isValidUsn, usnToEmail } from "../features/auth/usn";
 
 /*
 |--------------------------------------------------------------------------
@@ -58,10 +59,22 @@ function formatRelativeTime(date) {
   return new Date(date).toLocaleDateString();
 }
 
+// Postgres RPC errors raised as `raise exception 'CODE: message'` (doc §81)
+// arrive here as error.message === "CODE: message". Split that into a
+// machine-readable `.code` and a clean, user-facing `.message` so every
+// catch block in the UI shows readable text instead of a shouty prefix.
 function throwIfError(error) {
-  if (error) {
-    throw error;
+  if (!error) return;
+
+  const match = /^([A-Z][A-Z0-9_]{2,}):\s*(.+)$/.exec(error.message || "");
+  if (match) {
+    const wrapped = new Error(match[2]);
+    wrapped.code = match[1];
+    wrapped.cause = error;
+    throw wrapped;
   }
+
+  throw error;
 }
 
 /* =========================================================================
@@ -129,8 +142,9 @@ export async function signOut() {
 }
 
 /*
- * signInWithPassword — used by the kingpin account for instant, no-OTP login.
- * Creates a REAL Supabase session so auth.uid() works and RLS passes.
+ * signInWithPassword — email+password auth option (doc §6). Not currently
+ * wired into the UI (magic link is the default flow) but kept available for
+ * institutions that want password-based login alongside it.
  */
 export async function signInWithPassword(email, password) {
   const { data, error } = await supabase.auth.signInWithPassword({
@@ -138,6 +152,60 @@ export async function signInWithPassword(email, password) {
     password,
   });
   if (error) throw error;
+  return data;
+}
+
+/*
+ * Name + USN + Password login (alongside magic link). Supabase Auth is
+ * still email-based internally -- signUpWithUsn() creates the account
+ * server-side via the signup-with-usn Edge Function (service_role,
+ * email_confirm: true, doc-requested flow), which mints a synthetic email
+ * deterministically from the USN. signInWithUsn() derives that same email
+ * client-side and signs in with the normal password grant -- no Edge
+ * Function needed for login, only for the one-time account creation.
+ */
+export async function signUpWithUsn({ name, usn, password }) {
+  if (!name?.trim()) throw new Error("Enter your full name.");
+  if (!isValidUsn(usn || "")) throw new Error("USN must be exactly 10 letters/numbers.");
+  if (!password || password.length < 8) throw new Error("Password must be at least 8 characters.");
+
+  const { data, error } = await supabase.functions.invoke("signup-with-usn", {
+    body: { name: name.trim(), usn: usn.trim().toUpperCase(), password },
+  });
+  if (error) {
+    // supabase-js only exposes the HTTP error, not the JSON body, on
+    // FunctionsHttpError -- fall back to a generic message when that's all
+    // we get, otherwise surface the {code, message} the function returned.
+    const context = /** @type {any} */ (error).context;
+    let message = error.message;
+    try {
+      const body = await context?.json?.();
+      if (body?.message) message = body.message;
+    } catch {
+      /* ignore -- use the generic message */
+    }
+    throw new Error(message || "Unable to create account");
+  }
+  if (data?.code) {
+    throw new Error(data.message || "Unable to create account");
+  }
+
+  return signInWithUsn({ usn: usn.trim().toUpperCase(), password });
+}
+
+export async function signInWithUsn({ usn, password }) {
+  if (!isValidUsn(usn || "")) throw new Error("USN must be exactly 10 letters/numbers.");
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: usnToEmail(usn),
+    password,
+  });
+  if (error) {
+    throw new Error(
+      error.message?.toLowerCase().includes("invalid")
+        ? "Incorrect USN or password."
+        : (error.message || "Unable to sign in")
+    );
+  }
   return data;
 }
 
@@ -242,6 +310,19 @@ export async function getOrCreateProfile(
       await getProfile(authUser.id);
 
     if (existing) {
+      // handle_new_user() auto-creates this row on signup (including
+      // USN-based signups via the Admin API) without ever setting
+      // campus_id -- backfill it here so every profile ends up scoped to a
+      // campus, instead of only newly-inserted-by-this-function rows.
+      if (!existing.campus_id && campusId) {
+        const { data: patched } = await supabase
+          .from("profiles")
+          .update({ campus_id: campusId })
+          .eq("id", authUser.id)
+          .select()
+          .maybeSingle();
+        if (patched) return patched;
+      }
       return existing;
     }
 
@@ -311,12 +392,26 @@ export async function updateProfile(
     year: updates.year,
     avatar_url: updates.avatar_url,
     bio: updates.bio,
+    ...(updates.phone !== undefined ? { phone: updates.phone } : {}),
     ...(typeof updates.open_to_projects === "boolean"
       ? { open_to_projects: updates.open_to_projects }
       : {}),
     skills: Array.isArray(updates.skills)
       ? updates.skills
       : [],
+    ...(updates.achievements !== undefined
+      ? { achievements: Array.isArray(updates.achievements) ? updates.achievements : [] }
+      : {}),
+    // Empty string would fail the profiles_linkedin_url_check /
+    // profiles_github_url_check DB constraints (they only allow null or a
+    // real https://linkedin.com|github.com URL) -- normalize blank input to
+    // null rather than sending "".
+    ...(updates.linkedin_url !== undefined
+      ? { linkedin_url: updates.linkedin_url?.trim() || null }
+      : {}),
+    ...(updates.github_url !== undefined
+      ? { github_url: updates.github_url?.trim() || null }
+      : {}),
     updated_at: new Date().toISOString(),
   };
 
@@ -340,47 +435,23 @@ export async function updateProfile(
    PEOPLE
 ========================================================================= */
 
+// Other students' full profile rows are no longer directly selectable (RLS
+// restricts `profiles` to the caller's own row + privileged roles -- doc
+// §42). search_people() is a SECURITY DEFINER RPC that only ever projects
+// the safe, non-sensitive columns, regardless of what's asked for.
 export async function getPeople({
   campusId,
   search = "",
-  limit = 100,
+  limit = 50,
+  cursor = null,
 } = {}) {
   try {
-    let query = supabase
-      .from("profiles")
-      .select(`
-        id,
-        name,
-        course,
-        year,
-        avatar_url,
-        bio,
-        skills,
-        campus_id
-      `)
-      .limit(limit)
-      .order("name");
-
-    if (campusId) {
-      query = query.eq(
-        "campus_id",
-        campusId
-      );
-    }
-
-    if (search.trim()) {
-      const q =
-        search.trim().replace(/,/g, " ");
-
-      query = query.or(
-        `name.ilike.%${q}%,course.ilike.%${q}%,bio.ilike.%${q}%`
-      );
-    }
-
-    const {
-      data,
-      error,
-    } = await query;
+    const { data, error } = await supabase.rpc("search_people", {
+      p_campus_id: campusId,
+      p_query: search?.trim() || null,
+      p_limit: limit,
+      p_cursor: cursor,
+    });
 
     if (error) console.warn("getPeople query warning:", error);
 
@@ -391,10 +462,11 @@ export async function getPeople({
   }
 }
 
-export async function getLostFoundItems(campusId) {
+export async function getLostFoundItems(campusId, { limit = 30, cursor = null } = {}) {
   try {
-    let query = supabase.from("lost_found_items").select("*").eq("status", "open").order("created_at", { ascending: false });
+    let query = supabase.from("lost_found_items").select("*").eq("status", "open").order("created_at", { ascending: false }).limit(limit);
     if (campusId) query = query.eq("campus_id", campusId);
+    if (cursor) query = query.lt("created_at", cursor);
     const { data, error } = await query;
     if (error) console.warn("getLostFoundItems warning:", error);
     return data || [];
@@ -428,25 +500,36 @@ export async function createLostFoundItem({ userId, campusId, itemType, title, d
   return data;
 }
 
-export async function claimLostFoundItem({ itemId, userId }) {
+// Claiming now requires proof of ownership and staff verification before
+// the item is released (doc §44) -- it flips to 'claim_pending', not
+// straight to resolved, and goes through claim_lost_found_item() since
+// direct table updates are blocked once status leaves 'open'.
+export async function claimLostFoundItem({ itemId, userId, proof }) {
   if (!userId) throw new Error("Please sign in first.");
-  const { data, error } = await supabase.from("lost_found_items").update({ status: "claimed", claimed_by: userId, updated_at: new Date().toISOString() }).eq("id", itemId).eq("status", "open").select().single();
+  if (!proof?.trim()) throw new Error("Describe how you can prove this item is yours.");
+  const { data, error } = await supabase.rpc("claim_lost_found_item", {
+    p_item_id: itemId,
+    p_proof: proof.trim(),
+  });
   throwIfError(error);
   return data;
 }
 
-export async function getMarketplaceListings(campusId, search = "") {
+export async function getMarketplaceListings(campusId, search = "", { limit = 30, cursor = null } = {}) {
   try {
-    let query = supabase.from("marketplace_listings").select("*").eq("status", "active").order("created_at", { ascending: false });
+    let query = supabase.from("marketplace_listings").select("*").eq("status", "active").order("created_at", { ascending: false }).limit(limit);
     if (campusId) query = query.eq("campus_id", campusId);
     if (search.trim()) query = query.ilike("title", `%${search.trim()}%`);
+    if (cursor) query = query.lt("created_at", cursor);
     const { data, error } = await query;
     if (error) console.warn("getMarketplaceListings warning:", error);
     
     let listings = data || [];
     if (listings.length > 0) {
       const sellerIds = [...new Set(listings.map(l => l.seller_id))];
-      const { data: profiles } = await supabase.from("profiles").select("id, name, course").in("id", sellerIds);
+      // Other sellers' full profile rows aren't directly selectable anymore
+      // (RLS §42) -- get_profile_snippets() returns only the safe fields.
+      const { data: profiles } = await supabase.rpc("get_profile_snippets", { p_ids: sellerIds });
       const profileMap = {};
       if (profiles) profiles.forEach(p => profileMap[p.id] = p);
       listings = listings.map(l => ({ ...l, profiles: profileMap[l.seller_id] || null }));
@@ -483,8 +566,8 @@ export async function createMarketplaceListing({ userId, campusId, title, descri
   return data;
 }
 
-export async function markMarketplaceListingSold({ listingId, userId }) {
-  const { data, error } = await supabase.from("marketplace_listings").update({ status: "sold", updated_at: new Date().toISOString() }).eq("id", listingId).eq("seller_id", userId).select().single();
+export async function markMarketplaceListingSold({ listingId }) {
+  const { data, error } = await supabase.rpc("mark_listing_sold", { p_listing_id: listingId });
   throwIfError(error);
   return data;
 }
@@ -495,8 +578,11 @@ export async function markMarketplaceListingSold({ listingId, userId }) {
    POSTS
 ========================================================================= */
 
+// `cursor` is the created_at of the last post already loaded -- pass it to
+// fetch the next page (doc §90: cursor pagination, never "load everything").
 export async function getCampusPosts(
-  campusId
+  campusId,
+  { limit = 20, cursor = null } = {}
 ) {
   let query = supabase
     .from("posts")
@@ -510,15 +596,21 @@ export async function getCampusPosts(
       campus_id,
       author_id
     `)
+    .eq("status", "visible")
     .order("created_at", {
       ascending: false,
-    });
+    })
+    .limit(limit);
 
   if (campusId) {
     query = query.eq(
       "campus_id",
       campusId
     );
+  }
+
+  if (cursor) {
+    query = query.lt("created_at", cursor);
   }
 
   const {
@@ -536,16 +628,15 @@ export async function getCampusPosts(
 
   const authorIds = [...new Set(posts.map(p => p.author_id))];
   if (authorIds.length > 0) {
-    const { data: profilesData } = await supabase
-      .from("profiles")
-      .select("id, name, avatar_url, course, year")
-      .in("id", authorIds);
-    
+    // Other authors' full profile rows aren't directly selectable anymore
+    // (RLS §42) -- get_profile_snippets() returns only the safe fields.
+    const { data: profilesData } = await supabase.rpc("get_profile_snippets", { p_ids: authorIds });
+
     const profileMap = {};
     if (profilesData) {
       profilesData.forEach(p => profileMap[p.id] = p);
     }
-    
+
     posts = posts.map(p => ({
       ...p,
       profiles: profileMap[p.author_id] || null
@@ -571,8 +662,6 @@ export async function getCampusPosts(
       null,
     course:
       post.profiles?.course || "",
-    year:
-      post.profiles?.year || "",
     time:
       formatRelativeTime(
         post.created_at
@@ -798,11 +887,8 @@ export async function getPostComments(
 
   if (comments.length > 0) {
     const authorIds = [...new Set(comments.map(c => c.author_id))];
-    const { data: profilesData } = await supabase
-      .from("profiles")
-      .select("id, name, avatar_url")
-      .in("id", authorIds);
-    
+    const { data: profilesData } = await supabase.rpc("get_profile_snippets", { p_ids: authorIds });
+
     const profileMap = {};
     if (profilesData) {
       profilesData.forEach(p => profileMap[p.id] = p);
@@ -875,8 +961,10 @@ export async function addPostComment({
 export async function getClubs(
   campusId
 ) {
+  // members/events are derived counts (clubs_with_counts view), not
+  // hand-maintained integer columns that can drift from reality.
   let query = supabase
-    .from("clubs")
+    .from("clubs_with_counts")
     .select(`
       id,
       campus_id,
@@ -887,6 +975,7 @@ export async function getClubs(
       description,
       logo_url
     `)
+    .eq("active", true)
     .order("name");
 
   if (campusId) {
@@ -921,24 +1010,27 @@ export async function joinClub({
     throw new Error("Invalid club ID.");
   }
 
+  // Plain insert, not upsert: the RLS update policy for club_members
+  // requires clubs.manage permission (role changes are staff-only), so an
+  // upsert's ON CONFLICT DO UPDATE path would be rejected for a student
+  // re-joining a club they're already in. Treat "already a member" as a
+  // harmless no-op instead.
   const {
     data,
     error,
   } = await supabase
     .from("club_members")
-    .upsert(
-      {
-        club_id: clubId,
-        user_id: userId,
-        role: "member",
-      },
-      {
-        onConflict:
-          "club_id,user_id",
-      }
-    )
+    .insert({
+      club_id: clubId,
+      user_id: userId,
+      role: "member",
+    })
     .select()
     .single();
+
+  if (error?.code === "23505") {
+    return { club_id: clubId, user_id: userId, role: "member" };
+  }
 
   throwIfError(error);
 
@@ -1040,10 +1132,13 @@ function formatEvent(event) {
 }
 
 export async function getCampusEvents(
-  campusId
+  campusId,
+  { limit = 50, cursor = null } = {}
 ) {
+  // attendees is a derived count (events_with_counts view), not a
+  // hand-maintained integer column that can drift from real registrations.
   let query = supabase
-    .from("events")
+    .from("events_with_counts")
     .select(`
       id,
       campus_id,
@@ -1053,6 +1148,8 @@ export async function getCampusEvents(
       event_date,
       place,
       description,
+      capacity,
+      registration_status,
       attendees,
       clubs (
         id,
@@ -1060,13 +1157,18 @@ export async function getCampusEvents(
         logo_url
       )
     `)
-    .order("event_date");
+    .order("event_date")
+    .limit(limit);
 
   if (campusId) {
     query = query.eq(
       "campus_id",
       campusId
     );
+  }
+
+  if (cursor) {
+    query = query.gt("event_date", cursor);
   }
 
   const {
@@ -1101,6 +1203,7 @@ export async function getMyEventRegistrations(
         place
       )
     `)
+    .eq("status", "confirmed")
     .eq("user_id", userId);
 
   throwIfError(error);
@@ -1125,6 +1228,7 @@ export async function isRegisteredForEvent({
     .select("id")
     .eq("event_id", eventId)
     .eq("user_id", userId)
+    .eq("status", "confirmed")
     .maybeSingle();
 
   throwIfError(error);
@@ -1133,9 +1237,22 @@ export async function isRegisteredForEvent({
 }
 
 
+const PHONE_PATTERN = /^\+?[0-9]{7,15}$/;
+
+export function isValidPhone(phone) {
+  return typeof phone === "string" && PHONE_PATTERN.test(phone.trim());
+}
+
+// Capacity enforcement + waitlisting now happens atomically inside
+// register_for_event() (doc §35/§38) -- direct inserts into
+// event_registrations are no longer permitted (no client insert policy).
+// The registration confirmation dialog (name/USN/email come straight from
+// the signed-in profile; only phone is client-entered) is validated here
+// and again inside the RPC, which is the actual source of truth.
 export async function registerEvent({
   eventId,
   userId,
+  contactPhone,
 }) {
   if (!userId) {
     throw new Error(
@@ -1147,32 +1264,26 @@ export async function registerEvent({
     throw new Error("Invalid event ID.");
   }
 
+  if (!isValidPhone(contactPhone)) {
+    throw new Error("Enter a valid phone number to register.");
+  }
+
   const {
     data,
     error,
-  } = await supabase
-    .from("event_registrations")
-    .upsert(
-      {
-        event_id: eventId,
-        user_id: userId,
-      },
-      {
-        onConflict: "event_id,user_id",
-      }
-    )
-    .select()
-    .single();
+  } = await supabase.rpc("register_for_event", {
+    p_event_id: eventId,
+    p_contact_phone: contactPhone.trim(),
+  });
 
   throwIfError(error);
 
-  return data;
+  return data; // { status: 'confirmed' | 'waitlisted', registration_id?, ticket_token?, position? }
 }
 
-export async function cancelEventRegistration({ eventId, userId }) {
-  if (!userId) throw new Error("Please sign in first.");
+export async function cancelEventRegistration({ eventId }) {
   if (!isUuid(eventId)) throw new Error("Invalid event ID.");
-  const { error } = await supabase.from("event_registrations").delete().eq("event_id", eventId).eq("user_id", userId);
+  const { error } = await supabase.rpc("cancel_event_registration", { p_event_id: eventId });
   throwIfError(error);
   return true;
 }
@@ -1325,194 +1436,121 @@ export async function getCampusFood(campusId) {
    FOOD ORDERS
 ========================================================================= */
 
+// Order creation is fully server-side now (doc §5, §12, §62, §63): pricing,
+// stock/availability checks, and the order+items write all happen
+// atomically inside the create_food_order() Postgres function, which also
+// re-reads prices itself -- nothing here is trusted from the browser.
+// `idempotencyKey` should be a stable value for this checkout attempt (e.g.
+// generated once when the cart modal opens) so a flaky "Pay" double-click
+// can't create two orders.
 export async function createFoodOrder({
   userId,
   canteenId,
   cart,
   notes = "",
+  fulfillmentType = "pickup",
+  idempotencyKey = null,
 }) {
   if (!userId) {
-    throw new Error(
-      "Please sign in before ordering."
-    );
+    throw new Error("Please sign in before ordering.");
   }
-
   if (!canteenId) {
-    throw new Error(
-      "Select a canteen first."
-    );
+    throw new Error("Select a canteen first.");
   }
-
   if (!cart?.length) {
-    throw new Error(
-      "Your food cart is empty."
-    );
+    throw new Error("Your food cart is empty.");
   }
 
   const grouped = Object.values(
     cart.reduce((acc, item) => {
-      if (!acc[item.id]) {
-        acc[item.id] = {
-          ...item,
-          quantity: 0,
-        };
-      }
-
+      if (!acc[item.id]) acc[item.id] = { ...item, quantity: 0 };
       acc[item.id].quantity++;
-
       return acc;
     }, {})
   );
 
-  /*
-   * Re-read prices from the database.
-   *
-   * Never trust prices sent from the browser.
-   */
-  const itemIds =
-    grouped.map((item) => item.id);
+  const items = grouped.map((item) => ({
+    food_item_id: item.id,
+    quantity: item.quantity,
+    special_instructions: item.specialInstructions || null,
+  }));
 
-  const {
-    data: dbItems,
-    error: itemError,
-  } = await supabase
-    .from("food_items")
-    .select(
-      "id,name,price,canteen_id,available"
-    )
-    .in("id", itemIds);
+  const { data, error } = await supabase.rpc("create_food_order", {
+    p_canteen_id: canteenId,
+    p_items: items,
+    p_notes: notes,
+    p_fulfillment_type: fulfillmentType,
+    p_idempotency_key: idempotencyKey,
+  });
 
-  throwIfError(itemError);
-
-  if (!dbItems?.length) {
-    throw new Error(
-      "Food items could not be verified."
-    );
+  if (error) {
+    // Surface the {code, message}-style errors raised by the RPC
+    // (ORDER_ITEM_UNAVAILABLE, ORDER_SINGLE_CANTEEN, ...) as friendly text.
+    const message = (error.message || "").replace(/^[A-Z_]+:\s*/, "");
+    throw new Error(message || "Unable to place order");
   }
 
-  const dbMap =
-    Object.fromEntries(
-      dbItems.map((item) => [
-        item.id,
-        item,
-      ])
-    );
-
-  for (const item of grouped) {
-    const dbItem =
-      dbMap[item.id];
-
-    if (!dbItem) {
-      throw new Error(
-        `${item.name} is no longer available.`
-      );
-    }
-
-    if (!dbItem.available) {
-      throw new Error(
-        `${dbItem.name} is currently unavailable.`
-      );
-    }
-
-    if (
-      dbItem.canteen_id !== canteenId
-    ) {
-      throw new Error(
-        "All food items must come from the same canteen."
-      );
-    }
-  }
-
-  const subtotal =
-    grouped.reduce(
-      (sum, item) => {
-        const dbItem =
-          dbMap[item.id];
-
-        return (
-          sum +
-          Number(dbItem.price) *
-            item.quantity
-        );
-      },
-      0
-    );
-
-  const pickupCode =
-    randomCode();
-
-  const {
-    data: order,
-    error: orderError,
-  } = await supabase
-    .from("orders")
-    .insert({
-      user_id: userId,
-      canteen_id: canteenId,
-      status: "pending",
-      subtotal,
-      platform_fee: 0,
-      total: subtotal,
-      payment_status: "pending",
-      pickup_code: pickupCode,
-      notes,
-    })
-    .select()
-    .single();
-
-  throwIfError(orderError);
-
-  const orderItems =
-    grouped.map((item) => {
-      const dbItem =
-        dbMap[item.id];
-
-      return {
-        order_id: order.id,
-        food_item_id: item.id,
-        quantity: item.quantity,
-        unit_price:
-          Number(dbItem.price),
-        total_price:
-          Number(dbItem.price) *
-          item.quantity,
-      };
-    });
-
-  const {
-    error: itemsError,
-  } = await supabase
-    .from("order_items")
-    .insert(orderItems);
-
-  if (itemsError) {
-    await supabase
-      .from("orders")
-      .delete()
-      .eq("id", order.id);
-
-    throw itemsError;
-  }
-
-  return order;
+  return data;
 }
 
+// Kicks off payment for an order that's already in PAYMENT_PENDING: asks the
+// create-razorpay-order Edge Function for a gateway order to open Checkout
+// against. The order only becomes PAID once Razorpay's webhook verifies the
+// payment server-side (see supabase/functions/razorpay-webhook).
+export async function startFoodOrderPayment(orderId) {
+  const { data, error } = await supabase.functions.invoke("create-razorpay-order", {
+    body: { order_id: orderId },
+  });
+  if (error) throw new Error(error.message || "Unable to start payment");
+  return data; // { key_id, gateway_order_id, amount, currency, payment_id }
+}
 
+export async function transitionOrderStatus(orderId, toStatus, reason) {
+  const { data, error } = await supabase.rpc("transition_order_status", {
+    p_order_id: orderId,
+    p_to_status: toStatus,
+    p_reason: reason || null,
+  });
+  throwIfError(error);
+  return data;
+}
+
+// Vendor-side pickup scan (doc §15) -- validates server-side that the token
+// is unused, unexpired, and belongs to a READY order, then completes it.
+export async function redeemPickupToken(token) {
+  const { data, error } = await supabase.rpc("redeem_pickup_token", { p_token: token });
+  throwIfError(error);
+  return data;
+}
+
+export async function getOrderPickupToken(orderId) {
+  const { data, error } = await supabase
+    .from("order_pickup_tokens")
+    .select("token, short_code, expires_at, used_at")
+    .eq("order_id", orderId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  throwIfError(error);
+  return data;
+}
+
+// `cursor` is the created_at of the last order already loaded (doc §90).
 export async function getMyOrders(
-  userId
+  userId,
+  { limit = 20, cursor = null } = {}
 ) {
   if (!userId) return [];
 
-  const {
-    data,
-    error,
-  } = await supabase
+  let query = supabase
     .from("orders")
     .select(`
       id,
       status,
       subtotal,
+      tax_amount,
       platform_fee,
+      delivery_fee,
       total,
       payment_status,
       pickup_code,
@@ -1527,16 +1565,20 @@ export async function getMyOrders(
         quantity,
         unit_price,
         total_price,
-        food_items (
-          id,
-          name
-        )
+        item_name
       )
     `)
     .eq("user_id", userId)
     .order("created_at", {
       ascending: false,
-    });
+    })
+    .limit(limit);
+
+  if (cursor) {
+    query = query.lt("created_at", cursor);
+  }
+
+  const { data, error } = await query;
 
   throwIfError(error);
 
@@ -1578,17 +1620,10 @@ export async function uploadPrintJob({
   const path =
     `${userId}/${crypto.randomUUID()}-${safeName}`;
 
-  const calculatedPrice = calculatePrintJobPrice({
-    pages,
-    copies,
-    colorMode,
-    binding,
-  });
-
   const {
     error: uploadError,
   } = await supabase.storage
-    .from("print-documents")
+    .from("print-files")
     .upload(
       path,
       file,
@@ -1603,30 +1638,24 @@ export async function uploadPrintJob({
 
   throwIfError(uploadError);
 
-  const {
-    data: job,
-    error: jobError,
-  } = await supabase
-    .from("print_jobs")
-    .insert({
-      user_id: userId,
-      file_path: path,
-      file_name: file.name,
-      total_pages: Number(pages),
-      copies: Number(copies),
-      color_mode: colorMode,
-      paper_size: paperSize,
-      binding,
-      price: calculatedPrice,
-      status: "pending",
-      pickup_code: randomCode(),
-    })
-    .select()
-    .single();
+  // Price is computed server-side from the campus rate card inside
+  // create_print_job() (doc §29, §66) -- calculatePrintJobPrice() above is
+  // now only used for the pre-upload UI estimate, never as the charged
+  // amount. `file_url` stores the storage path; the print vendor UI resolves
+  // it to a signed URL when it actually needs to open the file.
+  const { data: job, error: jobError } = await supabase.rpc("create_print_job", {
+    p_file_url: path,
+    p_file_name: file.name,
+    p_pages: Number(pages),
+    p_copies: Number(copies),
+    p_color_mode: colorMode,
+    p_paper_size: paperSize,
+    p_binding: binding || "none",
+  });
 
   if (jobError) {
     await supabase.storage
-      .from("print-documents")
+      .from("print-files")
       .remove([path]);
 
     throw jobError;
@@ -1785,7 +1814,7 @@ export async function createCampusServiceRequest({
       location_id: locationId,
       title,
       details,
-      status: "reported",
+      status: "SUBMITTED",
     })
     .select()
     .single();
@@ -1937,62 +1966,34 @@ export async function createResourceBooking({
     );
   }
 
-  /*
-   * Application-level conflict check.
-   *
-   * We also add a database exclusion constraint
-   * in the SQL migration below.
-   */
-  const {
-    data: conflicts,
-    error: conflictError,
-  } = await supabase
-    .from("bookings")
-    .select("id")
-    .eq(
-      "resource_id",
-      resource.id
-    )
-    .in("status", [
-      "pending",
-      "approved",
-    ])
-    .lt(
-      "start_time",
-      endTime
-    )
-    .gt(
-      "end_time",
-      startTime
-    )
-    .limit(1);
+  // The actual double-booking guard is a PostgreSQL exclusion constraint
+  // (doc §35) enforced inside create_booking() -- no client-side
+  // pre-check can race it, so we don't bother with one here.
+  const { data, error } = await supabase.rpc("create_booking", {
+    p_resource_id: resource.id,
+    p_start_time: startTime,
+    p_end_time: endTime,
+    p_notes: notes,
+  });
 
-  throwIfError(conflictError);
-
-  if (conflicts?.length) {
+  if (error) {
+    const message = (error.message || "").replace(/^[A-Z_]+:\s*/, "");
     throw new Error(
-      "This resource is already booked for that time."
+      error.message?.includes("BOOKING_SLOT_TAKEN")
+        ? "This resource is already booked for that time."
+        : (message || "Unable to create booking")
     );
   }
 
-  const {
-    data,
-    error,
-  } = await supabase
-    .from("bookings")
-    .insert({
-      resource_id: resource.id,
-      user_id: userId,
-      start_time: startTime,
-      end_time: endTime,
-      status: "pending",
-      notes,
-    })
-    .select()
-    .single();
+  return data;
+}
 
+export async function setBookingStatus(bookingId, status) {
+  const { data, error } = await supabase.rpc("set_booking_status", {
+    p_booking_id: bookingId,
+    p_status: status,
+  });
   throwIfError(error);
-
   return data;
 }
 
@@ -2002,21 +2003,29 @@ export async function createResourceBooking({
 ========================================================================= */
 
 export async function getUserNotifications(
-  userId
+  userId,
+  { limit = 30, cursor = null } = {}
 ) {
   if (!userId) return [];
 
   try {
-    const {
-      data,
-      error,
-    } = await supabase
+    let query = supabase
       .from("notifications")
       .select("*")
       .eq("user_id", userId)
       .order("created_at", {
         ascending: false,
-      });
+      })
+      .limit(limit);
+
+    if (cursor) {
+      query = query.lt("created_at", cursor);
+    }
+
+    const {
+      data,
+      error,
+    } = await query;
 
     if (error) {
       console.warn("getUserNotifications warning:", error.message);
@@ -2166,6 +2175,18 @@ export function subscribeToEvents(callback) {
   };
 }
 
+export function subscribeToFood(callback) {
+  const channel = supabase
+    .channel("public:food_realtime")
+    .on("postgres_changes", { event: "*", schema: "public", table: "canteens" }, callback)
+    .on("postgres_changes", { event: "*", schema: "public", table: "food_items" }, callback)
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
 export function subscribeToClubs(callback) {
   const channel = supabase
     .channel("public:clubs_realtime")
@@ -2207,16 +2228,16 @@ export function subscribeToLostFound(callback) {
 export async function reportContent(contentType, contentId, reason) {
   const user = await getCurrentUser();
   if (!user) throw new Error("Must be logged in to report content");
+  if (!isUuid(contentId)) throw new Error("This content can't be reported.");
 
   const { data, error } = await supabase
     .from("content_reports")
     .insert([
       {
         reporter_id: user.id,
-        content_type: contentType,
-        content_id: contentId,
+        target_type: contentType,
+        target_id: contentId,
         reason: reason,
-        status: "pending",
       },
     ])
     .select()

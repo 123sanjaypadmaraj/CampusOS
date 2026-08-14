@@ -603,11 +603,37 @@
   gap: 5px;
 }
 
+.person-actions a {
+  border-radius: 9px;
+  padding: 9px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  text-decoration: none;
+}
+
 .person-actions .ghost {
   color: var(--ink);
   background: #fff;
   border: 1px solid var(--line);
   margin-left: 0;
+}
+
+.classmate-bio {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.achievements-list span {
+  background: rgba(240, 138, 60, 0.15);
+  color: var(--orange);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 /* ---------- Clubs ---------- */
@@ -1786,6 +1812,25 @@
   gap: 12px;
 }
 
+.feature-modal input:disabled {
+  background: var(--surface-muted, #f4f4f6);
+  color: var(--muted, #6b6b76);
+  cursor: not-allowed;
+}
+
+.modal-subtext {
+  color: var(--muted, #6b6b76);
+  font-size: 13px;
+  margin: -6px 0 4px;
+}
+
+.form-error {
+  color: #d92d20;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 4px 0 0;
+}
+
 .file-chip {
   display: flex;
   align-items: center;
@@ -2081,6 +2126,11 @@
   border-color: var(--border);
 }
 
+.app-shell.dark-mode .feature-modal input:disabled {
+  background: var(--surface-2);
+  color: var(--muted, #9a9aa5);
+}
+
 .app-shell.dark-mode .file-chip {
   background: var(--surface-2);
   border-color: var(--border);
@@ -2358,10 +2408,40 @@
   color: var(--muted);
 }
 
+.linkedin-social-links {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.linkedin-social-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: var(--soft);
+  color: #6544d8;
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
 .linkedin-actions {
   display: flex;
   gap: 8px;
   margin-top: 18px;
+}
+
+.link-btn {
+  color: var(--purple);
+  font-weight: 700;
+  text-decoration: underline;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: inherit;
 }
 
 .verified-pill {
@@ -2495,97 +2575,6 @@
 .socialize-feed {
   display: grid;
   gap: 13px;
-}
-
-.social-post {
-  border: 1px solid var(--line);
-  background: #fff;
-  border-radius: 20px;
-  padding: 20px;
-  transition: .2s;
-}
-
-.social-post:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 18px 40px #26154c0d;
-}
-
-.social-post-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.college-avatar {
-  width: 44px;
-  height: 44px;
-  border-radius: 13px;
-  background: var(--soft);
-  color: var(--purple);
-  display: grid;
-  place-items: center;
-  font: 800 17px Manrope;
-}
-
-.social-post-head > div:nth-child(2) {
-  flex: 1;
-}
-
-.social-post-head b,
-.social-post-head small {
-  display: block;
-}
-
-.social-post-head b {
-  font-size: 12px;
-}
-
-.social-post-head b svg {
-  width: 13px;
-  height: 13px;
-  color: var(--green);
-}
-
-.social-post-head small {
-  margin-top: 3px;
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.social-type {
-  padding: 6px 8px;
-  border-radius: 999px;
-  background: var(--soft);
-  color: var(--purple);
-  font-size: 9px;
-  font-weight: 800;
-}
-
-.social-post h3 {
-  font: 800 19px/1.35 Manrope;
-  margin: 17px 0 7px;
-}
-
-.social-post > p {
-  color: var(--muted);
-  line-height: 1.6;
-  font-size: 12px;
-}
-
-.social-post-actions {
-  display: flex;
-  gap: 18px;
-  border-top: 1px solid var(--line);
-  margin-top: 17px;
-  padding-top: 13px;
-}
-
-.social-post-actions button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--muted);
-  font-size: 11px;
 }
 
 .socialize-sidebar {
@@ -2879,7 +2868,6 @@
 /* ---------- Dark mode additions ---------- */
 
 .app-shell.dark-mode .linkedin-main-card,
-.app-shell.dark-mode .social-post,
 .app-shell.dark-mode .socialize-sidebar,
 .app-shell.dark-mode .service-detail-hero,
 .app-shell.dark-mode .workflow-card,
@@ -4263,3 +4251,80 @@
 .canteen-toggle-icon.busy {
   color: #e25555 !important;
 }
+/* =========================================================
+   SHARED STATE VIEWS -- loading / empty / error / offline
+   (doc §82). See src/components/ui/States.jsx
+========================================================= */
+
+.state-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 10px;
+  padding: 48px 24px;
+  color: var(--muted);
+}
+
+.state-view h3 {
+  margin: 4px 0 0;
+  color: var(--text);
+  font: 800 17px Manrope, sans-serif;
+}
+
+.state-view p {
+  margin: 0;
+  font-size: 13px;
+  max-width: 360px;
+}
+
+.state-icon {
+  font-size: 28px;
+  color: var(--accent);
+}
+
+.state-error .state-icon {
+  color: #e25555;
+}
+
+.state-spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 3px solid var(--line, #e8e5ef);
+  border-top-color: var(--accent);
+  animation: state-spin 0.8s linear infinite;
+}
+
+@keyframes state-spin {
+  to { transform: rotate(360deg); }
+}
+
+.offline-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+  background: #f4b73a22;
+  color: #a97313;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 10px 16px;
+  position: sticky;
+  top: 74px;
+  z-index: 29;
+}
+
+.app-shell.dark-mode .offline-banner {
+  color: #f4c771;
+}
+
+/* =========================================================
+   ADMIN CMS
+========================================================= */
+
+.admin-cms .section-head { margin-bottom: 16px; align-items: center; }
+.admin-panel { display: flex; flex-direction: column; gap: 8px; }
+.admin-panel .resource-list { margin-bottom: 8px; }
+.admin-panel select { border: 1px solid var(--line, #e8e5ef); border-radius: 10px; padding: 8px 10px; background: var(--bg); color: var(--text); }

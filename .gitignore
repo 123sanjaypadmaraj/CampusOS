@@ -13,3 +13,12 @@ dist
 .trunk
 coverage
 .env
+.env.local
+test-results
+playwright-report
+*.tsbuildinfo
+.vercel
+.service_role_key.local
+scripts/.sessions.json
+scripts/.vendor-credentials.local.json
+supabase/.temp/

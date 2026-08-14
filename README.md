@@ -309,75 +309,64 @@ The platform connects these interactions through a common campus identity and da
 
 ## Frontend
 
-- React
-- JavaScript / JSX
-- CSS
+- React 18
+- TypeScript (incremental adoption — new/rewritten files are `.ts`/`.tsx`, legacy files stay `.jsx`, see `tsconfig.json`)
+- Vite (dev server + production build)
+- TanStack Query
+- Zod
 - React Icons
+- Tailwind CSS
 
 ## Backend / Platform
 
-- Supabase
-- PostgreSQL
-- Supabase Authentication
-- Supabase Storage
+- Supabase (Auth, PostgreSQL, Storage, Realtime, Edge Functions)
+- PostgreSQL with Row Level Security on every table
+- Razorpay (test mode) for payments, via Edge Functions
 
-## Planned Technologies
+## Testing / CI
 
-- AI/LLM integration
-- Payment gateway
-- QR generation and scanning
-- Push notifications
-- Admin dashboard
-- Vendor dashboards
-- Analytics
+- Jest + Testing Library (unit/component)
+- Playwright (E2E, network-mocked — see `tests/helpers/mockSupabase.js`)
+- GitHub Actions (`.github/workflows/ci.yml`): lint → typecheck → unit tests → build → E2E
 
 ---
 
 # 📁 Project Structure
 
-The intended project structure is:
-
 ```text
-campus-os/
+CampusOS/
 │
-├── public/
-│   ├── favicon.ico
-│   └── assets/
-│
+├── index.html                  # Vite entry point
 ├── src/
-│   │
-│   ├── components/
-│   │   ├── Navbar.jsx
-│   │   ├── BottomNav.jsx
-│   │   ├── Post.jsx
-│   │   ├── EventCard.jsx
-│   │   ├── ServiceCard.jsx
-│   │   └── ...
-│   │
-│   ├── pages/
-│   │   ├── Home.jsx
-│   │   ├── Campus.jsx
-│   │   ├── Events.jsx
-│   │   ├── Services.jsx
-│   │   └── Profile.jsx
-│   │
-│   ├── services/
-│   │   ├── supabase.js
-│   │   ├── posts.js
-│   │   ├── events.js
-│   │   └── services.js
-│   │
-│   ├── App.jsx
-│   ├── index.css
-│   └── main.jsx
+│   ├── main.jsx                 # React root + TanStack Query provider
+│   ├── App.jsx                  # Main application shell + most page components
+│   ├── features/
+│   │   └── payments/             # Razorpay Checkout.js wrapper
+│   ├── components/ui/            # Shared loading/empty/error/offline states
+│   ├── services/mvpService.js    # Data layer — calls Postgres RPCs for anything
+│   │                              # security-sensitive, direct reads for public data
+│   ├── lib/supabase.ts           # Supabase client
+│   ├── types/database.ts         # Hand-authored DB types (see file header)
+│   ├── hooks/                    # useAuth, useOnlineStatus
+│   └── utils/                    # orderCalculator, mvpHelpers
 │
-├── .env.local
-├── package.json
-├── README.md
-└── .gitignore
+├── supabase/
+│   ├── migrations/                # THE canonical schema — see its own README.md
+│   └── functions/                 # Edge Functions (Razorpay order + webhook)
+│
+├── src/supabase/archive/          # Superseded schema files — do not run, kept for history
+│
+├── tests/                         # Playwright E2E specs + mock harness
+├── src/__tests__/, src/**/*.test.js  # Jest unit tests
+│
+└── .github/workflows/ci.yml
 ```
 
-The current prototype may still contain several components inside `App.jsx`. As development progresses, these should be separated into reusable components.
+`App.jsx` is still a large file holding most page-level components. The
+service/data layer (the part that actually mattered for security and
+correctness) was fully migrated off direct table writes onto Postgres RPCs
+in this hardening pass; splitting the remaining UI into
+`src/features/<name>/components/` is tracked in `docs/ROADMAP.md`.
 
 ---
 
@@ -385,13 +374,10 @@ The current prototype may still contain several components inside `App.jsx`. As 
 
 ## Prerequisites
 
-Install:
-
-- Node.js
+- Node.js 20+
 - npm
 - Git
-
-Check your versions:
+- (optional, for applying migrations/deploying functions) [Supabase CLI](https://supabase.com/docs/guides/cli)
 
 ```bash
 node --version
@@ -404,10 +390,8 @@ npm --version
 
 ```bash
 git clone <YOUR_REPOSITORY_URL>
-cd campus-os
+cd CampusOS
 ```
-
----
 
 ## 2. Install Dependencies
 
@@ -415,135 +399,90 @@ cd campus-os
 npm install
 ```
 
-Install React Icons:
+## 3. Environment Variables
 
 ```bash
-npm install react-icons
+cp .env.example .env
 ```
 
-Install Supabase:
+Fill in your Supabase project's URL and **anon/publishable key** (Project
+Settings → API). This key is safe to expose in client code — Row Level
+Security, not key secrecy, is what protects the data behind it. Never put a
+`service_role` key here.
+
+## 4. Apply the database schema
+
+The app needs the schema in `supabase/migrations/` applied to your Supabase
+project before it'll work — see `supabase/migrations/README.md` for the two
+supported ways to do that (Supabase CLI, or paste-into-SQL-Editor).
+
+## 5. Run it
 
 ```bash
-npm install @supabase/supabase-js
+npm run dev        # Vite dev server, http://localhost:5173
+npm run build       # production build -> dist/
+npm run preview     # serve the production build locally
+npm run lint         # ESLint
+npm run typecheck    # tsc --noEmit
+npm test              # Jest unit/component tests
+npm run test:ui        # Playwright E2E (network-mocked, no live backend needed)
 ```
 
----
-
-# 🔐 Environment Variables
-
-Create a file named:
-
-```text
-.env.local
-```
-
-Add:
-
-```env
-VITE_SUPABASE_URL=https://YOUR_PROJECT_ID.supabase.co
-VITE_SUPABASE_PUBLISHABLE_KEY=YOUR_SUPABASE_PUBLISHABLE_KEY
-```
-
-Never commit `.env.local` to Git.
-
-Add it to `.gitignore`:
-
-```gitignore
-.env
-.env.local
-.env.*.local
-```
-
-> **Important:** Never expose a Supabase service-role/secret key in the frontend.
+Signing in locally uses the same magic-link flow real students use — there
+is no dev-login bypass shipped in the app (see `SECURITY.md` for why that
+used to exist and was removed). E2E tests mock the backend instead, in
+`tests/helpers/mockSupabase.js`.
 
 ---
 
 # 🗄️ Database
 
-Campus OS uses PostgreSQL through Supabase.
+Campus OS uses PostgreSQL through Supabase. The schema is fully described in
+`supabase/migrations/` (14+ ordered, idempotent migration files) — see that
+folder's own `README.md` for the complete table list, the RPC-based write
+model, and what changed from the original prototype schema.
 
-The core database structure is:
-
-```text
-profiles
-│
-├── posts
-│   ├── post_likes
-│   └── comments
-│
-├── events
-│   └── event_registrations
-│
-├── services
-│   └── service_requests
-│
-├── help_requests
-│
-└── notifications
-```
-
-## Main Tables
-
-| Table | Purpose |
-|---|---|
-| `profiles` | Student identity and profile |
-| `posts` | Campus community posts |
-| `post_likes` | Post reactions |
-| `comments` | Post comments |
-| `events` | Campus events |
-| `event_registrations` | Event registrations |
-| `services` | Available campus services |
-| `service_requests` | Student service requests |
-| `help_requests` | Student help requests |
-| `notifications` | User notifications |
+At a glance, writes to anything security- or money-sensitive (orders,
+payments, refunds, event registrations, bookings, pickup redemption) go
+through `SECURITY DEFINER` Postgres functions, never raw table inserts from
+the browser — see `docs/DEPLOYMENT.md` for the full list of RPCs.
 
 ---
 
 # 🔒 Security
 
-Campus OS uses Row Level Security (RLS) to protect user data.
+Every table has Row Level Security enabled with real `auth.uid()`-scoped
+policies — not the previous `for all to anon, authenticated using (true)`
+open policies (see `SECURITY.md` for what that meant and why it was
+replaced). A real RBAC layer (`roles`/`permissions`/`role_permissions`/
+`user_roles`) backs every privileged policy and RPC, instead of ad-hoc
+`role === 'vendor'` string checks.
 
-Example permissions:
-
-```text
-Student
-   │
-   ├── Can read public campus posts
-   │
-   ├── Can create own posts
-   │
-   ├── Can edit own profile
-   │
-   ├── Can delete own posts
-   │
-   ├── Can register for events
-   │
-   └── Can view own service requests
-```
-
-Administrative permissions should be separated from normal student permissions.
+**Before this goes anywhere near a real production campus**, read
+`SECURITY.md` — it documents two real secrets found in this repo's git
+history that need to be rotated.
 
 ---
 
 # 🔑 Authentication
 
-The current prototype contains a demo login experience.
-
-The production authentication flow is intended to be:
-
 ```text
 Student
    ↓
-College Email
+College email (magic link)
    ↓
-Authentication
+Supabase Auth session
    ↓
-Verified Campus Account
+profiles row (auto-created via trigger)
    ↓
-Campus Profile
+Campus assignment
 ```
 
-For production deployment, authentication should be restricted to approved institutional email domains or another institution-approved identity mechanism.
+The login modal restricts sign-in to a small allowlist of email domains
+(`@nhce.edu.in`, `@newhorizonindia.edu`, `@gmail.com` for now — tighten this
+to just the institutional domain before a real launch). `student_verifications`
+exists in the schema for a stronger USN/document-based verification flow
+(doc §7) but isn't wired into the UI yet — tracked in `docs/ROADMAP.md`.
 
 ---
 
@@ -581,18 +520,9 @@ Inventory
 
 # 💳 Payments
 
-Payments are planned for:
+Food orders are wired to **Razorpay in test mode**: `create_food_order()` computes the authoritative total server-side, `create-razorpay-order` (Edge Function) opens a gateway order, and `razorpay-webhook` (Edge Function) is the only thing that ever flips `orders.payment_status` to `paid` — after verifying the gateway's HMAC signature server-side. See `supabase/functions/README.md` for how to get free Razorpay test keys and deploy the functions.
 
-- Food orders
-- Printing
-- Stationery
-- Event registrations
-- Campus merchandise
-- Other paid campus services
-
-The architecture should support marketplace-style vendor settlements rather than treating all vendor revenue as platform revenue.
-
-Payment integration will be implemented after the core authentication and database system is stable.
+A full payment ledger (`payments`, `payment_events`, `refunds`) and refund flow (full/partial, vendor-initiated) exist in the schema. Printing/store/event-registration payments and vendor payout settlement are not wired up yet — tracked in `docs/ROADMAP.md`.
 
 ---
 
@@ -883,31 +813,31 @@ Future versions can be packaged as:
 
 # ⚠️ Current Project Status
 
-**Status: Active MVP / Prototype**
+**Status: Hardened MVP — student-facing modules are production-grade at the data layer; not yet deployed live.**
 
-The current interface demonstrates the intended Campus OS experience.
+A production-hardening pass (see `docs/ROADMAP.md` for the full writeup)
+took the original MVP prototype and:
 
-The next development stage is connecting the existing UI to Supabase so that the application becomes persistent and multi-user.
+### Done in this pass
 
-### Currently being integrated
+- [x] Real RLS on every table (the old schema granted world-write access — see `SECURITY.md`)
+- [x] RBAC (roles/permissions) backing every privileged action
+- [x] Server-enforced order/ticket/booking state machines, idempotent order creation
+- [x] Payments wired to Razorpay test mode, webhook-verified, never trusted from the browser
+- [x] Secure single-use pickup tokens (food orders)
+- [x] Removed a hardcoded dev-login backdoor
+- [x] Parcel → Vite + incremental TypeScript
+- [x] Cursor pagination on posts/orders/notifications/marketplace/events/people
+- [x] Database-level rate limiting on orders/bookings/posts/comments/listings/etc.
+- [x] Loading/empty/error/offline states on the highest-traffic screens
+- [x] CI (lint/typecheck/test/build/E2E), including a network-mocked critical order-flow E2E test
 
-- [ ] Supabase authentication
-- [ ] PostgreSQL database
-- [ ] Persistent community posts
-- [ ] Event registration
-- [ ] User profiles
-- [ ] Service requests
-- [ ] Notifications
+### Deliberately not done in this pass (see `docs/ROADMAP.md`)
 
-### Not yet production-ready
-
-- [ ] Payment processing
-- [ ] Vendor settlements
-- [ ] Production authentication policies
-- [ ] Admin permissions
-- [ ] Moderation system
-- [ ] Production AI
-- [ ] Multi-campus deployment
+- [ ] Live deployment (Vercel/Cloudflare + a real domain)
+- [ ] Vendor/facilities/admin dashboards (the schema and RPCs are ready; no UI yet)
+- [ ] Messaging, AI assistant, IoT/delivery robots, multi-app split
+- [ ] Full UI componentization of `App.jsx` into `src/features/*/components`
 
 ---
 

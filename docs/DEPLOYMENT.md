@@ -1,0 +1,110 @@
+# Deployment runbook
+
+This wasn't done during the hardening pass (no hosting/payment accounts were
+connected to this session). Here's exactly what's left, in order.
+
+## 0. Rotate the credentials in `SECURITY.md` first
+
+Do this before anything else — a password and a Supabase key are sitting in
+this repo's git history. See `SECURITY.md`.
+
+## 1. Apply the database schema
+
+```bash
+npx supabase login
+npx supabase link --project-ref <your-project-ref>
+npx supabase db push
+```
+
+Or paste each file in `supabase/migrations/` into the Supabase Dashboard's
+SQL Editor, in filename order. Full detail in `supabase/migrations/README.md`.
+
+Skip `0013_seed_dev_data.sql` for a real campus — it inserts demo
+canteens/food items/clubs/events tagged to the `nhce` campus slug.
+
+## 2. Get Razorpay test keys and deploy the payment Edge Functions
+
+```bash
+npx supabase secrets set RAZORPAY_KEY_ID=rzp_test_xxxxxxxx
+npx supabase secrets set RAZORPAY_KEY_SECRET=xxxxxxxxxxxxxxxx
+npx supabase secrets set RAZORPAY_WEBHOOK_SECRET=xxxxxxxxxxxxxxxx
+
+npx supabase functions deploy create-razorpay-order
+npx supabase functions deploy razorpay-webhook --no-verify-jwt
+```
+
+Register the webhook URL in the Razorpay Dashboard (Settings → Webhooks):
+`https://<project-ref>.functions.supabase.co/razorpay-webhook`, subscribed
+to `payment.authorized`, `payment.captured`, `payment.failed`.
+
+Full detail, including how to get free test-mode keys with no KYC, in
+`supabase/functions/README.md`. **Stay in Razorpay test mode until you've
+gone through §3-4 below and are ready for a real launch** — doc §94 is
+explicit that payments/refunds should never be tested against production.
+
+## 3. Set up dev/staging/prod separation (recommended before real students use this)
+
+This pass kept the single existing Supabase project (a deliberate scope
+choice for speed). Before real money moves through this:
+
+1. Create two more Supabase projects (staging, production).
+2. Apply the same migrations to each (`supabase db push` per project, or
+   the SQL Editor route).
+3. Give each its own `.env` (`VITE_SUPABASE_URL`/`VITE_SUPABASE_PUBLISHABLE_KEY`)
+   and its own Razorpay key pair (test keys for staging, live keys only for
+   production once you're ready).
+4. Never point production traffic at a project that's ever had test
+   payments/refunds run against it.
+
+## 4. Deploy the frontend
+
+No hosting account was available to this session, so nothing has been
+pushed anywhere yet. Vercel is the path of least resistance for a Vite app:
+
+```bash
+npm install -g vercel   # or use npx vercel each time
+vercel login             # opens a browser to authenticate
+vercel                    # first run: links/creates the project, deploys a preview
+vercel --prod             # promotes to production
+```
+
+Set the same two env vars (`VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`)
+in the Vercel project's Environment Variables settings — once per
+environment (Preview / Production), pointing at staging/production Supabase
+respectively per §3.
+
+Cloudflare Pages is an equally reasonable alternative (`npx wrangler pages
+deploy dist`), doc §96 mentions both.
+
+## 5. DNS + domain
+
+Point your domain at the hosting provider (Vercel/Cloudflare both have
+one-click custom domain flows once you own the domain). Doc §78 suggests
+`campusos.app` with `vendor.`/`admin.`/`facilities.` subdomains for the
+apps that don't exist yet (§76-78) — irrelevant until those apps exist;
+a single domain is fine for now.
+
+## 6. Monitoring
+
+Not configured. Doc §96-98 recommends Sentry (error tracking) + the
+hosting platform's own metrics + PostHog (product analytics). All three
+need accounts; wire the Sentry SDK into `src/main.jsx` once you have a DSN.
+
+## 7. CI deploy step
+
+`.github/workflows/ci.yml` currently stops at build + E2E, deliberately —
+there was nothing to deploy to yet. Once step 4 is done, add a job like:
+
+```yaml
+  deploy:
+    needs: [lint-typecheck-test-build, e2e]
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npx vercel deploy --prod --token=${{ secrets.VERCEL_TOKEN }} --yes
+```
+
+(or the equivalent `wrangler pages deploy` for Cloudflare), gated behind
+whatever manual-approval GitHub Environment you want per doc §95's
+"Approval → Production" step.

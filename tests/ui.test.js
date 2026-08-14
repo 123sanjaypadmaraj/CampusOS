@@ -1,8 +1,13 @@
 // tests/ui.test.js
-const { test, expect } = require('@playwright/test');
+import { test } from '@playwright/test';
+import { mockSignedInSession } from './helpers/mockSupabase.js';
+
+test.beforeEach(async ({ page }) => {
+  await mockSignedInSession(page);
+});
 
 test('1 - Create a Post', async ({ page }) => {
-  await page.goto('http://localhost:1234');
+  await page.goto('/');
   await page.waitForLoadState('networkidle');
 
   // Navigate to Campus (Posts page) via bottom nav button
@@ -25,7 +30,7 @@ test('1 - Create a Post', async ({ page }) => {
 });
 
 test('2 - Report a Service Issue', async ({ page }) => {
-  await page.goto('http://localhost:1234');
+  await page.goto('/');
   await page.waitForLoadState('networkidle');
 
   // Navigate to Services via bottom nav (exact match)
@@ -43,7 +48,7 @@ test('2 - Report a Service Issue', async ({ page }) => {
 });
 
 test('3 - Report Lost Item', async ({ page }) => {
-  await page.goto('http://localhost:1234');
+  await page.goto('/');
   await page.waitForLoadState('networkidle');
 
   // Navigate to Services via bottom nav (exact match)
@@ -68,7 +73,7 @@ test('3 - Report Lost Item', async ({ page }) => {
 });
 
 test('4 - Create Marketplace Listing', async ({ page }) => {
-  await page.goto('http://localhost:1234');
+  await page.goto('/');
   await page.waitForLoadState('networkidle');
 
   // Navigate to Services via bottom nav (exact match)
@@ -93,12 +98,12 @@ test('4 - Create Marketplace Listing', async ({ page }) => {
 });
 
 test('5 - Register for an Event', async ({ page }) => {
-  await page.goto('http://localhost:1234');
+  await page.goto('/');
   await page.waitForLoadState('networkidle');
 
   await page.locator('nav.bottom-nav button', { hasText: 'Events' }).click();
   await page.waitForLoadState('networkidle');
-  
+
   // Wait for event cards to appear
   await page.waitForSelector('.event-card', { timeout: 15000 });
 

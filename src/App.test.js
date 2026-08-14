@@ -1,7 +1,5 @@
 process.env.VITE_SUPABASE_URL = "https://test.supabase.co";
 process.env.VITE_SUPABASE_PUBLISHABLE_KEY = "test-key";
-process.env.VITE_DEV_EMAIL = "sanjaypadmaraj@nhce.edu.in";
-process.env.VITE_DEV_PASSWORD = "test-password";
 
 import React from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
@@ -23,6 +21,7 @@ jest.mock("./services/mvpService", () => ({
   publishPost: jest.fn(() => Promise.resolve(null)),
   markAllNotificationsRead: jest.fn(() => Promise.resolve(null)),
   registerEvent: jest.fn(() => Promise.resolve(null)),
+  isValidPhone: jest.fn((value) => typeof value === "string" && /^\+?[0-9]{7,15}$/.test(value.trim())),
   sendMagicLink: jest.fn(() => Promise.resolve(true)),
   uploadPrintJob: jest.fn(() => Promise.resolve(null)),
   subscribeToAuthChanges: jest.fn((cb) => {
@@ -30,17 +29,12 @@ jest.mock("./services/mvpService", () => ({
     global.mockAuthCallback = cb;
     return () => {};
   }),
-  signInWithPassword: jest.fn(() => {
-    if (global.mockAuthCallback) {
-      global.mockAuthCallback({ session: {}, user: { name: "Sanjay", id: "1" } });
-    }
-    return Promise.resolve({ session: {}, user: { name: "Sanjay" } });
-  }),
   subscribeToUserNotifications: jest.fn(() => () => {}),
   subscribeToOrders: jest.fn(() => () => {}),
   subscribeToPosts: jest.fn(() => () => {}),
   subscribeToEvents: jest.fn(() => () => {}),
   subscribeToClubs: jest.fn(() => () => {}),
+  subscribeToFood: jest.fn(() => () => {}),
   subscribeToMarketplace: jest.fn(() => () => {}),
   subscribeToLostFound: jest.fn(() => () => {}),
   togglePostLike: jest.fn(() => Promise.resolve(null)),
@@ -93,19 +87,35 @@ describe("App button interactions", () => {
     expect(window.localStorage.getItem("campus-theme")).toBe("dark");
   });
 
-  test("opens the login modal and logs in directly with the default NHCE email", async () => {
+  test("opens the login modal and sends a magic link for an allowed college email", async () => {
+    const { sendMagicLink } = require("./services/mvpService");
     render(<App />);
     fireEvent.click(await screen.findByTestId("sign-in-button"));
 
-    // Click the submit button inside the modal
+    const emailInput = await screen.findByPlaceholderText(/yourname@gmail.com/i);
+    fireEvent.change(emailInput, { target: { value: "student@nhce.edu.in" } });
     fireEvent.click(await screen.findByTestId("direct-login-button"));
 
     await waitFor(() => {
-      expect(screen.queryByTestId("sign-in-button")).not.toBeInTheDocument();
+      expect(sendMagicLink).toHaveBeenCalledWith("student@nhce.edu.in");
     });
 
-    expect(screen.getAllByText(/Sanjay/i).length).toBeGreaterThan(0);
+    expect(await screen.findByText(/Check your email/i)).toBeInTheDocument();
   }, 10000);
+
+  test("rejects an email outside the allowed college domains without calling the backend", async () => {
+    const { sendMagicLink } = require("./services/mvpService");
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("sign-in-button"));
+
+    const emailInput = await screen.findByPlaceholderText(/yourname@gmail.com/i);
+    fireEvent.change(emailInput, { target: { value: "someone@example.com" } });
+    fireEvent.click(await screen.findByTestId("direct-login-button"));
+
+    await waitFor(() => {
+      expect(sendMagicLink).not.toHaveBeenCalled();
+    });
+  });
 
   test("navigates to the Campus section using the button", async () => {
     render(<App />);
@@ -114,5 +124,91 @@ describe("App button interactions", () => {
     fireEvent.click(campusButton);
 
     expect(campusButton).toHaveClass("active");
+  });
+
+  describe("event registration confirmation dialog", () => {
+    const signInAs = (overrides = {}) => {
+      const { getCurrentUser, getOrCreateProfile } = require("./services/mvpService");
+      getCurrentUser.mockResolvedValueOnce({
+        id: "user-1",
+        email: "student@nhce.edu.in",
+        user_metadata: {},
+      });
+      getOrCreateProfile.mockResolvedValueOnce({
+        id: "user-1",
+        name: "Sanjay",
+        usn: "1NH21CS001",
+        email: "student@nhce.edu.in",
+        phone: null,
+        ...overrides,
+      });
+    };
+
+    test("prefills name/USN/email from the profile and submits the entered phone number", async () => {
+      const { registerEvent } = require("./services/mvpService");
+      registerEvent.mockResolvedValueOnce({ status: "confirmed", registration_id: "reg-1" });
+      signInAs();
+
+      render(<App />);
+      fireEvent.click(await screen.findByTestId("nav-events-button"));
+
+      const registerButtons = await screen.findAllByRole("button", { name: "Register" });
+      fireEvent.click(registerButtons[0]);
+
+      expect(await screen.findByText(/Review your details/i)).toBeInTheDocument();
+      expect(screen.getByDisplayValue("Sanjay")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("1NH21CS001")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("student@nhce.edu.in")).toBeInTheDocument();
+
+      const phoneInput = screen.getByPlaceholderText(/9876543210/);
+      fireEvent.change(phoneInput, { target: { value: "9876543210" } });
+      fireEvent.click(screen.getByRole("button", { name: /Confirm registration/i }));
+
+      await waitFor(() => {
+        expect(registerEvent).toHaveBeenCalledWith({
+          eventId: "00000000-0000-4000-a000-000000000001",
+          userId: "user-1",
+          contactPhone: "9876543210",
+        });
+      });
+
+      expect(await screen.findByText(/registration confirmed/i)).toBeInTheDocument();
+    });
+
+    test("blocks confirmation and never calls registerEvent when the phone number is missing", async () => {
+      const { registerEvent } = require("./services/mvpService");
+      signInAs();
+
+      render(<App />);
+      fireEvent.click(await screen.findByTestId("nav-events-button"));
+
+      const registerButtons = await screen.findAllByRole("button", { name: "Register" });
+      fireEvent.click(registerButtons[0]);
+
+      await screen.findByText(/Review your details/i);
+      fireEvent.click(screen.getByRole("button", { name: /Confirm registration/i }));
+
+      expect(await screen.findByText(/valid phone number/i)).toBeInTheDocument();
+      expect(registerEvent).not.toHaveBeenCalled();
+    });
+
+    test("closing the dialog does not register the user", async () => {
+      const { registerEvent } = require("./services/mvpService");
+      signInAs();
+
+      render(<App />);
+      fireEvent.click(await screen.findByTestId("nav-events-button"));
+
+      const registerButtons = await screen.findAllByRole("button", { name: "Register" });
+      fireEvent.click(registerButtons[0]);
+
+      await screen.findByText(/Review your details/i);
+      fireEvent.click(document.querySelector(".modal-close"));
+
+      await waitFor(() => {
+        expect(screen.queryByText(/Review your details/i)).not.toBeInTheDocument();
+      });
+      expect(registerEvent).not.toHaveBeenCalled();
+    });
   });
 });
