@@ -219,4 +219,7 @@ export {
   getReportContext,
   moderateContent,
   resolveReport,
+  listPendingOrgRequests,
+  approveOrgRequest,
+  rejectOrgRequest,
 } from "../../services/mvpService";

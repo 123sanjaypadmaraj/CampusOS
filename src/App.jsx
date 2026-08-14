@@ -67,6 +67,7 @@ import {
   reportContent,
   getMyVerification,
   submitStudentVerification,
+  submitOrgRequest,
 } from "./services/mvpService";
 import { openRazorpayCheckout } from "./features/payments/razorpay";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
@@ -1816,7 +1817,7 @@ function App() {
     }
 
     if (active === "clubs") {
-      return <Clubs notify={notify} clubs={clubs} authUser={authUser} setLoginOpen={setLoginOpen} />;
+      return <Clubs notify={notify} clubs={clubs} authUser={authUser} setLoginOpen={setLoginOpen} campusId={campusId} />;
     }
 
     if (active === "food") {
@@ -2768,9 +2769,10 @@ function PersonCard({ person, notify }) {
   );
 }
 
-function Clubs({ notify, clubs: clubList, authUser, setLoginOpen }) {
+function Clubs({ notify, clubs: clubList, authUser, setLoginOpen, campusId }) {
   const [selectedClub, setSelectedClub] = useState(null);
   const [joinedClubs, setJoinedClubs] = useState({});
+  const [requestModalOpen, setRequestModalOpen] = useState(false);
 
   useEffect(() => {
     if (!authUser?.id) return;
@@ -2813,6 +2815,17 @@ function Clubs({ notify, clubs: clubList, authUser, setLoginOpen }) {
         kicker="STUDENT COMMUNITIES"
         title="Clubs Hub"
         text="Discover the communities shaping campus life."
+        action={
+          <button
+            className="primary"
+            onClick={() => {
+              if (!authUser) { setLoginOpen?.(); notify("Sign in to start a club"); return; }
+              setRequestModalOpen(true);
+            }}
+          >
+            <HiPlus /> Start a club
+          </button>
+        }
       />
 
       <div className="club-grid">
@@ -2872,7 +2885,76 @@ function Clubs({ notify, clubs: clubList, authUser, setLoginOpen }) {
           </button>
         </ModalShell>
       )}
+
+      {requestModalOpen && (
+        <OrgRequestModal
+          requestType="club"
+          authUser={authUser}
+          campusId={campusId}
+          onClose={() => setRequestModalOpen(false)}
+          notify={notify}
+        />
+      )}
     </section>
+  );
+}
+
+// Shared intake form for both "start a club" (Clubs Hub) and "apply to
+// become a vendor" (Profile) -- neither can self-serve past a request:
+// club approval creates the real club server-side via approve_org_request();
+// vendor approval can't create a Supabase Auth account from client code
+// (needs the service_role key), so it's an admin sign-off that a campus
+// admin then acts on with scripts/setup-vendor-accounts.mjs.
+function OrgRequestModal({ requestType, authUser, campusId, onClose, notify }) {
+  const [form, setForm] = useState({ name: "", description: "", category: "", contactPhone: "" });
+  const [submitting, setSubmitting] = useState(false);
+  const change = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const isVendor = requestType === "vendor";
+
+  return (
+    <ModalShell
+      kicker={isVendor ? "VENDOR APPLICATION" : "NEW CLUB"}
+      title={isVendor ? "Apply to become a campus vendor" : "Start a new club"}
+      onClose={onClose}
+    >
+      {isVendor && (
+        <p>
+          A campus admin reviews every application. Approval means your
+          request is accepted — a vendor account still has to be set up for
+          you by an admin as a separate step.
+        </p>
+      )}
+      <label>{isVendor ? "Business name" : "Club name"}<input value={form.name} onChange={(e) => change("name", e.target.value)} /></label>
+      <label>{isVendor ? "What will you sell?" : "What's this club about?"}<textarea value={form.description} onChange={(e) => change("description", e.target.value)} /></label>
+      <label>{isVendor ? "Category (canteen, print, etc.)" : "Category"}<input value={form.category} onChange={(e) => change("category", e.target.value)} /></label>
+      {isVendor && <label>Contact phone<input value={form.contactPhone} onChange={(e) => change("contactPhone", e.target.value)} /></label>}
+      <button
+        className="primary wide"
+        disabled={submitting || !form.name.trim() || !form.description.trim()}
+        onClick={async () => {
+          try {
+            setSubmitting(true);
+            await submitOrgRequest({
+              userId: authUser.id,
+              campusId,
+              requestType,
+              name: form.name,
+              description: form.description,
+              category: form.category,
+              contactPhone: form.contactPhone,
+            });
+            notify("Request submitted — a campus admin will review it");
+            onClose();
+          } catch (error) {
+            notify(error.message || "Could not submit request");
+          } finally {
+            setSubmitting(false);
+          }
+        }}
+      >
+        {submitting ? "Submitting…" : "Submit request"}
+      </button>
+    </ModalShell>
   );
 }
 
@@ -3884,6 +3966,7 @@ function Store({ items, cart, addStore, openModal }) {
 
 function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfileUpdated, stats = {}, verification, onVerificationChanged, campusId }) {
   const [verifyModalOpen, setVerifyModalOpen] = useState(false);
+  const [vendorModalOpen, setVendorModalOpen] = useState(false);
   if (!user) {
     return (
       <section className="page-section profile-page">
@@ -4061,6 +4144,14 @@ function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfil
         )}
       </div>
 
+      {profile?.role === "student" && (
+        <div className="profile-box profile-wide-box">
+          <span className="section-kicker">RUN A CAMPUS BUSINESS</span>
+          <p>Run a canteen, print counter or campus store? Apply for a vendor account.</p>
+          <button className="primary" onClick={() => setVendorModalOpen(true)}>Apply to become a vendor</button>
+        </div>
+      )}
+
       <div className="profile-box profile-wide-box">
         <span className="section-kicker">FEATURED PROJECT</span>
         <div className="featured-project">
@@ -4120,6 +4211,16 @@ function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfil
           campusId={campusId}
           onClose={() => setVerifyModalOpen(false)}
           onSubmitted={() => { setVerifyModalOpen(false); onVerificationChanged(); notify("ID submitted for review"); }}
+          notify={notify}
+        />
+      )}
+
+      {vendorModalOpen && (
+        <OrgRequestModal
+          requestType="vendor"
+          authUser={profile}
+          campusId={campusId}
+          onClose={() => setVendorModalOpen(false)}
           notify={notify}
         />
       )}

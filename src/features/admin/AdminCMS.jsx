@@ -42,6 +42,7 @@ const TABS = [
   ["verifications", "Student Verifications"],
   ["users", "Users"],
   ["moderation", "Moderation"],
+  ["requests", "Requests"],
 ];
 
 export default function AdminCMS({ notify, campusId, authUser }) {
@@ -75,7 +76,90 @@ export default function AdminCMS({ notify, campusId, authUser }) {
       {tab === "verifications" && <VerificationsTab notify={notify} campusId={campusId} authUser={authUser} />}
       {tab === "users" && <UsersTab notify={notify} campusId={campusId} authUser={authUser} />}
       {tab === "moderation" && <ModerationTab notify={notify} authUser={authUser} />}
+      {tab === "requests" && <RequestsTab notify={notify} campusId={campusId} />}
     </section>
+  );
+}
+
+/* =========================================================
+   CLUB/VENDOR REQUESTS (doc §104)
+========================================================= */
+
+function RequestsTab({ notify, campusId }) {
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busyId, setBusyId] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      setRequests(await adminApi.listPendingOrgRequests(campusId));
+    } catch (err) {
+      setError(err.message || "Could not load requests");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, [campusId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const approve = async (request) => {
+    try {
+      setBusyId(request.id);
+      await adminApi.approveOrgRequest(request.id);
+      notify(
+        request.request_type === "club"
+          ? `${request.name} club created`
+          : `${request.name} approved — set up their vendor account with scripts/setup-vendor-accounts.mjs`
+      );
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not approve this request");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const reject = async (request) => {
+    const reason = window.prompt(`Reason for rejecting "${request.name}"?`);
+    if (reason === null) return;
+    try {
+      setBusyId(request.id);
+      await adminApi.rejectOrgRequest(request.id, reason);
+      notify("Request rejected");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not reject this request");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (loading) return <LoadingState label="Loading requests…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  return (
+    <div className="resource-list">
+      {requests.length === 0 && <EmptyState title="No pending requests" text="Club and vendor applications will show up here." />}
+      {requests.map((request) => (
+        <article className="resource-row" key={request.id}>
+          <div>
+            <b>{request.request_type === "club" ? "Club" : "Vendor"} · {request.name}</b>
+            <small>
+              From {request.profiles?.name || "a student"} · {request.category || "uncategorised"}
+              {request.contact_phone ? ` · ${request.contact_phone}` : ""}
+            </small>
+            <small>{request.description}</small>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="primary" disabled={busyId === request.id} onClick={() => approve(request)}>Approve</button>
+            <button disabled={busyId === request.id} onClick={() => reject(request)}>Reject</button>
+          </div>
+        </article>
+      ))}
+    </div>
   );
 }
 
