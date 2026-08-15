@@ -28,8 +28,11 @@ import {
   HiSpeakerXMark,
   HiArrowUturnLeft,
   HiFire,
+  HiChartBar,
+  HiCurrencyRupee,
 } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
+import { StatTile } from "../../components/ui/Charts";
 import * as vendorApi from "./api";
 import VendorAnalytics from "./Analytics";
 import * as storeApi from "../store/api";
@@ -120,11 +123,131 @@ export default function VendorDashboard({ notify, authUser }) {
 }
 
 /* =========================================================
+   DASHBOARD OVERVIEW -- a real "how's today going" home screen (the vendor
+   app now defaults here instead of landing straight in the orders queue,
+   same idea as a Swiggy/Zomato partner app's home tab: today's numbers +
+   one-tap shortcuts, not a bare list). Two variants -- canteen and print
+   shop -- share the same stat-tile/quick-link markup but pull different
+   numbers, so they're kept as separate small components rather than one
+   prop-heavy do-it-all component.
+========================================================= */
+
+const money = (n) => `₹${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+
+function QuickLinkCard({ icon, label, sub, onClick }) {
+  return (
+    <button className="vendor-quicklink-card" onClick={onClick}>
+      <span className="vendor-quicklink-icon">{icon}</span>
+      <span>
+        <b>{label}</b>
+        <small>{sub}</small>
+      </span>
+    </button>
+  );
+}
+
+function CanteenOverview({ canteen, notify, onNavigate }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [stats, setStats] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      setStats(await vendorApi.getCanteenDashboardStats(canteen.id));
+    } catch (err) {
+      setError(err.message || "Could not load your dashboard");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, [canteen.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading) return <LoadingState label="Loading your dashboard…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  return (
+    <div>
+      <div className="analytics-grid">
+        <StatTile label="Orders today" value={stats.ordersToday} />
+        <StatTile label="Revenue today" value={money(stats.revenueToday)} />
+        <StatTile label="Needs your action" value={stats.pendingCount} sub={stats.pendingCount > 0 ? "In the order queue" : "All caught up"} />
+        <StatTile
+          label="Stock alerts"
+          value={stats.lowStockCount + stats.outOfStockCount}
+          sub={stats.outOfStockCount > 0 ? `${stats.outOfStockCount} out of stock` : stats.lowStockCount > 0 ? `${stats.lowStockCount} running low` : "All stocked"}
+        />
+      </div>
+
+      <div className="vendor-quicklink-grid">
+        <QuickLinkCard icon={<HiClock />} label="Order queue" sub="Accept, prepare, complete pickups" onClick={() => onNavigate("orders")} />
+        <QuickLinkCard icon={<HiPencilSquare />} label="Menu" sub="Items, pricing, stock, availability" onClick={() => onNavigate("menu")} />
+        <QuickLinkCard icon={<HiChartBar />} label="Analytics" sub="Revenue, orders, SLA over time" onClick={() => onNavigate("analytics")} />
+      </div>
+    </div>
+  );
+}
+
+function PrintShopOverview({ notify, onNavigate }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [stats, setStats] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      setStats(await vendorApi.getPrintShopDashboardStats());
+    } catch (err) {
+      setError(err.message || "Could not load your dashboard");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading) return <LoadingState label="Loading your dashboard…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  return (
+    <div>
+      <div className="analytics-grid">
+        <StatTile label="Jobs today" value={stats.jobsToday} />
+        <StatTile label="In progress" value={stats.activeCount} sub={stats.activeCount > 0 ? "In the print queue" : "All caught up"} />
+        <StatTile label="Ready for pickup" value={stats.readyCount} />
+      </div>
+
+      <div className="vendor-quicklink-grid">
+        <QuickLinkCard icon={<HiPrinter />} label="Print queue" sub="Process and hand off jobs" onClick={() => onNavigate("jobs")} />
+        <QuickLinkCard icon={<HiCurrencyRupee />} label="Pricing" sub="Black & white / colour rates" onClick={() => onNavigate("pricing")} />
+        <QuickLinkCard icon={<HiChartBar />} label="Analytics" sub="Turnaround & SLA over time" onClick={() => onNavigate("analytics")} />
+      </div>
+    </div>
+  );
+}
+
+// Local alias -- Analytics.jsx's own StatTile lives in components/ui/Charts.jsx
+// and is styled for a 4-up analytics grid; reused as-is here too so the
+// dashboard's numbers look like one system with the Analytics tab's.
+function StatTile({ label, value, sub }) {
+  return (
+    <div className="stat-card">
+      <small>{label}</small>
+      <b>{value}</b>
+      {sub && <span className="stat-sub">{sub}</span>}
+    </div>
+  );
+}
+
+/* =========================================================
    CANTEEN MENU (Udupi / Tango / Munch / Nescafe)
 ========================================================= */
 
 function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
-  const [tab, setTab] = useState("orders");
+  const [tab, setTab] = useState("dashboard");
   const [items, setItems] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -240,10 +363,13 @@ function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
       </div>
 
       <div className="socialize-filter-row">
+        <button className={tab === "dashboard" ? "chip active" : "chip"} onClick={() => setTab("dashboard")}>Dashboard</button>
         <button className={tab === "orders" ? "chip active" : "chip"} onClick={() => setTab("orders")}>Orders</button>
         <button className={tab === "menu" ? "chip active" : "chip"} onClick={() => setTab("menu")}>Menu</button>
         <button className={tab === "analytics" ? "chip active" : "chip"} onClick={() => setTab("analytics")}>Analytics</button>
       </div>
+
+      {tab === "dashboard" && <CanteenOverview canteen={canteen} notify={notify} onNavigate={setTab} />}
 
       {tab === "orders" && <OrderQueue canteen={canteen} notify={notify} />}
 
@@ -1350,7 +1476,7 @@ function ImportCsvModal({ canteenId, categories, existingItems, onClose, onImpor
 const RATE_LABELS = { black_white: "Black & White (per page)", colour: "Colour (per page)" };
 
 function PrintPricingManager({ rates, notify, onChanged }) {
-  const [tab, setTab] = useState("jobs");
+  const [tab, setTab] = useState("dashboard");
 
   return (
     <section className="page-section admin-cms">
@@ -1363,10 +1489,13 @@ function PrintPricingManager({ rates, notify, onChanged }) {
       </div>
 
       <div className="socialize-filter-row">
+        <button className={tab === "dashboard" ? "chip active" : "chip"} onClick={() => setTab("dashboard")}>Dashboard</button>
         <button className={tab === "jobs" ? "chip active" : "chip"} onClick={() => setTab("jobs")}>Print Queue</button>
         <button className={tab === "pricing" ? "chip active" : "chip"} onClick={() => setTab("pricing")}>Pricing</button>
         <button className={tab === "analytics" ? "chip active" : "chip"} onClick={() => setTab("analytics")}>Analytics</button>
       </div>
+
+      {tab === "dashboard" && <PrintShopOverview notify={notify} onNavigate={setTab} />}
 
       {tab === "jobs" && <PrintJobQueue notify={notify} />}
 

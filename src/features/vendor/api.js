@@ -503,6 +503,73 @@ export async function removeCanteenStaff(id) {
    way on the payment side.
 ========================================================================= */
 
+/* =========================================================================
+   DASHBOARD OVERVIEW -- a real "how's today going" home screen (the ask
+   that added this: "just like how a swiggy/zomato vendor can see their
+   details"), not a bare landing on the orders queue. Computed client-side
+   from lightweight, already-RLS-scoped reads rather than a new RPC -- these
+   are small per-canteen/per-shop counts, not analytics-scale aggregation
+   (that's what Analytics.jsx's vendor_gmv_series/vendor_sla_summary RPCs
+   are for).
+========================================================================= */
+
+function startOfToday() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
+const PENDING_ORDER_STATUSES = ["RECEIVED", "ACCEPTED", "PREPARING", "READY", "OUT_FOR_DELIVERY", "CANCEL_REQUESTED"];
+
+export async function getCanteenDashboardStats(canteenId) {
+  const [{ data: todayOrders, error: ordersErr }, { data: items, error: itemsErr }] = await Promise.all([
+    supabase
+      .from("orders")
+      .select("id, total, status")
+      .eq("canteen_id", canteenId)
+      .gte("created_at", startOfToday())
+      .not("status", "in", "(CREATED,PAYMENT_PENDING,EXPIRED)"),
+    supabase
+      .from("food_items")
+      .select("id, stock_quantity, low_stock_threshold")
+      .eq("canteen_id", canteenId)
+      .eq("active", true)
+      .eq("track_stock", true),
+  ]);
+  throwIfError(ordersErr);
+  throwIfError(itemsErr);
+
+  const orders = todayOrders || [];
+  const revenueToday = orders
+    .filter((o) => !["CANCELLED", "REJECTED"].includes(o.status))
+    .reduce((sum, o) => sum + Number(o.total || 0), 0);
+
+  return {
+    ordersToday: orders.length,
+    revenueToday,
+    pendingCount: orders.filter((o) => PENDING_ORDER_STATUSES.includes(o.status)).length,
+    lowStockCount: (items || []).filter((i) => i.stock_quantity != null && i.stock_quantity > 0 && i.stock_quantity <= (i.low_stock_threshold ?? 5)).length,
+    outOfStockCount: (items || []).filter((i) => i.stock_quantity != null && i.stock_quantity <= 0).length,
+  };
+}
+
+const ACTIVE_PRINT_STATUSES_FOR_STATS = new Set(["UPLOADED", "PROCESSING", "QUEUED", "PRINTING"]);
+
+export async function getPrintShopDashboardStats() {
+  const { data, error } = await supabase
+    .from("print_jobs")
+    .select("id, status")
+    .gte("created_at", startOfToday());
+  throwIfError(error);
+
+  const jobs = data || [];
+  return {
+    jobsToday: jobs.length,
+    activeCount: jobs.filter((j) => ACTIVE_PRINT_STATUSES_FOR_STATS.has(j.status)).length,
+    readyCount: jobs.filter((j) => j.status === "READY").length,
+  };
+}
+
 export async function initiateRefund(orderId, amount, reason) {
   const { data: refund, error } = await supabase.rpc("request_refund", {
     p_order_id: orderId,
