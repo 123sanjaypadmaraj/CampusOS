@@ -77,17 +77,30 @@ place; there's no UI yet:
 
 - **§16-22 Vendor CMS — mostly done as of 2026-08-15.** A real per-canteen
   vendor dashboard exists (`src/features/vendor/VendorDashboard.jsx`):
-  menu CRUD, an order-queue driving the real state machine, bulk select +
-  actions (availability, archive, move category, price ±amount/%, set
-  stock), CSV import/export
+  menu CRUD, bulk select + actions (availability, archive, move category,
+  price ±amount/%, set stock), CSV import/export
   (`supabase/migrations/20260815000800_food_stock_tracking.sql` +
   `foodItemsToCsv`/`parseFoodItemsCsv`/`bulkImportFoodItems` in
   `src/features/vendor/api.js`), and stock/low-stock tracking (opt-in
   `track_stock` per item; stock auto-decrements on a captured payment,
   auto-restores if the vendor rejects/cancels a paid order, and the item
   auto-hides at zero — see the migration's `adjust_stock_for_order()`).
-  Still missing: per-vendor staff sub-accounts (one login per canteen
-  today, not per staff member).
+  **Order-ops depth added 2026-08-15**
+  (`supabase/migrations/20260815001000_vendor_order_ops.sql`): a
+  Kitchen/Pickup/All queue split, order priority (normal/high/urgent),
+  vendor-internal notes (never shown to the student), a lightweight staff
+  roster + per-order assignment (`canteen_staff` table — a name label, not
+  a real login), sound/browser new-order alerts, a working
+  confirm-or-resume path out of `CANCEL_REQUESTED` (previously a dead end —
+  no button anywhere could move it forward), and refund initiation
+  (`request_refund()` existed since the original payments migration but
+  nothing ever called it, and it had the same cross-canteen ownership gap
+  0024 fixed on `transition_order_status`/`redeem_pickup_token` — fixed the
+  same way + a real gateway call via the new `razorpay-refund` Edge
+  Function). Still missing: menu variants/add-ons/availability schedules,
+  richer dietary tags, real image upload, a stock adjustment audit log,
+  inventory reports, and per-vendor staff *sub-accounts* (the new roster is
+  a name label for assignment, not a real login per staff member).
 - **§28 Campus Store** as a real commerce module (currently static mock data
   in `App.jsx`).
 - **§30-33 Print vendor dashboard, facilities dashboard.** `print.manage`/
