@@ -30,9 +30,9 @@ import {
   HiFire,
   HiChartBar,
   HiCurrencyRupee,
+  HiChevronRight,
 } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
-import { StatTile } from "../../components/ui/Charts";
 import * as vendorApi from "./api";
 import VendorAnalytics from "./Analytics";
 import * as storeApi from "../store/api";
@@ -142,11 +142,31 @@ function QuickLinkCard({ icon, label, sub, onClick, ariaLabel }) {
     // readers and ambiguous for anything that queries by accessible name.
     <button className="vendor-quicklink-card" onClick={onClick} aria-label={ariaLabel}>
       <span className="vendor-quicklink-icon">{icon}</span>
-      <span>
+      <span className="vendor-quicklink-text">
         <b>{label}</b>
         <small>{sub}</small>
       </span>
+      <HiChevronRight className="vendor-quicklink-chevron" />
     </button>
+  );
+}
+
+// A dashboard stat should read at a glance whether it's fine or needs
+// attention -- a flat, one-color grid of numbers (the shared analytics
+// StatTile, built for a trend-over-time view) doesn't carry that signal.
+// 'tone' borrows the exact amber/red/green already used for stock-alert
+// pills elsewhere in this file, so "everything's fine" vs. "look at this"
+// reads the same way here as it does on the Menu tab.
+function DashboardStatCard({ icon, label, value, sub, tone = "default" }) {
+  return (
+    <div className={`vendor-stat-card tone-${tone}`}>
+      <span className="vendor-stat-icon">{icon}</span>
+      <div>
+        <small>{label}</small>
+        <b>{value}</b>
+        {sub && <span className="stat-sub">{sub}</span>}
+      </div>
+    </div>
   );
 }
 
@@ -172,19 +192,35 @@ function CanteenOverview({ canteen, onNavigate }) {
   if (loading) return <LoadingState label="Loading your dashboard…" />;
   if (error) return <ErrorState text={error} onRetry={reload} />;
 
+  const stockAlertCount = stats.lowStockCount + stats.outOfStockCount;
+
   return (
     <div>
+      <div className="vendor-dashboard-greeting">
+        <h2>Today at {canteen.name}</h2>
+        <p>Here&apos;s what&apos;s happening right now — jump into any section below.</p>
+      </div>
+
       <div className="analytics-grid">
-        <StatTile label="Orders today" value={stats.ordersToday} />
-        <StatTile label="Revenue today" value={money(stats.revenueToday)} />
-        <StatTile label="Needs your action" value={stats.pendingCount} sub={stats.pendingCount > 0 ? "In the order queue" : "All caught up"} />
-        <StatTile
+        <DashboardStatCard icon={<HiClock />} label="Orders today" value={stats.ordersToday} />
+        <DashboardStatCard icon={<HiCurrencyRupee />} label="Revenue today" value={money(stats.revenueToday)} tone="good" />
+        <DashboardStatCard
+          icon={<HiExclamationTriangle />}
+          label="Needs your action"
+          value={stats.pendingCount}
+          sub={stats.pendingCount > 0 ? "In the order queue" : "All caught up"}
+          tone={stats.pendingCount > 0 ? "warning" : "good"}
+        />
+        <DashboardStatCard
+          icon={<HiCubeTransparent />}
           label="Stock alerts"
-          value={stats.lowStockCount + stats.outOfStockCount}
+          value={stockAlertCount}
           sub={stats.outOfStockCount > 0 ? `${stats.outOfStockCount} out of stock` : stats.lowStockCount > 0 ? `${stats.lowStockCount} running low` : "All stocked"}
+          tone={stats.outOfStockCount > 0 ? "critical" : stats.lowStockCount > 0 ? "warning" : "good"}
         />
       </div>
 
+      <div className="item-form-section-label">Quick actions</div>
       <div className="vendor-quicklink-grid">
         <QuickLinkCard icon={<HiClock />} label="Order queue" sub="Accept, prepare, complete pickups" ariaLabel="Jump to the order queue" onClick={() => onNavigate("orders")} />
         <QuickLinkCard icon={<HiPencilSquare />} label="Menu" sub="Items, pricing, stock, availability" ariaLabel="Edit items and stock" onClick={() => onNavigate("menu")} />
@@ -218,12 +254,29 @@ function PrintShopOverview({ onNavigate }) {
 
   return (
     <div>
-      <div className="analytics-grid">
-        <StatTile label="Jobs today" value={stats.jobsToday} />
-        <StatTile label="In progress" value={stats.activeCount} sub={stats.activeCount > 0 ? "In the print queue" : "All caught up"} />
-        <StatTile label="Ready for pickup" value={stats.readyCount} />
+      <div className="vendor-dashboard-greeting">
+        <h2>Today at the Print Shop</h2>
+        <p>Here&apos;s what&apos;s happening right now — jump into any section below.</p>
       </div>
 
+      <div className="analytics-grid">
+        <DashboardStatCard icon={<HiPrinter />} label="Jobs today" value={stats.jobsToday} />
+        <DashboardStatCard
+          icon={<HiExclamationTriangle />}
+          label="In progress"
+          value={stats.activeCount}
+          sub={stats.activeCount > 0 ? "In the print queue" : "All caught up"}
+          tone={stats.activeCount > 0 ? "warning" : "good"}
+        />
+        <DashboardStatCard
+          icon={<HiCheck />}
+          label="Ready for pickup"
+          value={stats.readyCount}
+          tone={stats.readyCount > 0 ? "warning" : "good"}
+        />
+      </div>
+
+      <div className="item-form-section-label">Quick actions</div>
       <div className="vendor-quicklink-grid">
         <QuickLinkCard icon={<HiPrinter />} label="Print queue" sub="Process and hand off jobs" ariaLabel="Process incoming jobs" onClick={() => onNavigate("jobs")} />
         <QuickLinkCard icon={<HiCurrencyRupee />} label="Pricing" sub="Black & white / colour rates" ariaLabel="Edit page rates" onClick={() => onNavigate("pricing")} />

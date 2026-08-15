@@ -47,7 +47,7 @@ test.describe('Vendor account nav restriction + dashboard overview', () => {
     await page.waitForLoadState('networkidle');
 
     await expect(page).toHaveURL(/\/vendor$/, { timeout: 10000 });
-    await expect(page.getByRole('heading', { name: 'Udupi' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Udupi', exact: true })).toBeVisible();
   });
 
   test('quick-link cards on the Dashboard tab navigate to Orders/Menu/Analytics', async ({ page, context }) => {

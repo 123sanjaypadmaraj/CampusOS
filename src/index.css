@@ -5014,6 +5014,54 @@
 
 .stat-sub { display: block; color: var(--muted); font-size: 11px; margin-top: 4px; }
 
+/* ---- vendor dashboard overview (Dashboard tab) ---- */
+
+.vendor-dashboard-greeting { margin-bottom: 20px; }
+.vendor-dashboard-greeting h2 { margin: 0; font: 800 22px Manrope; color: var(--text); }
+.vendor-dashboard-greeting p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+
+.vendor-stat-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px 18px;
+}
+
+.vendor-stat-icon {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  font-size: 17px;
+  background: var(--soft);
+  color: var(--purple);
+}
+
+.vendor-stat-card small {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.vendor-stat-card b { display: block; font: 800 23px Manrope; color: var(--text); margin-top: 3px; }
+.vendor-stat-card .stat-sub { margin-top: 3px; }
+
+.vendor-stat-card.tone-good .vendor-stat-icon { background: #e6f7ef; color: #1aa674; }
+.vendor-stat-card.tone-warning .vendor-stat-icon { background: #fff4e0; color: #b9770e; }
+.vendor-stat-card.tone-critical .vendor-stat-icon { background: #fdeeea; color: #d0562f; }
+
+.app-shell.dark-mode .vendor-stat-card.tone-good .vendor-stat-icon { background: #123425; color: #4fd399; }
+.app-shell.dark-mode .vendor-stat-card.tone-warning .vendor-stat-icon { background: #3a2a08; color: #f2c168; }
+.app-shell.dark-mode .vendor-stat-card.tone-critical .vendor-stat-icon { background: #3a2018; color: #f2916a; }
+
 /* ---- vendor dashboard overview: quick-link shortcut cards ---- */
 
 .vendor-quicklink-grid {
@@ -5031,10 +5079,14 @@
   border: 1px solid var(--border);
   border-radius: 18px;
   padding: 16px 18px;
-  transition: border-color .15s ease, box-shadow .15s ease;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
 }
 
-.vendor-quicklink-card:hover { border-color: var(--purple); box-shadow: 0 0 0 3px var(--soft); }
+.vendor-quicklink-card:hover {
+  border-color: var(--purple);
+  box-shadow: 0 10px 24px #26154c14, 0 0 0 3px var(--soft);
+  transform: translateY(-2px);
+}
 
 .vendor-quicklink-icon {
   flex-shrink: 0;
@@ -5048,8 +5100,10 @@
   font-size: 19px;
 }
 
+.vendor-quicklink-text { flex: 1; min-width: 0; }
 .vendor-quicklink-card b { display: block; font: 800 14px Manrope; color: var(--text); }
 .vendor-quicklink-card small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+.vendor-quicklink-chevron { flex-shrink: 0; color: var(--muted); font-size: 16px; }
 
 .chart-card {
   background: var(--surface);
