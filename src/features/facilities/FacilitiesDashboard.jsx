@@ -1,11 +1,13 @@
 import React, { useEffect, useRef, useState } from "react";
-import { HiCheck, HiXCircle, HiClock, HiWrenchScrewdriver, HiCalendarDays, HiQrCode, HiCamera, HiShieldCheck, HiXMark } from "react-icons/hi2";
+import { HiCheck, HiXCircle, HiClock, HiWrenchScrewdriver, HiCalendarDays, HiQrCode, HiCamera, HiShieldCheck, HiXMark, HiPhone } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import { verifyCampusPass } from "../../services/campusPassService";
 import * as facilitiesApi from "./api";
+import SosAlertsPanel from "./SosAlerts";
+import { EmergencyContactsTab } from "../admin/AdminCMS";
 
 export default function FacilitiesDashboard({ notify, campusId }) {
-  const [tab, setTab] = useState("tickets");
+  const [tab, setTab] = useState("sos");
 
   return (
     <section className="page-section admin-cms">
@@ -18,14 +20,18 @@ export default function FacilitiesDashboard({ notify, campusId }) {
       </div>
 
       <div className="socialize-filter-row">
+        <button className={tab === "sos" ? "chip active" : "chip"} onClick={() => setTab("sos")}><HiShieldCheck /> SOS Alerts</button>
         <button className={tab === "tickets" ? "chip active" : "chip"} onClick={() => setTab("tickets")}>Tickets</button>
         <button className={tab === "bookings" ? "chip active" : "chip"} onClick={() => setTab("bookings")}>Booking Approvals</button>
         <button className={tab === "pass" ? "chip active" : "chip"} onClick={() => setTab("pass")}><HiQrCode /> Verify Pass</button>
+        <button className={tab === "emergencycontacts" ? "chip active" : "chip"} onClick={() => setTab("emergencycontacts")}><HiPhone /> Emergency Contacts</button>
       </div>
 
+      {tab === "sos" && <SosAlertsPanel notify={notify} />}
       {tab === "tickets" && <TicketQueue notify={notify} campusId={campusId} />}
       {tab === "bookings" && <BookingApprovals notify={notify} />}
       {tab === "pass" && <VerifyPassPanel notify={notify} />}
+      {tab === "emergencycontacts" && <EmergencyContactsTab notify={notify} />}
     </section>
   );
 }

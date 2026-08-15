@@ -1977,6 +1977,61 @@
   font-size: 11px;
 }
 
+.emergency-actions button:disabled,
+.sos-card button:disabled {
+  opacity: .55;
+  cursor: default;
+}
+
+/* Press-and-hold SOS trigger: a fill sweeps left-to-right over
+   --sos-hold-ms while held, driven by a CSS transition rather than a JS
+   animation loop -- releasing early snaps it back via .holding being
+   removed, so a partial hold never fires. touch-action:none stops mobile
+   Safari/Chrome from treating the hold as a scroll/long-press-menu gesture. */
+.sos-hold-btn {
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+}
+
+.sos-hold-fill {
+  position: absolute;
+  inset: 0;
+  width: 0%;
+  background: #b8323d;
+  transition: width 0s linear;
+}
+
+.sos-hold-btn.holding .sos-hold-fill {
+  width: 100%;
+  transition-duration: var(--sos-hold-ms, 1500ms);
+}
+
+.sos-hold-label {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.sos-card-sent {
+  border-color: #9ed4b4;
+  background: #f2fbf6;
+}
+
+.sos-card-sent > span {
+  background: #dcf3e4;
+  color: #1f8a4c;
+}
+
+.sos-card-sent button {
+  background: #fff;
+  color: #b8323d;
+  border: 1px solid #eab8bd;
+}
+
 .route-preview {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -2875,6 +2930,28 @@
 
 .resource-row strong {
   font: 800 16px Manrope;
+}
+
+.segmented-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.segmented-toggle button {
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #fff;
+  padding: 10px;
+  font: 700 13px Manrope;
+  color: var(--muted);
+}
+
+.segmented-toggle button.active {
+  background: var(--purple);
+  border-color: var(--purple);
+  color: #fff;
 }
 
 .digital-pass-card {
@@ -4521,7 +4598,8 @@
   font-weight: 700;
 }
 
-.bulk-price-form {
+.bulk-price-form,
+.bulk-stock-form {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -4532,7 +4610,9 @@
 }
 
 .bulk-price-form select,
-.bulk-price-form input {
+.bulk-price-form input,
+.bulk-stock-form select,
+.bulk-stock-form input {
   border: none;
   background: transparent;
   color: #fff;
@@ -4541,7 +4621,8 @@
   padding: 4px;
 }
 
-.bulk-price-form input[type="number"] { width: 56px; }
+.bulk-price-form input[type="number"],
+.bulk-stock-form input[type="number"] { width: 56px; }
 
 /* ---- item card grid ---- */
 
@@ -4631,6 +4712,109 @@
 .status-pill.available { background: #e6f7ef; color: #1aa674; }
 .status-pill.unavailable { background: #fdeeea; color: #d0562f; }
 .status-pill.archived { background: #f1edff; color: #6945e8; }
+.status-pill.in-stock { background: #eef1fb; color: #4a5aa8; }
+.status-pill.low-stock { background: #fff4e0; color: #b9770e; }
+.status-pill.out-of-stock { background: #fdeeea; color: #d0562f; }
+.status-pill.priority-high { background: #fff4e0; color: #b9770e; }
+.status-pill.priority-urgent { background: #fdeeea; color: #d0562f; }
+
+/* ---- order ops row (priority / assign / internal note, vendor order queue) ---- */
+
+.order-ops-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.order-ops-row select {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--text);
+  padding: 6px 8px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.order-ops-row button {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.order-note-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  max-width: 320px;
+}
+
+.order-note-form textarea {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 8px;
+  font-size: 12px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+/* ---- stock alert banner (doc §17-19 low-stock tracking) ---- */
+
+.stock-alert-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  background: #fff4e0;
+  color: #8a5a00;
+  border: 1px solid #f3d9a4;
+  border-radius: 14px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.stock-alert-banner svg { flex-shrink: 0; font-size: 18px; }
+
+.stock-alert-banner button {
+  border: 1px solid #e7bd6b;
+  border-radius: 9px;
+  background: #fff;
+  color: #8a5a00;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+/* ---- CSV import file picker ---- */
+
+.file-drop {
+  display: block;
+  border: 1.5px dashed var(--line);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+  margin-top: 10px;
+}
+
+.file-drop:hover { border-color: var(--purple); color: var(--ink); }
+.file-drop input { display: none; }
 
 .veg-dot {
   width: 10px;
@@ -4803,6 +4987,14 @@
 .app-shell.dark-mode .price-input-wrap { border-color: var(--border); }
 .app-shell.dark-mode .status-pill.available { background: #123425; color: #4fd399; }
 .app-shell.dark-mode .status-pill.unavailable { background: #3a2018; color: #f2916a; }
+.app-shell.dark-mode .status-pill.in-stock { background: #1c2440; color: #9db0f2; }
+.app-shell.dark-mode .status-pill.low-stock { background: #3a2a08; color: #f2c168; }
+.app-shell.dark-mode .status-pill.out-of-stock { background: #3a2018; color: #f2916a; }
+.app-shell.dark-mode .status-pill.priority-high { background: #3a2a08; color: #f2c168; }
+.app-shell.dark-mode .status-pill.priority-urgent { background: #3a2018; color: #f2916a; }
+.app-shell.dark-mode .stock-alert-banner { background: #3a2a08; color: #f2c168; border-color: #5c470f; }
+.app-shell.dark-mode .stock-alert-banner button { background: var(--surface); color: #f2c168; border-color: #5c470f; }
+.app-shell.dark-mode .file-drop { border-color: var(--border); color: var(--muted); }
 
 /* =========================================================
    ANALYTICS -- charts, SLA bars, date-range chips. Uses the
@@ -4975,4 +5167,19 @@
 .verify-pass-result b { display: block; font-size: 14px; }
 .verify-pass-result small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
 .verified-pill { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; background: #e4f7ef; color: #13845b; padding: 4px 10px; border-radius: 999px; font-size: 10px; font-weight: 800; }
+
+/* =========================================================
+   RECOMMENDED FOR YOU (doc §108)
+========================================================= */
+.recommend-rows { display: flex; flex-direction: column; gap: 26px; }
+.recommend-row h4 { font: 800 13px Manrope; letter-spacing: .02em; margin: 0 0 12px; color: var(--muted); text-transform: uppercase; font-size: 11px; }
+.recommend-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.recommend-card { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px; transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
+.recommend-card:hover { transform: translateY(-2px); border-color: #d8d0ff; box-shadow: 0 12px 30px #26154c0d; }
+.recommend-card > div { cursor: pointer; }
+.recommend-card b { display: block; font-size: 13px; margin-right: 18px; }
+.recommend-card small { display: block; color: var(--muted); font-size: 11px; margin-top: 3px; }
+.recommend-reason { display: flex; align-items: center; gap: 5px; margin-top: 10px; color: var(--purple); font-size: 10px; font-weight: 700; }
+.recommend-dismiss { position: absolute; right: 10px; top: 10px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; color: var(--muted); background: var(--surface-2); font-size: 13px; }
+.recommend-dismiss:hover { color: var(--text); }
 .app-shell.dark-mode .status-pill.archived { background: #241d34; color: #b7a4ff; }

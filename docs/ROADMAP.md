@@ -45,31 +45,49 @@ by the source doc's section numbers so nothing is silently dropped.
 | §90 | Cursor pagination (posts/orders/notifications/marketplace/lost&found/events/people) | `mvpService.js` |
 | §92-93 | Hardcoded dev-login backdoor + committed password found and removed; rotation documented | `SECURITY.md` |
 | §95 | CI: lint → typecheck → unit → build → E2E | `.github/workflows/ci.yml` |
+| §76-78 | Multi-app split — done as **one app, route-branched**, not separate Student/Vendor/Admin/Facilities frontends. Real URL per section (deep links, refresh, browser back/forward all work via the History API); `/admin`, `/vendor`, `/facilities` are reachable URLs but only render for the matching role (unauthorized visitors are bounced to Home and the URL is corrected) — same one Vite build, one Vercel deployment, for every role. | `src/App.jsx` (`ROUTABLE_KEYS`/`pathToKey`/`keyToPath`/`go()`), `vercel.json` (SPA rewrite so a hard refresh on a deep route doesn't 404) |
+| §107 | Production profile fields (name/photo/USN/course/department/year/skills/bio/clubs/projects/achievements/privacy/notification settings/security) | `src/App.jsx` `Profile`/`EditProfileModal`, `0001_extensions_and_core.sql` |
+| §108 | Dashboard personalization — real recommendation engine (food/events/clubs/opportunities, scored from skills/course/department/year/club membership/order & registration/application history; "recommended people" reuses the existing People-you-may-know feature). Deliberately rule-based, not an LLM call — the doc's own "avoid creepy behavior and provide controls" ask is satisfied with a `profiles.personalization_enabled` toggle (falls back to campus-wide popular/recent, not an empty dashboard) and a per-card "not interested" dismiss, both self-service, no admin involved. | `supabase/migrations/20260815000600_profile_personalization_recommendations.sql`, `src/services/recommendationsService.js`, `RecommendedForYou` in `src/App.jsx` |
 
 ## Deferred — infrastructure/access blockers (need the project owner)
 
 These aren't skipped by choice — they need credentials or accounts nobody
 but the project owner can provide:
 
-- **§94-98 Live deployment, monitoring, DNS.** No Vercel/Cloudflare account
-  was connected this session. See `docs/DEPLOYMENT.md` for the exact steps
-  once you have one.
-- **§24 Real (non-test) payment gateway.** Needs a business KYC'd Razorpay/
-  Cashfree account.
+- **§94-98 Live deployment, monitoring, DNS — done as of 2026-08-15**
+  (deployment: 2026-08-14). Live at https://campusos-amber.vercel.app
+  (production) and https://campusos-staging.vercel.app (staging).
+  Monitoring is in-house (no Sentry/PostHog account) — error tracking via
+  `error_logs` + Admin CMS's "Errors" tab, uptime via
+  `.github/workflows/uptime.yml`. See `docs/DEPLOYMENT.md`.
+- **§24 Real (non-test) payment gateway.** Still needs a business KYC'd
+  Razorpay/Cashfree account — both environments run Razorpay test mode.
 - **§47, §49 Real email/SMS/push providers.** Needs accounts + API keys.
-- **§97 Sentry/PostHog.** Needs accounts.
-- **§94 dev/staging/prod Supabase separation.** Needs the owner to create
-  the additional projects; the migrations in `supabase/migrations/` will
-  apply cleanly to any of them.
+  (Web push notifications *are* real and working, via VAPID — no account
+  needed for that specific channel.)
+- **§94 dev/staging/prod Supabase separation — done as of 2026-08-15.**
+  See `docs/ENVIRONMENTS.md` for the full split (separate projects, separate
+  Vercel Preview/Production env vars, `scripts/env-target.mjs` defaulting
+  every admin/seed script to staging).
 
 ## Deferred — new feature surface (out of "harden existing modules" scope)
 
 The database/RPC layer for most of these is either fully or partially in
 place; there's no UI yet:
 
-- **§16-22 Vendor CMS** (menu management, bulk CSV import/export, inventory,
-  staff accounts, order queue dashboard). `food.menu.write`/
-  `food.orders.update` permissions and the RPCs exist; no vendor-facing app.
+- **§16-22 Vendor CMS — mostly done as of 2026-08-15.** A real per-canteen
+  vendor dashboard exists (`src/features/vendor/VendorDashboard.jsx`):
+  menu CRUD, an order-queue driving the real state machine, bulk select +
+  actions (availability, archive, move category, price ±amount/%, set
+  stock), CSV import/export
+  (`supabase/migrations/20260815000800_food_stock_tracking.sql` +
+  `foodItemsToCsv`/`parseFoodItemsCsv`/`bulkImportFoodItems` in
+  `src/features/vendor/api.js`), and stock/low-stock tracking (opt-in
+  `track_stock` per item; stock auto-decrements on a captured payment,
+  auto-restores if the vendor rejects/cancels a paid order, and the item
+  auto-hides at zero — see the migration's `adjust_stock_for_order()`).
+  Still missing: per-vendor staff sub-accounts (one login per canteen
+  today, not per staff member).
 - **§28 Campus Store** as a real commerce module (currently static mock data
   in `App.jsx`).
 - **§30-33 Print vendor dashboard, facilities dashboard.** `print.manage`/
@@ -85,19 +103,28 @@ place; there's no UI yet:
 - **§67-69 Analytics** (student/vendor/admin dashboards).
 - **§70-72 AI assistant / recommendation engine / smart search.**
 - **§73-75 Autonomous delivery, IoT.**
-- **§76-78 Multi-app split** (separate Student/Vendor/Admin/Facilities
-  frontends). Currently one app.
 - **§79-80 Full PWA** (service worker, offline shell, install prompt, push
   notifications). `useOnlineStatus` + an offline banner exist; no service
   worker/manifest yet.
-- **§99-101 Backup/DR runbooks, data retention policies.** Supabase's
-  built-in backups apply once you're on a paid plan; no custom retention
-  jobs configured.
+- **§99-101 Backup/DR runbooks, data retention policies — done as of
+  2026-08-15.** Free-tier Supabase has no built-in backups, so a custom
+  daily pipeline was built instead of waiting on a paid plan:
+  `.github/workflows/backup.yml` + `scripts/backup-retention.mjs`. See
+  `docs/DISASTER_RECOVERY.md` and `docs/DATA_RETENTION.md`.
 - **§102 Formal privacy policy / terms / consent flows / data export.**
 - **§104 Admin approval workflows** for vendor registration, club creation,
   event publishing.
-- **§109-113 Opportunities/mentorship, academic announcements integration,
-  hostel module, transport module, emergency contacts module.**
+- **§109-112 Opportunities/mentorship, academic announcements integration,
+  hostel module, transport module.**
+- **§113 Emergency/contact module -- partially done as of 2026-08-15.** A
+  verified next-of-kin/emergency-contacts directory per student now exists
+  (`supabase/migrations/20260815000700_emergency_contacts.sql`): students
+  self-report contacts from Profile, facilities/admin verify them, and a
+  responder can pull a student's contacts scoped to a real active SOS alert
+  (`get_emergency_contacts_for_alert`, wired into `SosAlertsPanel`'s "View
+  emergency contacts"). The doc's other half of §113 -- a directory of
+  verified *campus office* contacts (Security/Medical/Admin/Facilities/
+  Transport/Hostel) -- is still not built.
 - **§114 Feature flags table.**
 
 ## Deferred — polish within modules that WERE hardened

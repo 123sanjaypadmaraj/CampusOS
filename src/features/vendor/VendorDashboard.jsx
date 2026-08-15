@@ -16,10 +16,24 @@ import {
   HiPercentBadge,
   HiEyeSlash,
   HiEye,
+  HiArrowDownTray,
+  HiArrowUpTray,
+  HiExclamationTriangle,
+  HiCubeTransparent,
+  HiFlag,
+  HiUserGroup,
+  HiChatBubbleLeftEllipsis,
+  HiBanknotes,
+  HiSpeakerWave,
+  HiSpeakerXMark,
+  HiArrowUturnLeft,
+  HiFire,
 } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import * as vendorApi from "./api";
 import VendorAnalytics from "./Analytics";
+import * as storeApi from "../store/api";
+import StoreDashboard from "../store/StoreDashboard";
 
 /* =========================================================
    SHARED SHELL (mirrors App.jsx's ModalShell markup/classes, same
@@ -47,6 +61,7 @@ export default function VendorDashboard({ notify, authUser }) {
   const [error, setError] = useState("");
   const [canteen, setCanteen] = useState(null);
   const [printRates, setPrintRates] = useState([]);
+  const [hasStore, setHasStore] = useState(false);
 
   const reload = async () => {
     try {
@@ -56,11 +71,20 @@ export default function VendorDashboard({ notify, authUser }) {
       if (myCanteen) {
         setCanteen(myCanteen);
         setPrintRates([]);
+        setHasStore(false);
         return;
       }
       const rates = await vendorApi.getMyPrintRateCard(authUser.id);
+      if (rates.length) {
+        setCanteen(null);
+        setPrintRates(rates);
+        setHasStore(false);
+        return;
+      }
+      const myStore = await storeApi.getMyStore(authUser.id);
       setCanteen(null);
-      setPrintRates(rates);
+      setPrintRates([]);
+      setHasStore(!!myStore);
     } catch (err) {
       setError(err.message || "Could not load your vendor dashboard");
     } finally {
@@ -81,11 +105,15 @@ export default function VendorDashboard({ notify, authUser }) {
     return <PrintPricingManager rates={printRates} notify={notify} onChanged={reload} />;
   }
 
+  if (hasStore) {
+    return <StoreDashboard notify={notify} authUser={authUser} />;
+  }
+
   return (
     <section className="page-section admin-cms">
       <EmptyState
         title="No vendor profile assigned yet"
-        text="This account isn't linked to a canteen or the print shop. Ask a campus admin to assign it."
+        text="This account isn't linked to a canteen, the print shop, or a Campus Store shop. Ask a campus admin to assign it."
       />
     </section>
   );
@@ -106,8 +134,9 @@ function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
   const [selected, setSelected] = useState(() => new Set());
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all"); // all | available | unavailable | archived
+  const [statusFilter, setStatusFilter] = useState("all"); // all | available | unavailable | archived | low_stock | out_of_stock
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [importModal, setImportModal] = useState(false);
 
   const reload = async () => {
     try {
@@ -129,6 +158,15 @@ function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
 
   useEffect(() => { reload(); }, [canteen.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const lowStockItems = useMemo(
+    () => items.filter((i) => i.active && i.track_stock && i.stock_quantity != null && i.stock_quantity > 0 && i.stock_quantity <= (i.low_stock_threshold ?? 5)),
+    [items]
+  );
+  const outOfStockItems = useMemo(
+    () => items.filter((i) => i.active && i.track_stock && i.stock_quantity != null && i.stock_quantity <= 0),
+    [items]
+  );
+
   const visibleItems = useMemo(() => {
     const q = search.trim().toLowerCase();
     return items.filter((item) => {
@@ -137,6 +175,8 @@ function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
       if (statusFilter === "archived" && item.active) return false;
       if (statusFilter === "available" && !(item.active && item.available)) return false;
       if (statusFilter === "unavailable" && !(item.active && !item.available)) return false;
+      if (statusFilter === "low_stock" && !(item.active && item.track_stock && item.stock_quantity != null && item.stock_quantity > 0 && item.stock_quantity <= (item.low_stock_threshold ?? 5))) return false;
+      if (statusFilter === "out_of_stock" && !(item.active && item.track_stock && item.stock_quantity != null && item.stock_quantity <= 0)) return false;
       return true;
     });
   }, [items, search, categoryFilter, statusFilter]);
@@ -218,10 +258,54 @@ function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
             <>
               <div className="section-head">
                 <h2>Menu items</h2>
-                <button className="primary" onClick={() => setItemModal({ canteen_id: canteen.id })}>
-                  <HiPlus /> New item
-                </button>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button className="ghost" onClick={() => {
+                    const csv = vendorApi.foodItemsToCsv(items, categories);
+                    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `${canteen.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-menu.csv`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+                  }} disabled={items.length === 0}>
+                    <HiArrowDownTray /> Export CSV
+                  </button>
+                  <button className="ghost" onClick={() => setImportModal(true)}>
+                    <HiArrowUpTray /> Import CSV
+                  </button>
+                  <button className="primary" onClick={() => setItemModal({ canteen_id: canteen.id })}>
+                    <HiPlus /> New item
+                  </button>
+                </div>
               </div>
+
+              {(lowStockItems.length > 0 || outOfStockItems.length > 0) && (
+                <div className="stock-alert-banner">
+                  <HiExclamationTriangle />
+                  <span>
+                    {outOfStockItems.length > 0 && (
+                      <>
+                        <b>{outOfStockItems.length}</b> item{outOfStockItems.length === 1 ? "" : "s"} out of stock
+                        {lowStockItems.length > 0 ? " · " : ""}
+                      </>
+                    )}
+                    {lowStockItems.length > 0 && (
+                      <><b>{lowStockItems.length}</b> item{lowStockItems.length === 1 ? "" : "s"} running low</>
+                    )}
+                  </span>
+                  <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
+                    {outOfStockItems.length > 0 && (
+                      <button onClick={() => setStatusFilter("out_of_stock")}>View out of stock</button>
+                    )}
+                    {lowStockItems.length > 0 && (
+                      <button onClick={() => setStatusFilter("low_stock")}>View low stock</button>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {items.length > 0 && (
                 <div className="vendor-menu-toolbar">
@@ -243,6 +327,8 @@ function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
                     <option value="available">Available</option>
                     <option value="unavailable">Unavailable</option>
                     <option value="archived">Archived</option>
+                    <option value="low_stock">Low stock</option>
+                    <option value="out_of_stock">Out of stock</option>
                   </select>
                   <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700 }}>
                     <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} />
@@ -272,6 +358,14 @@ function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
                   onPriceAdjust={(opts) => runBulk(
                     () => vendorApi.bulkAdjustPrice(selectedItems, opts),
                     `Price updated on ${selectedIds.length} item(s)`
+                  )}
+                  onSetStock={(qty) => runBulk(
+                    () => vendorApi.bulkSetStock(selectedIds, qty),
+                    `Stock set on ${selectedIds.length} item(s)`
+                  )}
+                  onStopTracking={() => runBulk(
+                    () => vendorApi.bulkStopTrackingStock(selectedIds),
+                    `Stopped tracking stock on ${selectedIds.length} item(s)`
                   )}
                 />
               )}
@@ -329,6 +423,17 @@ function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
           notify={notify}
         />
       )}
+
+      {importModal && (
+        <ImportCsvModal
+          canteenId={canteen.id}
+          categories={categories}
+          existingItems={items}
+          onClose={() => setImportModal(false)}
+          onImported={reload}
+          notify={notify}
+        />
+      )}
     </section>
   );
 }
@@ -351,17 +456,69 @@ function timeAgo(iso) {
   return `${Math.floor(diffMin / 60)}h ${diffMin % 60}m ago`;
 }
 
+const PRIORITY_RANK = { urgent: 2, high: 1, normal: 0 };
+const KITCHEN_STATUSES = new Set(["RECEIVED", "ACCEPTED", "PREPARING", "CANCEL_REQUESTED"]);
+const PICKUP_STATUSES = new Set(["READY", "OUT_FOR_DELIVERY"]);
+
+function sortByPriority(orders) {
+  return [...orders].sort((a, b) => {
+    const p = (PRIORITY_RANK[b.priority] || 0) - (PRIORITY_RANK[a.priority] || 0);
+    if (p !== 0) return p;
+    return new Date(a.created_at) - new Date(b.created_at);
+  });
+}
+
+// Two short beeps via the Web Audio API -- no asset to fetch/self-host, and
+// it works the same on staging/prod/localhost. Best-effort: browsers that
+// haven't seen a user gesture yet may reject autoplay; that's fine, the
+// visible queue update still happened.
+function playAlertSound() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    [0, 0.18].forEach((delay) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + delay);
+      gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + delay + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + delay + 0.16);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(ctx.currentTime + delay);
+      osc.stop(ctx.currentTime + delay + 0.2);
+    });
+  } catch { /* best-effort */ }
+}
+
 function OrderQueue({ canteen, notify }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState(null);
   const [history, setHistory] = useState(null); // null until "View recent history" is opened
+  const [view, setView] = useState("all"); // all | kitchen | pickup
+  const [staff, setStaff] = useState([]);
+  const [staffModal, setStaffModal] = useState(false);
+  const [soundOn, setSoundOn] = useState(() => localStorage.getItem(`vendor-sound-${canteen.id}`) !== "off");
+  const knownReceivedIds = React.useRef(null); // null until first load, so mount never "alerts" for pre-existing orders
 
   const reload = async () => {
     try {
       setError("");
       const active = await vendorApi.listActiveCanteenOrders(canteen.id);
+      const receivedIds = new Set(active.filter((o) => o.status === "RECEIVED").map((o) => o.id));
+      if (knownReceivedIds.current && soundOn) {
+        const isNew = [...receivedIds].some((id) => !knownReceivedIds.current.has(id));
+        if (isNew) {
+          playAlertSound();
+          if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+            new Notification("New order received", { body: `${canteen.name} has a new order waiting` });
+          }
+        }
+      }
+      knownReceivedIds.current = receivedIds;
       setOrders(active);
     } catch (err) {
       setError(err.message || "Could not load orders");
@@ -372,9 +529,21 @@ function OrderQueue({ canteen, notify }) {
 
   useEffect(() => {
     reload();
+    vendorApi.listCanteenStaff(canteen.id).then(setStaff).catch(() => {});
     const unsubscribe = vendorApi.subscribeToCanteenOrders(canteen.id, reload);
     return unsubscribe;
   }, [canteen.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleSound = () => {
+    setSoundOn((prev) => {
+      const next = !prev;
+      localStorage.setItem(`vendor-sound-${canteen.id}`, next ? "on" : "off");
+      if (next && typeof Notification !== "undefined" && Notification.permission === "default") {
+        Notification.requestPermission();
+      }
+      return next;
+    });
+  };
 
   const act = async (order, toStatus, reason) => {
     try {
@@ -392,17 +561,72 @@ function OrderQueue({ canteen, notify }) {
     }
   };
 
+  const saveOps = async (order, fields) => {
+    try {
+      await vendorApi.setOrderOpsFields(order.id, fields);
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not save");
+    }
+  };
+
+  const refund = async (order) => {
+    const reason = window.prompt(`Refund ₹${order.total} for order #${order.id.slice(0, 8)}? Enter a reason:`);
+    if (reason === null) return;
+    try {
+      setBusyId(order.id);
+      await vendorApi.initiateRefund(order.id, order.total, reason || "Vendor-initiated refund");
+      notify(`Refund initiated for order #${order.id.slice(0, 8)}`);
+    } catch (err) {
+      // request_refund() itself may have already succeeded (order flipped to
+      // REFUND_PENDING) even if the follow-up gateway call failed -- reload
+      // below regardless so the UI never goes stale on a partial failure.
+      notify(err.message || "Could not initiate refund");
+    } finally {
+      setBusyId(null);
+      await reload();
+      if (history !== null) setHistory(await vendorApi.listCanteenOrderHistory(canteen.id));
+    }
+  };
+
   if (loading) return <LoadingState label="Loading order queue…" />;
   if (error) return <ErrorState text={error} onRetry={reload} />;
 
+  const visibleOrders = sortByPriority(
+    view === "kitchen" ? orders.filter((o) => KITCHEN_STATUSES.has(o.status))
+      : view === "pickup" ? orders.filter((o) => PICKUP_STATUSES.has(o.status))
+      : orders
+  );
+  const kitchenCount = orders.filter((o) => KITCHEN_STATUSES.has(o.status)).length;
+  const pickupCount = orders.filter((o) => PICKUP_STATUSES.has(o.status)).length;
+
   return (
     <>
+      <div className="socialize-filter-row" style={{ marginBottom: 12 }}>
+        <button className={view === "all" ? "chip active" : "chip"} onClick={() => setView("all")}>All ({orders.length})</button>
+        <button className={view === "kitchen" ? "chip active" : "chip"} onClick={() => setView("kitchen")}><HiFire /> Kitchen ({kitchenCount})</button>
+        <button className={view === "pickup" ? "chip active" : "chip"} onClick={() => setView("pickup")}><HiTruck /> Pickup ({pickupCount})</button>
+        <button className="chip" onClick={toggleSound} title={soundOn ? "Turn off new-order alerts" : "Turn on new-order alerts"}>
+          {soundOn ? <HiSpeakerWave /> : <HiSpeakerXMark />} Alerts {soundOn ? "on" : "off"}
+        </button>
+        <button className="chip" onClick={() => setStaffModal(true)}><HiUserGroup /> Staff ({staff.filter((s) => s.active).length})</button>
+      </div>
+
       <div className="resource-list">
-        {orders.length === 0 && (
-          <EmptyState icon={<HiClock />} title="No active orders" text="New orders will appear here the moment a student pays." />
+        {visibleOrders.length === 0 && (
+          <EmptyState icon={<HiClock />} title="No orders here" text="New orders will appear the moment a student pays." />
         )}
-        {orders.map((order) => (
-          <OrderCard key={order.id} order={order} busy={busyId === order.id} onAct={act} onChanged={reload} notify={notify} />
+        {visibleOrders.map((order) => (
+          <OrderCard
+            key={order.id}
+            order={order}
+            busy={busyId === order.id}
+            staff={staff}
+            onAct={act}
+            onChanged={reload}
+            onSaveOps={saveOps}
+            notify={notify}
+          />
         ))}
       </div>
 
@@ -417,32 +641,117 @@ function OrderQueue({ canteen, notify }) {
       {history !== null && (
         <div className="resource-list" style={{ marginTop: 12 }}>
           {history.length === 0 && <EmptyState title="No past orders yet" />}
-          {history.map((order) => (
-            <article className="resource-row" key={order.id}>
-              <div>
-                <b>#{order.id.slice(0, 8)} · {order.status}</b>
-                <small>
-                  {order.order_items.map((i) => `${i.quantity}× ${i.item_name}`).join(", ")} · {timeAgo(order.created_at)}
-                </small>
-              </div>
-            </article>
-          ))}
+          {history.map((order) => {
+            const refundable = ["REJECTED", "CANCELLED"].includes(order.status) && order.payment_status === "paid";
+            return (
+              <article className="resource-row" key={order.id}>
+                <div>
+                  <b>#{order.id.slice(0, 8)} · {order.status}</b>
+                  <small>
+                    {order.order_items.map((i) => `${i.quantity}× ${i.item_name}`).join(", ")} · {timeAgo(order.created_at)}
+                  </small>
+                </div>
+                {refundable && (
+                  <button disabled={busyId === order.id} onClick={() => refund(order)}>
+                    <HiBanknotes /> Initiate refund
+                  </button>
+                )}
+                {order.status === "REFUND_PENDING" && <span className="status-pill low-stock">Refund processing…</span>}
+                {order.status === "REFUNDED" && <span className="status-pill in-stock">Refunded</span>}
+              </article>
+            );
+          })}
         </div>
+      )}
+
+      {staffModal && (
+        <StaffRosterModal
+          canteenId={canteen.id}
+          staff={staff}
+          onClose={() => setStaffModal(false)}
+          onChanged={async () => setStaff(await vendorApi.listCanteenStaff(canteen.id))}
+          notify={notify}
+        />
       )}
     </>
   );
 }
 
-function OrderCard({ order, busy, onAct, onChanged, notify }) {
+function StaffRosterModal({ canteenId, staff, onClose, onChanged, notify }) {
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <Modal kicker="ORDERS" title="Kitchen staff roster" onClose={onClose}>
+      <p>Names here appear in the &ldquo;Assign to&rdquo; dropdown on each order — this doesn&apos;t create a login, just a label for who&apos;s handling it.</p>
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Staff member name"
+          style={{ flex: 1 }}
+        />
+        <button
+          className="primary"
+          disabled={busy || !name.trim()}
+          onClick={async () => {
+            try {
+              setBusy(true);
+              await vendorApi.addCanteenStaff(canteenId, name);
+              setName("");
+              await onChanged();
+            } catch (err) { notify(err.message || "Could not add staff"); } finally { setBusy(false); }
+          }}
+        >
+          <HiPlus /> Add
+        </button>
+      </div>
+      <div className="resource-list">
+        {staff.length === 0 && <EmptyState title="No staff added yet" text="Add names so orders can be assigned to someone." />}
+        {staff.map((s) => (
+          <article className="resource-row" key={s.id}>
+            <div><b>{s.name}</b>{!s.active && <small> · inactive</small>}</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={async () => {
+                try { await vendorApi.setCanteenStaffActive(s.id, !s.active); await onChanged(); }
+                catch (err) { notify(err.message || "Could not update"); }
+              }}>
+                {s.active ? "Deactivate" : "Reactivate"}
+              </button>
+              <button onClick={async () => {
+                if (!window.confirm(`Remove ${s.name} from the roster?`)) return;
+                try { await vendorApi.removeCanteenStaff(s.id); await onChanged(); }
+                catch (err) { notify(err.message || "Could not remove"); }
+              }}>
+                <HiTrash />
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
+const PRIORITY_LABEL = { normal: "Normal", high: "High", urgent: "Urgent" };
+
+function OrderCard({ order, busy, staff, onAct, onChanged, onSaveOps, notify }) {
   const [pickupModal, setPickupModal] = useState(false);
+  const [noteDraft, setNoteDraft] = useState(order.internal_note || "");
+  const [noteOpen, setNoteOpen] = useState(false);
   const next = NEXT_STEP[order.status];
 
   return (
-    <article className="resource-row" style={{ alignItems: "flex-start" }}>
+    <article className="resource-row" style={{ alignItems: "flex-start", flexWrap: "wrap" }}>
       <div>
         <b>
           #{order.id.slice(0, 8)} · {order.status}{" "}
           <span className="social-type" style={{ marginLeft: 6 }}>{order.fulfillment_type}</span>
+          {order.priority !== "normal" && (
+            <span className={`status-pill priority-${order.priority}`} style={{ marginLeft: 6 }}>
+              <HiFlag /> {PRIORITY_LABEL[order.priority]}
+            </span>
+          )}
         </b>
         <small>
           {order.order_items.map((i) => (
@@ -453,8 +762,58 @@ function OrderCard({ order, busy, onAct, onChanged, notify }) {
             </span>
           ))}
         </small>
-        {order.notes && <small>Note: {order.notes}</small>}
+        {order.notes && <small>Student note: {order.notes}</small>}
+        {order.assigned_staff_name && <small>Assigned to: {order.assigned_staff_name}</small>}
+        {order.internal_note && <small>Staff note: {order.internal_note}</small>}
         <small>{timeAgo(order.created_at)} · Order code {order.pickup_code}</small>
+
+        <div className="order-ops-row">
+          <select
+            aria-label="Priority"
+            value={order.priority}
+            disabled={busy}
+            onChange={(e) => onSaveOps(order, { priority: e.target.value, internalNote: order.internal_note, assignedStaffName: order.assigned_staff_name })}
+          >
+            <option value="normal">Normal priority</option>
+            <option value="high">High priority</option>
+            <option value="urgent">Urgent</option>
+          </select>
+          <select
+            aria-label="Assign to"
+            value={order.assigned_staff_name || ""}
+            disabled={busy}
+            onChange={(e) => onSaveOps(order, { priority: order.priority, internalNote: order.internal_note, assignedStaffName: e.target.value })}
+          >
+            <option value="">Unassigned</option>
+            {staff.filter((s) => s.active || s.name === order.assigned_staff_name).map((s) => (
+              <option key={s.id} value={s.name}>{s.name}</option>
+            ))}
+          </select>
+          <button onClick={() => setNoteOpen((v) => !v)}>
+            <HiChatBubbleLeftEllipsis /> {order.internal_note ? "Edit note" : "Add note"}
+          </button>
+        </div>
+
+        {noteOpen && (
+          <div className="order-note-form">
+            <textarea
+              value={noteDraft}
+              onChange={(e) => setNoteDraft(e.target.value)}
+              placeholder="Internal note for kitchen/staff -- never shown to the student"
+              rows={2}
+            />
+            <button
+              className="primary"
+              disabled={busy}
+              onClick={async () => {
+                await onSaveOps(order, { priority: order.priority, internalNote: noteDraft, assignedStaffName: order.assigned_staff_name });
+                setNoteOpen(false);
+              }}
+            >
+              Save note
+            </button>
+          </div>
+        )}
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -491,6 +850,16 @@ function OrderCard({ order, busy, onAct, onChanged, notify }) {
           <button disabled={busy} onClick={() => onAct(order, "CANCEL_REQUESTED", "Cancelled by vendor")}>
             <HiXCircle /> Cancel
           </button>
+        )}
+        {order.status === "CANCEL_REQUESTED" && (
+          <>
+            <button disabled={busy} onClick={() => onAct(order, "CANCELLED", "Cancellation confirmed")}>
+              <HiXCircle /> Confirm cancellation
+            </button>
+            <button className="primary" disabled={busy} onClick={() => onAct(order, "PREPARING", "Resumed by vendor")}>
+              <HiArrowUturnLeft /> Resume preparing
+            </button>
+          </>
         )}
       </div>
 
@@ -608,8 +977,18 @@ function statusLabel(item) {
   return item.available ? { text: "Available", cls: "available" } : { text: "Unavailable", cls: "unavailable" };
 }
 
+// null when the item doesn't track stock -- ItemCard renders nothing extra
+// in that case, same as every item behaved before this feature existed.
+function stockLabel(item) {
+  if (!item.track_stock || item.stock_quantity == null) return null;
+  if (item.stock_quantity <= 0) return { text: "Out of stock", cls: "out-of-stock" };
+  if (item.stock_quantity <= (item.low_stock_threshold ?? 5)) return { text: `Low stock: ${item.stock_quantity}`, cls: "low-stock" };
+  return { text: `Stock: ${item.stock_quantity}`, cls: "in-stock" };
+}
+
 function ItemCard({ item, selected, onToggleSelect, onEdit, onDelete, onToggleAvailable }) {
   const status = statusLabel(item);
+  const stock = stockLabel(item);
   return (
     <article className={`vendor-item-card${selected ? " selected" : ""}${!item.active ? " archived" : ""}`}>
       <input
@@ -630,6 +1009,7 @@ function ItemCard({ item, selected, onToggleSelect, onEdit, onDelete, onToggleAv
         <span className={`veg-dot${item.is_vegetarian ? "" : " non-veg"}`} />
         {item.food_categories?.name || "Uncategorised"}
         <span className={`status-pill ${status.cls}`}>{status.text}</span>
+        {stock && <span className={`status-pill ${stock.cls}`}>{stock.text}</span>}
       </div>
       <div className="vendor-item-actions">
         <button onClick={onEdit}><HiPencilSquare /> Edit</button>
@@ -650,10 +1030,11 @@ function ItemCard({ item, selected, onToggleSelect, onEdit, onDelete, onToggleAv
    BULK ACTIONS BAR (doc §16 bulk menu & inventory)
 ========================================================= */
 
-function BulkActionsBar({ count, categories, busy, onClear, onAvailable, onArchive, onCategory, onPriceAdjust }) {
+function BulkActionsBar({ count, categories, busy, onClear, onAvailable, onArchive, onCategory, onPriceAdjust, onSetStock, onStopTracking }) {
   const [priceMode, setPriceMode] = useState("percent"); // 'percent' | 'amount'
   const [priceDirection, setPriceDirection] = useState("1"); // '1' increase, '-1' decrease
   const [priceValue, setPriceValue] = useState("");
+  const [stockValue, setStockValue] = useState("");
 
   return (
     <div className="bulk-action-bar">
@@ -705,6 +1086,27 @@ function BulkActionsBar({ count, categories, busy, onClear, onAvailable, onArchi
           </button>
         </div>
 
+        <div className="bulk-stock-form">
+          <HiCubeTransparent />
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={stockValue}
+            onChange={(e) => setStockValue(e.target.value)}
+            placeholder="Set stock"
+            aria-label="Set stock quantity"
+            style={{ width: 66 }}
+          />
+          <button
+            disabled={busy || stockValue === "" || Number(stockValue) < 0}
+            onClick={() => { onSetStock(stockValue); setStockValue(""); }}
+          >
+            Apply
+          </button>
+        </div>
+        <button disabled={busy} onClick={onStopTracking}>Stop tracking stock</button>
+
         <button disabled={busy} onClick={onArchive}><HiArchiveBoxArrowDown /> Archive</button>
         <button disabled={busy} onClick={onClear}><HiXMark /> Clear</button>
       </div>
@@ -739,6 +1141,8 @@ function FoodItemForm({ item, canteenId, categories, onClose, onSaved, notify })
     image_url: item.image_url || "", preparation_time_min: item.preparation_time_min ?? 10,
     is_vegetarian: item.is_vegetarian !== false, available: item.available !== false,
     active: item.active !== false, featured: Boolean(item.featured),
+    track_stock: Boolean(item.track_stock), stock_quantity: item.stock_quantity ?? "",
+    low_stock_threshold: item.low_stock_threshold ?? 5,
   });
   const [saving, setSaving] = useState(false);
   const change = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -776,6 +1180,34 @@ function FoodItemForm({ item, canteenId, categories, onClose, onSaved, notify })
           <ToggleSwitch label="Active (on menu)" checked={form.active} onChange={(v) => change("active", v)} />
           <ToggleSwitch label="Featured" checked={form.featured} onChange={(v) => change("featured", v)} />
 
+          <div className="item-form-section-label">Inventory</div>
+          <ToggleSwitch
+            label="Track stock"
+            checked={form.track_stock}
+            onChange={(v) => change("track_stock", v)}
+          />
+          {form.track_stock && (
+            <div className="form-grid">
+              <label>Stock quantity
+                <input
+                  type="number"
+                  min="0"
+                  value={form.stock_quantity}
+                  onChange={(e) => change("stock_quantity", e.target.value)}
+                  placeholder="e.g. 20"
+                />
+              </label>
+              <label>Low stock alert below
+                <input
+                  type="number"
+                  min="0"
+                  value={form.low_stock_threshold}
+                  onChange={(e) => change("low_stock_threshold", e.target.value)}
+                />
+              </label>
+            </div>
+          )}
+
           <button
             className="primary wide"
             style={{ marginTop: 20 }}
@@ -805,9 +1237,108 @@ function FoodItemForm({ item, canteenId, categories, onClose, onSaved, notify })
             </div>
             <small>{form.description || "No description yet."}</small>
             <small>{form.preparation_time_min || 10} min prep · {form.available ? "Available" : "Unavailable"} to students</small>
+            {form.track_stock && (
+              <small>
+                {form.stock_quantity === "" ? "Stock not set yet" : `${form.stock_quantity} in stock`}
+                {" "}(low-stock alert below {form.low_stock_threshold || 5})
+              </small>
+            )}
           </div>
         </div>
       </div>
+    </Modal>
+  );
+}
+
+/* =========================================================
+   CSV IMPORT (doc §17-19) -- parse client-side, show a preview + any
+   per-row problems, and only write to the DB once the vendor confirms.
+========================================================= */
+
+function ImportCsvModal({ canteenId, categories, existingItems, onClose, onImported, notify }) {
+  const [fileName, setFileName] = useState("");
+  const [parsed, setParsed] = useState(null); // { rows, errors }
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState(null); // { created, updated, errors } once import runs
+
+  const onFile = (file) => {
+    if (!file) return;
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = () => setParsed(vendorApi.parseFoodItemsCsv(String(reader.result || ""), categories));
+    reader.onerror = () => notify("Could not read that file");
+    reader.readAsText(file);
+  };
+
+  const willUpdate = parsed ? parsed.rows.filter((r) => r.id || existingItems.some((i) =>
+    (r.sku && i.sku && i.sku.toLowerCase() === r.sku.toLowerCase()) || i.name.toLowerCase() === r.name.toLowerCase()
+  )).length : 0;
+  const willCreate = parsed ? parsed.rows.length - willUpdate : 0;
+
+  return (
+    <Modal kicker="MENU" title="Import menu from CSV" onClose={onClose}>
+      <p>
+        Upload a CSV with at least <b>name</b> and <b>price</b> columns. Rows matching an existing item
+        (by id, SKU, or name) update it; everything else is created as a new item.
+      </p>
+      <label className="file-drop">
+        <input
+          type="file"
+          accept=".csv,text/csv"
+          onChange={(e) => onFile(e.target.files?.[0])}
+        />
+        {fileName || "Choose a CSV file…"}
+      </label>
+
+      {parsed && (
+        <>
+          {parsed.rows.length > 0 && (
+            <p style={{ marginTop: 14 }}>
+              Ready to import: <b>{willCreate}</b> new item{willCreate === 1 ? "" : "s"}, <b>{willUpdate}</b> existing item{willUpdate === 1 ? "" : "s"} will be updated.
+            </p>
+          )}
+          {parsed.errors.length > 0 && (
+            <div className="resource-list" style={{ marginTop: 10 }}>
+              {parsed.errors.map((e, i) => (
+                <article className="resource-row" key={i}><small style={{ color: "#d0562f" }}>{e}</small></article>
+              ))}
+            </div>
+          )}
+          <button
+            className="primary wide"
+            style={{ marginTop: 16 }}
+            disabled={importing || parsed.rows.length === 0}
+            onClick={async () => {
+              try {
+                setImporting(true);
+                const outcome = await vendorApi.bulkImportFoodItems(canteenId, parsed.rows, existingItems);
+                setResult(outcome);
+                const parts = [];
+                if (outcome.created) parts.push(`${outcome.created} created`);
+                if (outcome.updated) parts.push(`${outcome.updated} updated`);
+                if (outcome.errors.length) parts.push(`${outcome.errors.length} failed`);
+                notify(parts.length ? parts.join(", ") : "Nothing to import");
+                if (outcome.created + outcome.updated > 0) onImported();
+              } catch (err) {
+                notify(err.message || "Import failed");
+              } finally {
+                setImporting(false);
+              }
+            }}
+          >
+            {importing ? "Importing…" : `Import ${parsed.rows.length} row(s)`}
+          </button>
+
+          {result && result.errors.length > 0 && (
+            <div className="resource-list" style={{ marginTop: 10 }}>
+              <p><b>{result.errors.length}</b> row(s) failed to save:</p>
+              {result.errors.map((e, i) => (
+                <article className="resource-row" key={i}><small style={{ color: "#d0562f" }}>{e}</small></article>
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </Modal>
   );
 }

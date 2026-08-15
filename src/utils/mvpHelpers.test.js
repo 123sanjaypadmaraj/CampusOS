@@ -18,6 +18,21 @@ describe("CampusOS MVP helpers", () => {
       .toEqual([{ id: "dosa", price: 40, quantity: 2 }, { id: "coffee", price: 25, quantity: 1 }]);
   });
 
+  test("keeps different variants of the same store item as separate cart lines", () => {
+    const cart = mergeCartItem([], { id: "hoodie", name: "Hoodie", price: 599, variantId: "small-id" });
+    const withMedium = mergeCartItem(cart, { id: "hoodie", name: "Hoodie", price: 599, variantId: "medium-id" });
+    expect(withMedium).toEqual([
+      { id: "hoodie", name: "Hoodie", price: 599, variantId: "small-id", quantity: 1 },
+      { id: "hoodie", name: "Hoodie", price: 599, variantId: "medium-id", quantity: 1 },
+    ]);
+    // adding the same variant again increments that line only
+    expect(mergeCartItem(withMedium, { id: "hoodie", name: "Hoodie", price: 599, variantId: "small-id" }))
+      .toEqual([
+        { id: "hoodie", name: "Hoodie", price: 599, variantId: "small-id", quantity: 2 },
+        { id: "hoodie", name: "Hoodie", price: 599, variantId: "medium-id", quantity: 1 },
+      ]);
+  });
+
   test("calculates print pricing consistently", () => {
     expect(calculatePrintJobPrice({ pages: 10, copies: 2, colorMode: "colour", binding: true }))
       .toBe(120);

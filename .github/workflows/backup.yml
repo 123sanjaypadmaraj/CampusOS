@@ -1,0 +1,102 @@
+name: Database backup (production)
+
+# Doc §96-98 "backups, disaster recovery, retention policy" -- see
+# docs/DISASTER_RECOVERY.md for the restore procedure and full policy.
+# Production only; staging isn't backed up (nothing on it is
+# irreplaceable -- see docs/ENVIRONMENTS.md).
+#
+# Needs 2 repository secrets, neither of which this session could set
+# itself (no `gh` CLI available) -- see docs/DISASTER_RECOVERY.md for exact
+# setup steps:
+#   SUPABASE_ACCESS_TOKEN          -- personal access token. Used for the
+#                                     dump (`supabase db dump`, no DB
+#                                     password needed -- it provisions a
+#                                     short-lived login role itself) and the
+#                                     upload (`supabase storage cp`).
+#   PROD_SUPABASE_SERVICE_ROLE_KEY -- only used by the retention-pruning
+#                                     step (list/delete old backups) --
+#                                     `supabase storage rm` doesn't reliably
+#                                     work, see scripts/backup-retention.mjs.
+#
+# This pipeline was built and verified end-to-end manually (real dump, real
+# upload, real retention run against the real backups bucket -- see git
+# history), but NOT inside an actual GitHub Actions run -- the dev machine
+# this was authored on has neither Docker nor a way to trigger workflow
+# runs. Run this once via workflow_dispatch after setting the two secrets
+# above to confirm it completes in your GitHub environment before trusting
+# the schedule alone.
+
+on:
+  schedule:
+    - cron: "17 20 * * *" # ~01:47 IST, a low-traffic hour
+  workflow_dispatch: {}
+
+env:
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+  PROJECT_REF: dzjzjlylsfpmymkcavrq
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Matches the project's server version exactly (17.6) via the
+      # official PGDG apt repo, rather than trusting whatever
+      # `postgresql-client` version ubuntu-latest happens to default to --
+      # pg_dump generally can't dump from a server newer than itself.
+      - name: Install PostgreSQL 17 client tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq curl ca-certificates gnupg lsb-release
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+
+      - name: Dump schema + data
+        # `supabase db dump --dry-run` prints a ready-to-run bash script
+        # (ephemeral login-role credentials + the exact pg_dump invocation)
+        # instead of running it -- run it ourselves rather than trusting
+        # `db dump -f` to invoke pg_dump correctly itself, for two reasons
+        # found live building/testing this: (1) it always dumps schema XOR
+        # data, never both -- a real backup needs two runs, concatenated;
+        # (2) CLI 2.114.0's generated script passes pg_dump a flag typo,
+        # `--quote-all-identifier` (singular) instead of the real
+        # `--quote-all-identifiers` (plural) -- confirmed this hard-fails
+        # against a real pg_dump binary, patched below rather than filed-
+        # and-waited-on since backups can't silently stop working over a
+        # CLI typo.
+        run: |
+          set -euo pipefail
+          npx supabase db dump --project-ref "$PROJECT_REF" --dry-run > schema_dump.sh 2>/dev/null
+          npx supabase db dump --project-ref "$PROJECT_REF" --data-only --dry-run > data_dump.sh 2>/dev/null
+          sed -i 's/--quote-all-identifier /--quote-all-identifiers /' schema_dump.sh data_dump.sh
+          bash schema_dump.sh > schema.sql
+          bash data_dump.sh > data.sql
+          cat schema.sql data.sql > backup.sql
+          gzip backup.sql
+          DATE=$(date -u +%F)
+          FILENAME="db-${DATE}.sql.gz"
+          mv backup.sql.gz "$FILENAME"
+          echo "BACKUP_FILE=$FILENAME" >> "$GITHUB_ENV"
+          echo "Dumped $(du -h "$FILENAME" | cut -f1) to $FILENAME"
+
+      - name: Upload to the backups bucket
+        run: |
+          set -euo pipefail
+          npx supabase --experimental storage cp \
+            "$BACKUP_FILE" "ss:///backups/db/$BACKUP_FILE" \
+            --content-type application/gzip \
+            --project-ref "$PROJECT_REF"
+
+      - name: Prune old backups per retention policy
+        env:
+          SUPABASE_URL: https://dzjzjlylsfpmymkcavrq.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.PROD_SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/backup-retention.mjs

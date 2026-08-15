@@ -1,7 +1,13 @@
 export function mergeCartItem(cart, item) {
-  const existing = cart.find((entry) => entry.id === item.id);
+  // variantId is undefined for every non-variant caller (food, plain store
+  // items), so `undefined === undefined` keeps those merging exactly as
+  // before -- this only changes behavior for store items that carry a
+  // variantId, keeping different variants of the same product as separate
+  // cart lines instead of merging their quantities together.
+  const sameLine = (entry) => entry.id === item.id && entry.variantId === item.variantId;
+  const existing = cart.find(sameLine);
   return existing
-    ? cart.map((entry) => entry.id === item.id
+    ? cart.map((entry) => sameLine(entry)
       ? { ...entry, quantity: Number(entry.quantity || 1) + 1 }
       : entry)
     : [...cart, { ...item, quantity: 1 }];

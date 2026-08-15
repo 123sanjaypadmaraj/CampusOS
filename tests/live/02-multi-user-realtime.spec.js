@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { seedRealSession } from './helpers/realSession.js';
+import { resolveServiceRoleKey } from './helpers/resolveServiceRoleKey.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..', '..');
@@ -18,7 +19,12 @@ function readEnvVar(name) {
   return fs.readFileSync(path.join(root, '.env'), 'utf8').match(new RegExp(`^${name}=(.+)$`, 'm'))?.[1]?.trim();
 }
 const SUPABASE_URL = readEnvVar('VITE_SUPABASE_URL');
-const SERVICE_ROLE_KEY = fs.readFileSync(path.join(root, '.service_role_key.local'), 'utf8').trim();
+// Was hardcoded to .service_role_key.local (production only) -- silently
+// sent production's service_role key against whatever project .env
+// actually points at, which 401s on staging (the default) and surfaces as
+// "(intermediate value) is not iterable" from destructuring the error
+// response as if it were a data array. See resolveServiceRoleKey.js.
+const SERVICE_ROLE_KEY = resolveServiceRoleKey(root, SUPABASE_URL);
 
 async function serviceFetch(pathname, options = {}) {
   const res = await fetch(`${SUPABASE_URL}${pathname}`, {

@@ -7,11 +7,14 @@
  * these tests assert against, not re-implemented here.
  */
 
+const mockFrom = jest.fn();
+
 jest.mock("../lib/supabase", () => ({
   supabase: {
     rpc: jest.fn(),
     functions: { invoke: jest.fn() },
     auth: { linkIdentity: jest.fn() },
+    from: (...args) => mockFrom(...args),
   },
 }));
 
@@ -29,6 +32,16 @@ import {
   hasLinkedinIdentity,
   markMarketplaceListingSold,
   touchActivity,
+  getResources,
+  logClientError,
+  listErrorLogs,
+  setErrorLogResolved,
+  listMyEmergencyContacts,
+  upsertEmergencyContact,
+  deleteEmergencyContact,
+  listPendingEmergencyContacts,
+  verifyEmergencyContact,
+  getEmergencyContactsForAlert,
 } from "./mvpService";
 
 describe("createFoodOrder", () => {
@@ -358,5 +371,231 @@ describe("touchActivity", () => {
     supabase.rpc.mockResolvedValue({ data: null, error: { message: "network error" } });
 
     await expect(touchActivity()).resolves.not.toThrow();
+  });
+});
+
+describe("getResources", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  // Regression test: this used to query/filter on `active`, a legacy
+  // column some pre-existing installs happened to carry -- `available` is
+  // the schema's canonical column (supabase/migrations/
+  // 20260814000700_services_bookings.sql) and the only one guaranteed to
+  // exist. Querying `active` 42703'd outright on a project whose resources
+  // table never had it, silently emptying the resource list app-wide.
+  it("selects and filters on the canonical `available` column, not the legacy `active` one", async () => {
+    const mockResponse = { data: [{ id: "r1", name: "Seminar Hall", available: true }], error: null };
+    const builder = {
+      select: jest.fn(() => builder),
+      eq: jest.fn(() => builder),
+      order: jest.fn(() => builder),
+      then: (resolve) => Promise.resolve(mockResponse).then(resolve),
+    };
+    mockFrom.mockReturnValue(builder);
+
+    const result = await getResources("campus-1");
+
+    expect(mockFrom).toHaveBeenCalledWith("resources");
+    expect(builder.select.mock.calls[0][0]).toContain("available");
+    expect(builder.select.mock.calls[0][0]).not.toMatch(/\bactive\b/);
+    expect(builder.eq).toHaveBeenCalledWith("available", true);
+    expect(builder.eq).toHaveBeenCalledWith("campus_id", "campus-1");
+    expect(result).toEqual([{ id: "r1", name: "Seminar Hall", available: true }]);
+  });
+});
+
+describe("logClientError", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("calls log_client_error with the message/severity/context, truncated fields", async () => {
+    supabase.rpc.mockResolvedValue({ data: "log-id-1", error: null });
+
+    await logClientError("Something broke", {
+      stack: "Error: broke\n  at x",
+      severity: "warning",
+      context: { flow: "test" },
+    });
+
+    expect(supabase.rpc).toHaveBeenCalledWith("log_client_error", expect.objectContaining({
+      p_message: "Something broke",
+      p_stack: "Error: broke\n  at x",
+      p_severity: "warning",
+      p_context: { flow: "test" },
+      p_source: "client",
+    }));
+  });
+
+  // The whole point of this being fire-and-forget: a broken error-reporting
+  // call must never itself throw and cascade into a second failure on top
+  // of whatever it was trying to report.
+  it("never throws even when the RPC call itself fails", async () => {
+    supabase.rpc.mockRejectedValue(new Error("network down"));
+    await expect(logClientError("Something broke")).resolves.toBeUndefined();
+  });
+
+  it("does not call the RPC at all for an empty message", async () => {
+    await logClientError("");
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  // De-dupe within a tab session -- see the module-level fingerprint Set.
+  it("only logs the first occurrence of an identical message+severity", async () => {
+    supabase.rpc.mockResolvedValue({ data: null, error: null });
+    const marker = `dedupe test ${Date.now()}`;
+    await logClientError(marker, { severity: "error" });
+    await logClientError(marker, { severity: "error" });
+    expect(supabase.rpc).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("listErrorLogs / setErrorLogResolved (Admin CMS Errors tab)", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("filters by severity and resolved, embeds the reporter's name", async () => {
+    const mockResponse = { data: [{ id: "e1", message: "boom", severity: "error", resolved: false }], error: null };
+    const builder = {
+      select: jest.fn(() => builder),
+      order: jest.fn(() => builder),
+      limit: jest.fn(() => builder),
+      eq: jest.fn(() => builder),
+      then: (resolve) => Promise.resolve(mockResponse).then(resolve),
+    };
+    mockFrom.mockReturnValue(builder);
+
+    const result = await listErrorLogs({ severity: "error", resolved: false });
+
+    expect(mockFrom).toHaveBeenCalledWith("error_logs");
+    expect(builder.select.mock.calls[0][0]).toContain("reporter:profiles");
+    expect(builder.eq).toHaveBeenCalledWith("severity", "error");
+    expect(builder.eq).toHaveBeenCalledWith("resolved", false);
+    expect(result).toEqual(mockResponse.data);
+  });
+
+  it("marks an error resolved", async () => {
+    const mockResponse = { data: { id: "e1", resolved: true }, error: null };
+    const builder = {
+      update: jest.fn(() => builder),
+      eq: jest.fn(() => builder),
+      select: jest.fn(() => builder),
+      single: jest.fn(() => Promise.resolve(mockResponse)),
+    };
+    mockFrom.mockReturnValue(builder);
+
+    const result = await setErrorLogResolved("e1", true);
+
+    expect(builder.update).toHaveBeenCalledWith({ resolved: true });
+    expect(builder.eq).toHaveBeenCalledWith("id", "e1");
+    expect(result).toEqual(mockResponse.data);
+  });
+});
+
+describe("emergency contacts (doc §113, 20260815000600_emergency_contacts.sql)", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("listMyEmergencyContacts selects the caller's contacts, primary first", async () => {
+    const mockResponse = { data: [{ id: "c1", contact_name: "Mom", is_primary: true }], error: null };
+    const builder = {
+      select: jest.fn(() => builder),
+      order: jest.fn(() => builder),
+      then: (resolve) => Promise.resolve(mockResponse).then(resolve),
+    };
+    mockFrom.mockReturnValue(builder);
+
+    const result = await listMyEmergencyContacts();
+
+    expect(mockFrom).toHaveBeenCalledWith("emergency_contacts");
+    expect(builder.order).toHaveBeenCalledWith("is_primary", { ascending: false });
+    expect(builder.order).toHaveBeenCalledWith("created_at", { ascending: true });
+    expect(result).toEqual(mockResponse.data);
+  });
+
+  it("upsertEmergencyContact validates the phone client-side before ever calling the RPC", async () => {
+    await expect(
+      upsertEmergencyContact({ contactName: "Dad", relationship: "parent", phone: "not-a-phone" })
+    ).rejects.toThrow(/valid phone number/i);
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("upsertEmergencyContact requires a name", async () => {
+    await expect(
+      upsertEmergencyContact({ contactName: "  ", relationship: "parent", phone: "9876543210" })
+    ).rejects.toThrow(/name is required/i);
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("upsertEmergencyContact rejects an invalid alternate phone without dropping a valid primary one", async () => {
+    await expect(
+      upsertEmergencyContact({ contactName: "Dad", relationship: "parent", phone: "9876543210", altPhone: "bad" })
+    ).rejects.toThrow(/alternate phone/i);
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("upsertEmergencyContact calls the RPC with trimmed fields and nulls for blanks", async () => {
+    supabase.rpc.mockResolvedValue({ data: { id: "c1" }, error: null });
+
+    await upsertEmergencyContact({
+      contactName: "  Dad  ",
+      relationship: "parent",
+      phone: " 9876543210 ",
+      altPhone: "",
+      email: "",
+      isPrimary: true,
+    });
+
+    expect(supabase.rpc).toHaveBeenCalledWith("upsert_emergency_contact", {
+      p_id: null,
+      p_contact_name: "Dad",
+      p_relationship: "parent",
+      p_phone: "9876543210",
+      p_alt_phone: null,
+      p_email: null,
+      p_is_primary: true,
+    });
+  });
+
+  it("upsertEmergencyContact passes the existing id through on an edit", async () => {
+    supabase.rpc.mockResolvedValue({ data: { id: "c1" }, error: null });
+
+    await upsertEmergencyContact({ id: "c1", contactName: "Mom", relationship: "parent", phone: "9876543210" });
+
+    expect(supabase.rpc).toHaveBeenCalledWith("upsert_emergency_contact", expect.objectContaining({ p_id: "c1" }));
+  });
+
+  it("deleteEmergencyContact calls the RPC with the id", async () => {
+    supabase.rpc.mockResolvedValue({ data: null, error: null });
+    await deleteEmergencyContact("c1");
+    expect(supabase.rpc).toHaveBeenCalledWith("delete_emergency_contact", { p_id: "c1" });
+  });
+
+  it("listPendingEmergencyContacts calls admin_list_pending_emergency_contacts", async () => {
+    supabase.rpc.mockResolvedValue({ data: [{ id: "c1" }], error: null });
+    const result = await listPendingEmergencyContacts();
+    expect(supabase.rpc).toHaveBeenCalledWith("admin_list_pending_emergency_contacts");
+    expect(result).toEqual([{ id: "c1" }]);
+  });
+
+  it("verifyEmergencyContact calls the RPC with id/verified/notes", async () => {
+    supabase.rpc.mockResolvedValue({ data: { id: "c1", verified: true }, error: null });
+    await verifyEmergencyContact("c1", true, "called and confirmed");
+    expect(supabase.rpc).toHaveBeenCalledWith("verify_emergency_contact", {
+      p_id: "c1",
+      p_verified: true,
+      p_notes: "called and confirmed",
+    });
+  });
+
+  // The SOS-response integration point: a responder pulls a student's
+  // contacts scoped to one real alert, not a standing directory browse.
+  it("getEmergencyContactsForAlert calls the RPC with the alert id and returns the list", async () => {
+    supabase.rpc.mockResolvedValue({ data: [{ id: "c1", contact_name: "Mom", verified: true }], error: null });
+    const result = await getEmergencyContactsForAlert("alert-1");
+    expect(supabase.rpc).toHaveBeenCalledWith("get_emergency_contacts_for_alert", { p_alert_id: "alert-1" });
+    expect(result).toEqual([{ id: "c1", contact_name: "Mom", verified: true }]);
+  });
+
+  it("getEmergencyContactsForAlert returns an empty array when there's no data", async () => {
+    supabase.rpc.mockResolvedValue({ data: null, error: null });
+    const result = await getEmergencyContactsForAlert("alert-1");
+    expect(result).toEqual([]);
   });
 });

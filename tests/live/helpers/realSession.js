@@ -39,6 +39,17 @@ export function listTestUsers() {
   return Object.entries(SESSIONS).map(([email, v]) => ({ email, label: v.label, userId: v.userId }));
 }
 
+// For specs that only need a test account's real user id (e.g. to scope a
+// service_role cleanup query) without seeding a browser session for it --
+// same env-aware sessions file this whole helper already resolves, instead
+// of a spec reading scripts/.sessions.json directly (hardcoded to
+// production; see docs/ENVIRONMENTS.md).
+export function getTestUserId(email) {
+  const entry = SESSIONS[email];
+  if (!entry) throw new Error(`No session found for ${email} -- run scripts/setup-test-users.mjs first`);
+  return entry.userId;
+}
+
 export async function seedRealSession(context, email) {
   const entry = SESSIONS[email];
   if (!entry) throw new Error(`No session found for ${email} -- run scripts/setup-test-users.mjs first`);

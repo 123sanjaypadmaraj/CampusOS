@@ -70,6 +70,9 @@ jest.mock("./services/mvpService", () => ({
   createMarketplaceListing: jest.fn(() => Promise.resolve(null)),
   markMarketplaceListingSold: jest.fn(() => Promise.resolve(null)),
   touchActivity: jest.fn(() => Promise.resolve()),
+  triggerSosAlert: jest.fn(() => Promise.resolve({ id: "alert-1", status: "active", responders_notified: 0 })),
+  cancelMySosAlert: jest.fn(() => Promise.resolve(null)),
+  getBestEffortLocation: jest.fn(() => Promise.resolve(null)),
 }));
 
 describe("App button interactions", () => {
@@ -132,6 +135,67 @@ describe("App button interactions", () => {
     fireEvent.click(campusButton);
 
     expect(campusButton).toHaveClass("active");
+  });
+
+  describe("route branching (doc §76-78: one app, not separate per-role apps)", () => {
+    afterEach(() => {
+      window.history.pushState(null, "", "/");
+    });
+
+    test("clicking a nav item updates the URL, not just component state", async () => {
+      render(<App />);
+      fireEvent.click(await screen.findByTestId("nav-events-button"));
+
+      await waitFor(() => {
+        expect(window.location.pathname).toBe("/events");
+      });
+    });
+
+    test("deep-linking straight to a URL (refresh/bookmark) renders that section on first paint", async () => {
+      window.history.pushState(null, "", "/food");
+      const { container } = render(<App />);
+
+      // Assert on the *route* rendering, not on its data finishing loading
+      // (that's a separate, unrelated async chain with its own coverage) --
+      // the Food section shows either its loading state or the loaded menu
+      // depending on timing, both of which only render under `active ===
+      // "food"`.
+      await waitFor(() => {
+        expect(container.querySelector(".food-page")).toBeInTheDocument();
+      });
+    });
+
+    test("browser back navigates to the previous section", async () => {
+      render(<App />);
+      fireEvent.click(await screen.findByTestId("nav-events-button"));
+      await waitFor(() => expect(window.location.pathname).toBe("/events"));
+
+      fireEvent.click(await screen.findByTestId("nav-home-button"));
+      await waitFor(() => expect(window.location.pathname).toBe("/"));
+
+      window.history.back();
+
+      await waitFor(() => {
+        expect(window.location.pathname).toBe("/events");
+      });
+    });
+
+    test("an unknown path falls back to Home instead of a blank/broken screen", async () => {
+      window.history.pushState(null, "", "/not-a-real-route");
+      render(<App />);
+
+      expect(await screen.findByText(/Sign in/i)).toBeInTheDocument();
+    });
+
+    test("a signed-out visitor deep-linking into /vendor is bounced back to Home, and the URL is corrected", async () => {
+      window.history.pushState(null, "", "/vendor");
+      render(<App />);
+
+      await waitFor(() => {
+        expect(window.location.pathname).toBe("/");
+      });
+      expect(screen.queryByText(/Vendor access only/i)).not.toBeInTheDocument();
+    });
   });
 
   test("starts Google OAuth sign-in from the login modal", async () => {
@@ -262,6 +326,108 @@ describe("App button interactions", () => {
         expect(screen.queryByText(/Review your details/i)).not.toBeInTheDocument();
       });
       expect(registerEvent).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("SOS / emergency alert", () => {
+    const signInAs = (overrides = {}) => {
+      const { getCurrentUser, getOrCreateProfile } = require("./services/mvpService");
+      getCurrentUser.mockResolvedValueOnce({ id: "user-1", email: "student@nhce.edu.in", user_metadata: {} });
+      getOrCreateProfile.mockResolvedValueOnce({
+        id: "user-1", name: "Sanjay", usn: "1NH21CS001", email: "student@nhce.edu.in", phone: null, ...overrides,
+      });
+    };
+
+    const openSosModal = async () => {
+      render(<App />);
+      fireEvent.click(await screen.findByTestId("nav-services-button"));
+      fireEvent.click(await screen.findByRole("button", { name: /Emergency/i }));
+      await screen.findByText(/Hold for emergency/i);
+    };
+
+    test("the Emergency service card actually opens the SOS modal (used to be a dead stub)", async () => {
+      await openSosModal();
+      expect(screen.getByRole("button", { name: /Hold to activate SOS/i })).toBeInTheDocument();
+    });
+
+    test("a quick-action button prompts sign-in instead of dispatching when signed out", async () => {
+      const { triggerSosAlert } = require("./services/mvpService");
+      await openSosModal();
+
+      fireEvent.click(screen.getByRole("button", { name: /^Security$/i }));
+
+      await screen.findByText(/Sign in to send an SOS alert/i);
+      expect(triggerSosAlert).not.toHaveBeenCalled();
+    });
+
+    test("releasing the hold button before the threshold cancels -- no alert is sent", async () => {
+      const { triggerSosAlert } = require("./services/mvpService");
+      signInAs();
+      await openSosModal();
+
+      const holdBtn = screen.getByRole("button", { name: /Hold to activate SOS/i });
+      fireEvent.pointerDown(holdBtn);
+      fireEvent.pointerUp(holdBtn);
+
+      // Give any (incorrectly still-pending) timer a chance to fire.
+      await new Promise((r) => setTimeout(r, 50));
+      expect(triggerSosAlert).not.toHaveBeenCalled();
+    });
+
+    test("holding past the threshold sends a real general alert with best-effort location", async () => {
+      const { triggerSosAlert, getBestEffortLocation } = require("./services/mvpService");
+      getBestEffortLocation.mockResolvedValueOnce({ latitude: 12.9, longitude: 77.6, accuracy: 15 });
+      signInAs();
+      await openSosModal();
+
+      jest.useFakeTimers({ advanceTimers: true });
+      try {
+        const holdBtn = screen.getByRole("button", { name: /Hold to activate SOS/i });
+        fireEvent.pointerDown(holdBtn);
+        jest.advanceTimersByTime(1600);
+
+        await waitFor(() => {
+          expect(triggerSosAlert).toHaveBeenCalledWith({
+            alertType: "general",
+            location: { latitude: 12.9, longitude: 77.6, accuracy: 15 },
+          });
+        });
+        await screen.findByText("Alert sent");
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    test("a quick-action button (e.g. Medical) dispatches immediately without holding", async () => {
+      const { triggerSosAlert } = require("./services/mvpService");
+      signInAs();
+      await openSosModal();
+
+      fireEvent.click(screen.getByRole("button", { name: /^Medical$/i }));
+
+      await waitFor(() => {
+        expect(triggerSosAlert).toHaveBeenCalledWith(expect.objectContaining({ alertType: "medical" }));
+      });
+      await screen.findByText("Alert sent");
+    });
+
+    test("cancelling a just-sent alert calls cancelMySosAlert and returns to the trigger screen", async () => {
+      const { triggerSosAlert, cancelMySosAlert } = require("./services/mvpService");
+      triggerSosAlert.mockResolvedValueOnce({ id: "alert-42", status: "active", responders_notified: 2 });
+      signInAs();
+      await openSosModal();
+
+      fireEvent.click(screen.getByRole("button", { name: /^Campus help$/i }));
+      await screen.findByText("Alert sent");
+
+      fireEvent.click(screen.getByRole("button", { name: /false alarm/i }));
+
+      await waitFor(() => {
+        expect(cancelMySosAlert).toHaveBeenCalledWith("alert-42");
+      });
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /Hold to activate SOS/i })).toBeInTheDocument();
+      });
     });
   });
 });

@@ -108,7 +108,11 @@ test('Services: Lost & Found -- report an item', async ({ page }) => {
   await page.locator('nav.bottom-nav button', { hasText: 'Services' }).click();
   await page.getByRole('button', { name: /Lost & Found/i }).click();
   await page.waitForLoadState('networkidle');
-  await page.getByRole('button', { name: /Report lost item/i }).click();
+  // "Report lost item"/"Demo item" -> "Report an item"/real Lost/Found
+  // toggle once the hardcoded-fake-items fallback was removed (doc: real
+  // empty state instead of 3 fake demo rows) -- see tests/live/15-lost-found.spec.js
+  // for full coverage of the new form/claim/admin-CMS flows this enabled.
+  await page.getByRole('button', { name: /Report an item/i }).click();
   await page.getByLabel(/Item title/i).fill(marker);
   await page.getByLabel(/Last seen location/i).fill('E2E Test Location');
   await page.getByRole('button', { name: /Submit report/i }).click();

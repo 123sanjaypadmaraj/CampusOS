@@ -10,10 +10,15 @@ import {
   HiShieldCheck,
   HiXCircle,
   HiDocumentText,
+  HiMagnifyingGlassCircle,
+  HiExclamationTriangle,
+  HiPhone,
 } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import * as adminApi from "./api";
+import * as opportunitiesApi from "../../services/opportunitiesService";
 import AdminAnalytics from "./Analytics";
+import SosAlertsPanel from "../facilities/SosAlerts";
 
 /* =========================================================
    SHARED SHELL (mirrors App.jsx's ModalShell markup/classes so
@@ -36,13 +41,18 @@ function Modal({ title, kicker, onClose, children }) {
 }
 
 const TABS = [
+  ["sos", "SOS Alerts"],
   ["analytics", "Analytics"],
   ["announcements", "Announcements"],
   ["events", "Events & Clubs"],
   ["verifications", "Student Verifications"],
+  ["emergencycontacts", "Emergency Contacts"],
   ["users", "Users"],
   ["moderation", "Moderation"],
   ["requests", "Requests"],
+  ["lostfound", "Lost & Found"],
+  ["opportunities", "Opportunities & Mentors"],
+  ["errors", "Errors"],
 ];
 
 export default function AdminCMS({ notify, campusId, authUser }) {
@@ -70,13 +80,18 @@ export default function AdminCMS({ notify, campusId, authUser }) {
         ))}
       </div>
 
+      {tab === "sos" && <SosAlertsPanel notify={notify} />}
       {tab === "analytics" && <AdminAnalytics campusId={campusId} />}
       {tab === "announcements" && <AnnouncementsTab notify={notify} campusId={campusId} />}
       {tab === "events" && <EventsClubsTab notify={notify} campusId={campusId} authUser={authUser} />}
       {tab === "verifications" && <VerificationsTab notify={notify} campusId={campusId} authUser={authUser} />}
+      {tab === "emergencycontacts" && <EmergencyContactsTab notify={notify} />}
       {tab === "users" && <UsersTab notify={notify} campusId={campusId} authUser={authUser} />}
       {tab === "moderation" && <ModerationTab notify={notify} authUser={authUser} />}
       {tab === "requests" && <RequestsTab notify={notify} campusId={campusId} />}
+      {tab === "lostfound" && <LostFoundTab notify={notify} campusId={campusId} authUser={authUser} />}
+      {tab === "opportunities" && <OpportunitiesMentorsTab notify={notify} campusId={campusId} />}
+      {tab === "errors" && <ErrorLogsTab notify={notify} />}
     </section>
   );
 }
@@ -487,6 +502,95 @@ function VerificationsTab({ notify, campusId, authUser }) {
   );
 }
 
+/* =========================================================
+   EMERGENCY CONTACTS -- verification queue (doc §113)
+   A student self-reports next-of-kin contacts (Profile page); this queue
+   is where facilities/admin confirm a number is real before it's trusted
+   by a responder mid-SOS (see SosAlertsPanel's "View emergency contacts").
+========================================================= */
+
+const RELATIONSHIP_LABEL = {
+  parent: "Parent", guardian: "Guardian", sibling: "Sibling",
+  spouse: "Spouse", relative: "Relative", friend: "Friend", other: "Other",
+};
+
+// Exported (not just used locally) -- facilities_staff holds
+// emergency_contacts.verify too (same set as sos.respond) but has no Admin
+// CMS nav access, so FacilitiesDashboard.jsx imports and renders this same
+// tab from its own dashboard instead of duplicating it.
+export function EmergencyContactsTab({ notify }) {
+  const [contacts, setContacts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busyId, setBusyId] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      setContacts(await adminApi.listPendingEmergencyContacts());
+    } catch (err) {
+      setError(err.message || "Could not load emergency contacts");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const review = async (contact, verified) => {
+    let notes;
+    if (!verified) {
+      notes = window.prompt("Why is this contact being rejected? (optional, shown internally)");
+      if (notes === null) return;
+    }
+    try {
+      setBusyId(contact.id);
+      await adminApi.verifyEmergencyContact(contact.id, verified, notes || null);
+      notify(verified ? "Emergency contact verified" : "Emergency contact marked unverified");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not review this contact");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (loading) return <LoadingState label="Loading emergency contacts…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  return (
+    <div className="resource-list">
+      {contacts.length === 0 && (
+        <EmptyState icon={<HiPhone />} title="No pending emergency contacts" text="New next-of-kin submissions will show up here for verification." />
+      )}
+      {contacts.map((contact) => (
+        <article className="resource-row" key={contact.id}>
+          <div>
+            <b>{contact.contact_name} <small>({RELATIONSHIP_LABEL[contact.relationship] || contact.relationship})</small></b>
+            <small>
+              <HiPhone /> {contact.phone}{contact.alt_phone ? ` · alt ${contact.alt_phone}` : ""}
+              {contact.email ? ` · ${contact.email}` : ""}
+            </small>
+            <small>
+              For {contact.student_name || "Unknown student"} · {contact.student_course} · {contact.student_year} · USN {contact.student_usn || "—"}
+              {contact.is_primary ? " · Primary contact" : ""}
+            </small>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="primary" disabled={busyId === contact.id} onClick={() => review(contact, true)}>
+              <HiShieldCheck /> Verify
+            </button>
+            <button disabled={busyId === contact.id} onClick={() => review(contact, false)}>
+              <HiXCircle /> Reject
+            </button>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 // Food & Canteens management used to live here as its own admin tab, gated
 // only by 'food.menu.write' back when only admins held that permission. Now
 // every canteen has its own vendor login (VendorDashboard.jsx) with real
@@ -837,5 +941,660 @@ function ClubMembersModal({ club, onClose, notify }) {
         </div>
       ))}
     </Modal>
+  );
+}
+
+/* =========================================================
+   LOST & FOUND (doc §44)
+   The student-facing list (LostService in App.jsx) used to fall back to
+   3 hardcoded fake items whenever the real table was empty for a campus --
+   looked like real reports, "Claim" on one just showed an error toast.
+   Removed there; this tab is the admin side of the same fix -- staff can
+   post an item on the college's behalf (e.g. something handed in to
+   security) instead of the feature only working via student self-report,
+   and can verify/reject a pending claim or resolve/delete a report by hand.
+========================================================= */
+
+const LOST_FOUND_CATEGORIES = ["Electronics", "ID card", "Bag", "Documents", "Keys", "Clothing", "Other"];
+
+function LostFoundTab({ notify, campusId, authUser }) {
+  const [statusFilter, setStatusFilter] = useState("");
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busyId, setBusyId] = useState(null);
+  const [creating, setCreating] = useState(false);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      setItems(await adminApi.listLostFoundItemsAdmin(campusId, { status: statusFilter || null }));
+    } catch (err) {
+      setError(err.message || "Could not load lost & found reports");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, [campusId, statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const verify = async (item, approve) => {
+    try {
+      setBusyId(item.id);
+      await adminApi.verifyLostFoundHandover(item.id, approve);
+      notify(approve ? "Handover verified — item marked resolved" : "Claim rejected — item reopened");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not verify this claim");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const markResolved = async (item) => {
+    if (!window.confirm(`Mark "${item.title}" resolved without a claim?`)) return;
+    try {
+      setBusyId(item.id);
+      await adminApi.setLostFoundItemStatusAdmin(item.id, "resolved");
+      notify("Marked resolved");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not update this report");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const remove = async (item) => {
+    if (!window.confirm(`Delete "${item.title}"? This can't be undone.`)) return;
+    try {
+      setBusyId(item.id);
+      await adminApi.deleteLostFoundItemAdmin(item.id);
+      notify("Report deleted");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not delete this report");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div className="admin-panel">
+      <div className="section-head">
+        <h2>Lost &amp; Found</h2>
+        <button className="primary" onClick={() => setCreating(true)}><HiPlus /> Post an item</button>
+      </div>
+
+      <div className="chips" style={{ marginBottom: 16 }}>
+        <button className={statusFilter === "" ? "chip active" : "chip"} onClick={() => setStatusFilter("")}>All</button>
+        <button className={statusFilter === "open" ? "chip active" : "chip"} onClick={() => setStatusFilter("open")}>Open</button>
+        <button className={statusFilter === "claim_pending" ? "chip active" : "chip"} onClick={() => setStatusFilter("claim_pending")}>Pending verification</button>
+        <button className={statusFilter === "resolved" ? "chip active" : "chip"} onClick={() => setStatusFilter("resolved")}>Resolved</button>
+      </div>
+
+      {loading && <LoadingState label="Loading lost & found reports…" />}
+      {error && <ErrorState text={error} onRetry={reload} />}
+
+      {!loading && !error && (
+        <div className="resource-list">
+          {items.length === 0 && <EmptyState icon={<HiMagnifyingGlassCircle />} title="No reports" text="Nothing matches this filter." />}
+          {items.map((item) => (
+            <article className="resource-row" key={item.id} style={{ alignItems: "flex-start" }}>
+              <div>
+                <b>{item.item_type === "found" ? "Found" : "Lost"} · {item.title}</b>
+                <small>
+                  {item.category} · {item.location} · Reported by {item.reporter?.name || "unknown"} · {new Date(item.created_at).toLocaleString()}
+                </small>
+                {item.status === "claim_pending" && (
+                  <small>Claimed by <b>{item.claimant?.name || "unknown"}</b>: &ldquo;{item.claim_proof}&rdquo;</small>
+                )}
+                {item.status === "resolved" && <small>Resolved</small>}
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {item.status === "claim_pending" && (
+                  <>
+                    <button className="primary" disabled={busyId === item.id} onClick={() => verify(item, true)}>Verify &amp; release</button>
+                    <button disabled={busyId === item.id} onClick={() => verify(item, false)}>Reject claim</button>
+                  </>
+                )}
+                {item.status === "open" && (
+                  <button disabled={busyId === item.id} onClick={() => markResolved(item)}>Mark resolved</button>
+                )}
+                <button disabled={busyId === item.id} onClick={() => remove(item)}><HiTrash /> Delete</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+
+      {creating && (
+        <LostFoundItemForm
+          campusId={campusId}
+          authUser={authUser}
+          onClose={() => setCreating(false)}
+          onSaved={() => { setCreating(false); reload(); }}
+          notify={notify}
+        />
+      )}
+    </div>
+  );
+}
+
+function LostFoundItemForm({ campusId, authUser, onClose, onSaved, notify }) {
+  const [itemType, setItemType] = useState("found");
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [category, setCategory] = useState("Other");
+  const [location, setLocation] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  return (
+    <Modal kicker="LOST & FOUND" title="Post an item on the college's behalf" onClose={onClose}>
+      <label>Type
+        <select value={itemType} onChange={(e) => setItemType(e.target.value)}>
+          <option value="found">Found (e.g. handed in to security)</option>
+          <option value="lost">Lost (reported to staff in person)</option>
+        </select>
+      </label>
+      <label>Title<input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Black backpack" /></label>
+      <div className="form-grid">
+        <label>Category
+          <select value={category} onChange={(e) => setCategory(e.target.value)}>
+            {LOST_FOUND_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </label>
+        <label>Location<input value={location} onChange={(e) => setLocation(e.target.value)} /></label>
+      </div>
+      <label>Description<textarea value={description} onChange={(e) => setDescription(e.target.value)} /></label>
+      <button className="primary wide" disabled={saving || !title.trim() || !location.trim()} onClick={async () => {
+        try {
+          setSaving(true);
+          await adminApi.createLostFoundItem({ userId: authUser?.id, campusId, itemType, title, description, category, location });
+          notify("Report posted");
+          onSaved();
+        } catch (err) { notify(err.message || "Could not post this report"); }
+        finally { setSaving(false); }
+      }}>
+        {saving ? "Posting…" : "Post report"}
+      </button>
+    </Modal>
+  );
+}
+
+/* =========================================================
+   OPPORTUNITIES & MENTORS (doc §109)
+========================================================= */
+
+const OPPORTUNITY_TYPES = ["Internship", "Research", "Job", "Volunteer", "Competition"];
+
+function OpportunitiesMentorsTab({ notify, campusId }) {
+  const [section, setSection] = useState("opportunities");
+
+  return (
+    <div className="admin-panel">
+      <div className="socialize-filter-row" style={{ marginBottom: 16 }}>
+        <button className={section === "opportunities" ? "chip active" : "chip"} onClick={() => setSection("opportunities")}>Opportunities</button>
+        <button className={section === "mentors" ? "chip active" : "chip"} onClick={() => setSection("mentors")}>Mentors</button>
+        <button className={section === "requests" ? "chip active" : "chip"} onClick={() => setSection("requests")}>Mentor requests</button>
+      </div>
+
+      {section === "opportunities" && <OpportunitiesAdminSection notify={notify} campusId={campusId} />}
+      {section === "mentors" && <MentorsAdminSection notify={notify} campusId={campusId} />}
+      {section === "requests" && <MentorRequestsAdminSection notify={notify} />}
+    </div>
+  );
+}
+
+function OpportunitiesAdminSection({ notify, campusId }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [items, setItems] = useState([]);
+  const [formOpen, setFormOpen] = useState(null); // {} for new, {...opportunity} to edit
+  const [applicantsFor, setApplicantsFor] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      setItems(await opportunitiesApi.listOpportunitiesAdmin(campusId));
+    } catch (err) {
+      setError(err.message || "Could not load opportunities");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, [campusId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading) return <LoadingState label="Loading opportunities…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  return (
+    <div>
+      <div className="section-head">
+        <h2>Opportunities</h2>
+        <button className="primary" onClick={() => setFormOpen({})}><HiPlus /> Post opportunity</button>
+      </div>
+
+      <div className="resource-list">
+        {items.length === 0 && <EmptyState title="No opportunities posted yet" />}
+        {items.map((item) => (
+          <article className="resource-row" key={item.id}>
+            <div>
+              <b>{item.role} · {item.company}</b>
+              <small>{item.type} · {item.opportunity_applications?.length || 0} applicant(s) · {item.active ? "Active" : "Closed"}</small>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setApplicantsFor(item)}>Applicants</button>
+              <button onClick={() => setFormOpen(item)}><HiPencilSquare /></button>
+              <button onClick={async () => {
+                try { await opportunitiesApi.updateOpportunity(item.id, { active: !item.active }); reload(); }
+                catch (err) { notify(err.message || "Could not update opportunity"); }
+              }}>
+                {item.active ? "Close" : "Reopen"}
+              </button>
+              <button onClick={async () => {
+                if (!window.confirm(`Delete "${item.role}"?`)) return;
+                try { await opportunitiesApi.deleteOpportunity(item.id); notify("Opportunity deleted"); reload(); }
+                catch (err) { notify(err.message || "Could not delete opportunity"); }
+              }}>
+                <HiTrash />
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      {formOpen && (
+        <OpportunityForm
+          opportunity={formOpen}
+          campusId={campusId}
+          onClose={() => setFormOpen(null)}
+          onSaved={() => { setFormOpen(null); reload(); }}
+          notify={notify}
+        />
+      )}
+
+      {applicantsFor && (
+        <ApplicantsModal opportunity={applicantsFor} onClose={() => setApplicantsFor(null)} notify={notify} />
+      )}
+    </div>
+  );
+}
+
+function OpportunityForm({ opportunity, campusId, onClose, onSaved, notify }) {
+  const isNew = !opportunity.id;
+  const [form, setForm] = useState({
+    company: opportunity.company || "",
+    role: opportunity.role || "",
+    type: opportunity.type || OPPORTUNITY_TYPES[0],
+    description: opportunity.description || "",
+    tags: (opportunity.tags || []).join(", "),
+    deadline: opportunity.deadline || "",
+    applyUrl: opportunity.apply_url || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const change = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const save = async () => {
+    if (!form.company.trim() || !form.role.trim()) return;
+    try {
+      setSaving(true);
+      const payload = {
+        company: form.company.trim(),
+        role: form.role.trim(),
+        type: form.type,
+        description: form.description,
+        tags: form.tags.split(",").map((t) => t.trim()).filter(Boolean),
+        deadline: form.deadline || null,
+        applyUrl: form.applyUrl || null,
+      };
+      if (isNew) {
+        await opportunitiesApi.createOpportunity({ campusId, ...payload });
+      } else {
+        await opportunitiesApi.updateOpportunity(opportunity.id, {
+          company: payload.company, role: payload.role, type: payload.type,
+          description: payload.description, tags: payload.tags, deadline: payload.deadline, apply_url: payload.applyUrl,
+        });
+      }
+      notify(isNew ? "Opportunity posted" : "Opportunity updated");
+      onSaved();
+    } catch (err) {
+      notify(err.message || "Could not save opportunity");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal kicker="OPPORTUNITY" title={isNew ? "Post opportunity" : "Edit opportunity"} onClose={onClose}>
+      <label>Role<input value={form.role} onChange={(e) => change("role", e.target.value)} /></label>
+      <label>Company / Lab<input value={form.company} onChange={(e) => change("company", e.target.value)} /></label>
+      <label>Type
+        <select value={form.type} onChange={(e) => change("type", e.target.value)}>
+          {OPPORTUNITY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+      </label>
+      <label>Description<textarea rows={3} value={form.description} onChange={(e) => change("description", e.target.value)} /></label>
+      <label>Tags (comma separated)<input value={form.tags} onChange={(e) => change("tags", e.target.value)} placeholder="Python, ML" /></label>
+      <label>Deadline<input type="date" value={form.deadline} onChange={(e) => change("deadline", e.target.value)} /></label>
+      <label>External apply link (optional)<input value={form.applyUrl} onChange={(e) => change("applyUrl", e.target.value)} placeholder="https://…" /></label>
+      <button className="primary wide" disabled={saving || !form.company.trim() || !form.role.trim()} onClick={save}>
+        {saving ? "Saving…" : isNew ? "Post opportunity" : "Save changes"}
+      </button>
+    </Modal>
+  );
+}
+
+function ApplicantsModal({ opportunity, onClose, notify }) {
+  const [loading, setLoading] = useState(true);
+  const [applicants, setApplicants] = useState([]);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setApplicants(await opportunitiesApi.listOpportunityApplicants(opportunity.id));
+    } catch (err) {
+      notify(err.message || "Could not load applicants");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, [opportunity.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <Modal kicker="APPLICANTS" title={`${opportunity.role} at ${opportunity.company}`} onClose={onClose}>
+      {loading ? (
+        <LoadingState label="Loading applicants…" />
+      ) : applicants.length === 0 ? (
+        <EmptyState title="No applications yet" />
+      ) : (
+        <div className="resource-list">
+          {applicants.map((a) => (
+            <article className="resource-row" key={a.id}>
+              <div>
+                <b>{a.profiles?.name || "Student"} · {a.status}</b>
+                <small>{a.profiles?.course} · {a.profiles?.email}</small>
+                {a.message && <small>&ldquo;{a.message}&rdquo;</small>}
+              </div>
+              <select value={a.status} onChange={async (e) => {
+                try { await opportunitiesApi.setApplicationStatus(a.id, e.target.value); reload(); }
+                catch (err) { notify(err.message || "Could not update status"); }
+              }}>
+                {["submitted", "reviewed", "shortlisted", "rejected"].map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </article>
+          ))}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function MentorsAdminSection({ notify, campusId }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [items, setItems] = useState([]);
+  const [formOpen, setFormOpen] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      setItems(await opportunitiesApi.listMentorsAdmin(campusId));
+    } catch (err) {
+      setError(err.message || "Could not load mentors");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, [campusId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading) return <LoadingState label="Loading mentors…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  return (
+    <div>
+      <div className="section-head">
+        <h2>Mentors</h2>
+        <button className="primary" onClick={() => setFormOpen({})}><HiPlus /> Add mentor</button>
+      </div>
+
+      <div className="resource-list">
+        {items.length === 0 && <EmptyState title="No mentors listed yet" />}
+        {items.map((item) => (
+          <article className="resource-row" key={item.id}>
+            <div>
+              <b>{item.name} · {item.role}</b>
+              <small>{(item.skills || []).join(", ")} · {item.active ? "Listed" : "Hidden"}</small>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setFormOpen(item)}><HiPencilSquare /></button>
+              <button onClick={async () => {
+                try { await opportunitiesApi.updateMentor(item.id, { active: !item.active }); reload(); }
+                catch (err) { notify(err.message || "Could not update mentor"); }
+              }}>
+                {item.active ? "Hide" : "List"}
+              </button>
+              <button onClick={async () => {
+                if (!window.confirm(`Remove "${item.name}" from the mentor directory?`)) return;
+                try { await opportunitiesApi.deleteMentor(item.id); notify("Mentor removed"); reload(); }
+                catch (err) { notify(err.message || "Could not remove mentor"); }
+              }}>
+                <HiTrash />
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      {formOpen && (
+        <MentorForm
+          mentor={formOpen}
+          campusId={campusId}
+          onClose={() => setFormOpen(null)}
+          onSaved={() => { setFormOpen(null); reload(); }}
+          notify={notify}
+        />
+      )}
+    </div>
+  );
+}
+
+function MentorForm({ mentor, campusId, onClose, onSaved, notify }) {
+  const isNew = !mentor.id;
+  const [form, setForm] = useState({
+    name: mentor.name || "",
+    role: mentor.role || "",
+    skills: (mentor.skills || []).join(", "),
+    bio: mentor.bio || "",
+    contactEmail: mentor.contact_email || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const change = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const save = async () => {
+    if (!form.name.trim() || !form.role.trim()) return;
+    try {
+      setSaving(true);
+      const skills = form.skills.split(",").map((s) => s.trim()).filter(Boolean);
+      if (isNew) {
+        await opportunitiesApi.createMentor({ campusId, name: form.name.trim(), role: form.role.trim(), skills, bio: form.bio, contactEmail: form.contactEmail });
+      } else {
+        await opportunitiesApi.updateMentor(mentor.id, { name: form.name.trim(), role: form.role.trim(), skills, bio: form.bio, contact_email: form.contactEmail || null });
+      }
+      notify(isNew ? "Mentor added" : "Mentor updated");
+      onSaved();
+    } catch (err) {
+      notify(err.message || "Could not save mentor");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal kicker="MENTOR" title={isNew ? "Add mentor" : "Edit mentor"} onClose={onClose}>
+      <label>Name<input value={form.name} onChange={(e) => change("name", e.target.value)} /></label>
+      <label>Role / Title<input value={form.role} onChange={(e) => change("role", e.target.value)} placeholder="Robotics & Embedded Systems" /></label>
+      <label>Skills (comma separated)<input value={form.skills} onChange={(e) => change("skills", e.target.value)} placeholder="ESP32, ROS, CAD" /></label>
+      <label>Bio (optional)<textarea rows={2} value={form.bio} onChange={(e) => change("bio", e.target.value)} /></label>
+      <label>Contact email (optional)<input value={form.contactEmail} onChange={(e) => change("contactEmail", e.target.value)} /></label>
+      <button className="primary wide" disabled={saving || !form.name.trim() || !form.role.trim()} onClick={save}>
+        {saving ? "Saving…" : isNew ? "Add mentor" : "Save changes"}
+      </button>
+    </Modal>
+  );
+}
+
+function MentorRequestsAdminSection({ notify }) {
+  const [loading, setLoading] = useState(true);
+  const [requests, setRequests] = useState([]);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setRequests(await opportunitiesApi.listMentorRequestsAdmin());
+    } catch (err) {
+      notify(err.message || "Could not load mentor requests");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading) return <LoadingState label="Loading requests…" />;
+
+  return (
+    <div>
+      <div className="resource-list">
+        {requests.length === 0 && <EmptyState title="No mentorship requests yet" />}
+        {requests.map((r) => (
+          <article className="resource-row" key={r.id}>
+            <div>
+              <b>{r.profiles?.name || "Student"} → {r.mentors?.name}</b>
+              <small>{r.profiles?.course} · {new Date(r.created_at).toLocaleString()} · {r.status}</small>
+              {r.message && <small>&ldquo;{r.message}&rdquo;</small>}
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   ERRORS (monitoring -- doc §96-98)
+   In-house error tracking instead of a third-party account: every
+   uncaught client error/rejection (main.jsx), React render crash
+   (ErrorBoundary), and a couple of explicitly-instrumented critical flows
+   (food order creation/payment) land here via log_client_error(). No
+   dedicated account, DSN, or third-party dashboard to sign up for.
+========================================================= */
+
+const ERROR_SEVERITIES = ["debug", "info", "warning", "error", "fatal"];
+
+function ErrorLogsTab({ notify }) {
+  const [severity, setSeverity] = useState("");
+  const [resolvedFilter, setResolvedFilter] = useState(false); // false = show open, true = show resolved
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busyId, setBusyId] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      setLogs(await adminApi.listErrorLogs({ severity: severity || null, resolved: resolvedFilter }));
+    } catch (err) {
+      setError(err.message || "Could not load error logs");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, [severity, resolvedFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleResolved = async (log) => {
+    try {
+      setBusyId(log.id);
+      await adminApi.setErrorLogResolved(log.id, !log.resolved);
+      notify(log.resolved ? "Reopened" : "Marked resolved");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not update this error");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div className="admin-panel">
+      <div className="section-head">
+        <h2>Errors</h2>
+      </div>
+
+      <div className="chips" style={{ marginBottom: 12 }}>
+        <button className={resolvedFilter === false ? "chip active" : "chip"} onClick={() => setResolvedFilter(false)}>Open</button>
+        <button className={resolvedFilter === true ? "chip active" : "chip"} onClick={() => setResolvedFilter(true)}>Resolved</button>
+      </div>
+
+      <div className="chips" style={{ marginBottom: 16 }}>
+        <button className={severity === "" ? "chip active" : "chip"} onClick={() => setSeverity("")}>All severities</button>
+        {ERROR_SEVERITIES.map((s) => (
+          <button key={s} className={severity === s ? "chip active" : "chip"} onClick={() => setSeverity(s)}>{s}</button>
+        ))}
+      </div>
+
+      {loading && <LoadingState label="Loading error logs…" />}
+      {error && <ErrorState text={error} onRetry={reload} />}
+
+      {!loading && !error && (
+        <div className="resource-list">
+          {logs.length === 0 && (
+            <EmptyState
+              icon={<HiExclamationTriangle />}
+              title={resolvedFilter ? "Nothing resolved yet" : "No open errors"}
+              text={resolvedFilter ? "" : "Nothing has been reported since you last cleared this list."}
+            />
+          )}
+          {logs.map((log) => (
+            <article className="resource-row" key={log.id} style={{ alignItems: "flex-start" }}>
+              <div>
+                <b>
+                  <span className="social-type">{log.severity.toUpperCase()}</span> {log.message}
+                </b>
+                <small>
+                  {log.source} · {log.reporter?.name || "not signed in"} · {new Date(log.created_at).toLocaleString()}
+                  {log.url ? ` · ${log.url}` : ""}
+                </small>
+                {expandedId === log.id && (
+                  <>
+                    {log.stack && <small style={{ whiteSpace: "pre-wrap", display: "block", marginTop: 6 }}>{log.stack}</small>}
+                    {log.context && Object.keys(log.context).length > 0 && (
+                      <small style={{ whiteSpace: "pre-wrap", display: "block", marginTop: 6 }}>{JSON.stringify(log.context, null, 2)}</small>
+                    )}
+                  </>
+                )}
+                {(log.stack || (log.context && Object.keys(log.context).length > 0)) && (
+                  <button className="ghost" style={{ marginTop: 6 }} onClick={() => setExpandedId(expandedId === log.id ? null : log.id)}>
+                    {expandedId === log.id ? "Hide details" : "Show details"}
+                  </button>
+                )}
+              </div>
+              <button disabled={busyId === log.id} onClick={() => toggleResolved(log)}>
+                {log.resolved ? "Reopen" : "Mark resolved"}
+              </button>
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

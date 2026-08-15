@@ -9,11 +9,36 @@
 // isn't left broken for other specs.
 
 import { test, expect } from '@playwright/test';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createClient } from '@supabase/supabase-js';
 import { seedRealSession } from './helpers/realSession.js';
+import { resolveServiceRoleKey } from './helpers/resolveServiceRoleKey.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(__dirname, '..', '..');
+
+function readEnvVar(name) {
+  return fs.readFileSync(path.join(root, '.env'), 'utf8').match(new RegExp(`^${name}=(.+)$`, 'm'))?.[1]?.trim();
+}
+const SUPABASE_URL = readEnvVar('VITE_SUPABASE_URL');
+const SERVICE_ROLE_KEY = resolveServiceRoleKey(root, SUPABASE_URL);
 
 const ADMIN = '1nh25cs265@usn.campusos.internal';
 
 test.describe.serial('Admin user management', () => {
+  test.beforeAll(async () => {
+    // This spec relies on Bob starting 'active' (the first test suspends
+    // then reactivates him). Found live: a prior run that failed partway
+    // through -- or a *different* spec/manual run that suspended Bob and
+    // didn't clean up -- leaves him stuck 'suspended', and every test here
+    // times out looking for a "Suspend" button that isn't there. Reset
+    // unconditionally rather than assuming any prior state.
+    const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+    await admin.from('profiles').update({ status: 'active', suspended_reason: null }).eq('usn', '1NH22IS202');
+  });
+
   test('search finds Bob, suspend + reactivate round-trips', async ({ page, context }) => {
     await seedRealSession(context, ADMIN);
     await page.goto('/');

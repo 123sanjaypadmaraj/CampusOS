@@ -18,14 +18,16 @@ const TANGO_VENDOR = 'tango.canteen@nhce.edu.in';
 
 test.describe.serial('Vendor order queue', () => {
   // Clears out any order left behind by a previous run and seeds exactly
-  // one fresh "Rava Idli" order in RECEIVED. Udupi's real queue also
-  // contains genuine (non-test) "Rava Idli" orders from earlier multi-user
-  // testing, so `.first()` filtered on the *marker notes* rather than the
-  // dish name is what actually guarantees a single match -- filtering on
-  // "Rava Idli" alone was the root cause of the flake (see
-  // helpers/seedVendorOrder.js for the full story).
+  // one fresh order (against whatever Udupi's menu actually has -- see
+  // helpers/seedVendorOrder.js) in RECEIVED. Udupi's real queue can also
+  // contain genuine (non-test) orders for the same dish from earlier
+  // multi-user testing, so `.first()` filtered on the *marker notes* rather
+  // than the dish name is what actually guarantees a single match --
+  // filtering on the dish name alone was the root cause of an earlier flake
+  // (see helpers/seedVendorOrder.js for the full story).
+  let seededItemName;
   test.beforeAll(async () => {
-    await seedFreshVendorTestOrder();
+    ({ itemName: seededItemName } = await seedFreshVendorTestOrder());
   });
 
 
@@ -53,7 +55,7 @@ test.describe.serial('Vendor order queue', () => {
     const orderCard = page.locator('.resource-row', { hasText: 'Live vendor-queue test order' }).first();
     await expect(orderCard).toBeVisible({ timeout: 15000 });
     await expect(orderCard).toContainText('RECEIVED');
-    await expect(orderCard).toContainText('Rava Idli');
+    await expect(orderCard).toContainText(seededItemName);
     await expect(orderCard).toContainText('Extra chutney please');
 
     await orderCard.getByRole('button', { name: /Accept/i }).click();

@@ -12,6 +12,7 @@ const RANGES = [
 const SLA_LABEL = {
   food_order: "Order fulfillment (30-min target)",
   print_job: "Print turnaround (2-hour target)",
+  store_order: "Pickup turnaround (24-hour target)",
 };
 
 async function rpc(name, args) {
@@ -22,10 +23,12 @@ async function rpc(name, args) {
 
 const money = (n) => `₹${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
-// Scoped entirely server-side to whatever the caller owns (their canteen or
-// the print shop) -- see vendor_gmv_series()/vendor_sla_summary() in
-// supabase/migrations/20260814005000_analytics.sql. Same component serves
-// both vendor types; the SLA domain returned tells us which one this is.
+// Scoped entirely server-side to whatever the caller owns (their canteen,
+// the print shop, or a campus store) -- see vendor_gmv_series()/
+// vendor_sla_summary() in supabase/migrations/20260814005000_analytics.sql
+// (extended for stores in 20260815000900_..._variants_stock_analytics.sql).
+// Same component serves all three vendor types; the SLA domain returned
+// tells us which one this is.
 export default function VendorAnalytics() {
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(true);

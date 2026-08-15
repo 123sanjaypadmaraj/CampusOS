@@ -1,7 +1,7 @@
 // tests/live/helpers/seedVendorOrder.js
 //
-// Seeds a fresh, uniquely-identifiable "Rava Idli" order at Udupi for the
-// vendor-order-queue live spec, and clears out any leftover orders from
+// Seeds a fresh, uniquely-identifiable order against Udupi's real menu for
+// the vendor-order-queue live spec, and clears out any leftover orders from
 // prior runs first.
 //
 // Why this exists: the spec used to assume a "Rava Idli" / "Live
@@ -23,6 +23,12 @@
 // an actual gateway payment headlessly isn't feasible -- see the spec's own
 // header comment). That leaves exactly one matching order in the DB by the
 // time the browser-based assertions run.
+//
+// Which Udupi item gets ordered is resolved dynamically (any active item on
+// Udupi's menu), not hardcoded to "Rava Idli" -- staging's seed data is a
+// different set of dishes than production's (see docs/ENVIRONMENTS.md), so
+// a hardcoded dish name would only ever work on one of the two projects.
+// The chosen item's real name is returned so the spec can assert against it.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -43,7 +49,16 @@ function readEnvVar(name) {
 const SUPABASE_URL = readEnvVar("VITE_SUPABASE_URL");
 const ANON_KEY = readEnvVar("VITE_SUPABASE_PUBLISHABLE_KEY");
 const SERVICE_ROLE_KEY = resolveServiceRoleKey(root, SUPABASE_URL);
-const SESSIONS = JSON.parse(fs.readFileSync(path.join(root, "scripts", ".sessions.json"), "utf8"));
+
+// Same "which project is .env actually pointed at" resolution
+// tests/live/helpers/realSession.js uses -- this helper used to hardcode
+// scripts/.sessions.json (production-only), which silently broke on
+// staging (missing/stale session) instead of using the sessions file that
+// actually matches the currently-linked project.
+const PROD_PROJECT_REF = "dzjzjlylsfpmymkcavrq";
+const PROJECT_REF = new URL(SUPABASE_URL).hostname.split(".")[0];
+const sessionsFileName = PROJECT_REF === PROD_PROJECT_REF ? ".sessions.json" : ".sessions.staging.json";
+const SESSIONS = JSON.parse(fs.readFileSync(path.join(root, "scripts", sessionsFileName), "utf8"));
 
 export const TEST_ORDER_NOTES = "Live vendor-queue test order";
 export const TEST_ORDER_ITEM_NOTES = "Extra chutney please";
@@ -62,9 +77,9 @@ async function clearStaleTestOrders(admin) {
   if (delErr) throw new Error(`Failed to delete stale test orders: ${delErr.message}`);
 }
 
-// Creates one fresh Rava Idli order as Alice, then forwards it to RECEIVED
-// the same way a verified Razorpay capture would via record_payment_event().
-// Returns the new order's id.
+// Creates one fresh order (against whatever Udupi actually has on its menu)
+// as Alice, then forwards it to RECEIVED the same way a verified Razorpay
+// capture would via record_payment_event(). Returns { orderId, itemName }.
 export async function seedFreshVendorTestOrder() {
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
@@ -72,14 +87,26 @@ export async function seedFreshVendorTestOrder() {
 
   await clearStaleTestOrders(admin);
 
+  const { data: udupi, error: canteenErr } = await admin
+    .from("canteens")
+    .select("id")
+    .ilike("name", "%udupi%")
+    .limit(1)
+    .single();
+  if (canteenErr || !udupi) {
+    throw new Error(`Could not find the Udupi canteen to seed the order against: ${canteenErr?.message}`);
+  }
+
   const { data: foodItem, error: foodErr } = await admin
     .from("food_items")
-    .select("id, canteen_id")
-    .ilike("name", "%rava idli%")
+    .select("id, name, canteen_id")
+    .eq("canteen_id", udupi.id)
+    .eq("active", true)
+    .eq("available", true)
     .limit(1)
     .single();
   if (foodErr || !foodItem) {
-    throw new Error(`Could not find a "Rava Idli" food item to seed the order against: ${foodErr?.message}`);
+    throw new Error(`Could not find an available Udupi food item to seed the order against: ${foodErr?.message}`);
   }
 
   const aliceEntry = SESSIONS["e2e.alice@nhce.edu.in"];
@@ -129,5 +156,5 @@ export async function seedFreshVendorTestOrder() {
     reason: "test seed: auto-forwarded to vendor queue",
   });
 
-  return order.id;
+  return { orderId: order.id, itemName: foodItem.name };
 }

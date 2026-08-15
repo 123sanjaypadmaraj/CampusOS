@@ -86,11 +86,42 @@ one-click custom domain flows once you own the domain). Doc §78 suggests
 apps that don't exist yet (§76-78) — irrelevant until those apps exist;
 a single domain is fine for now.
 
-## 6. Monitoring
+## 6. Monitoring, backups, disaster recovery -- done (2026-08-15)
 
-Not configured. Doc §96-98 recommends Sentry (error tracking) + the
-hosting platform's own metrics + PostHog (product analytics). All three
-need accounts; wire the Sentry SDK into `src/main.jsx` once you have a DSN.
+In-house error tracking (no third-party account/DSN needed): a global
+`ErrorBoundary` + `window.onerror`/`unhandledrejection` handlers
+(`src/main.jsx`) plus a couple of explicitly-instrumented critical flows
+(food order creation/payment) log to `error_logs` via `log_client_error()`
+-- viewable/resolvable in Admin CMS's "Errors" tab. An hourly-ish uptime
+check (`.github/workflows/uptime.yml`) pings the deployed frontend + the
+Supabase REST API; a failed scheduled run triggers GitHub's own automatic
+failure-notification email, no separate alerting service.
+
+Daily automated backups (`.github/workflows/backup.yml` + retention
+pruning) and a written restore procedure -- full detail in
+`docs/DISASTER_RECOVERY.md` and `docs/DATA_RETENTION.md`. **Needs 2
+GitHub repo secrets this session couldn't set itself** (no `gh` CLI
+available):
+- `SUPABASE_ACCESS_TOKEN` -- a personal access token
+  (Supabase Dashboard -> Account -> Access Tokens). Also usable for the
+  `SUPABASE_ACCESS_TOKEN` the `uptime`/`backup` workflows need.
+- `PROD_SUPABASE_SERVICE_ROLE_KEY` -- production's service_role key
+  (Dashboard -> Project Settings -> API), used only by the backup
+  workflow's retention-pruning step.
+
+Add both via GitHub -> repo -> Settings -> Secrets and variables ->
+Actions -> New repository secret, then run the "Database backup
+(production)" workflow once manually (Actions tab -> Run workflow) to
+confirm it completes -- see the workflow file's own comments for why that
+verification step matters (it was built and tested manually, not inside an
+actual GitHub Actions run).
+
+Not done: PostHog or any product-analytics account (doc §96-98 also
+mentions this) -- out of scope for this pass, which focused on the
+reliability side (errors/uptime/backups), not usage analytics. A
+first-party `analytics`/`user_activity_daily` table already exists
+(`supabase/migrations/20260814005000_analytics.sql`) and covers basic
+usage numbers without needing a third-party account, if that's enough.
 
 ## 7. CI deploy step
 

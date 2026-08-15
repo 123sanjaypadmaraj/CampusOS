@@ -116,6 +116,204 @@ export async function bulkAdjustPrice(items, { mode, value, direction }) {
   if (failed) throw failed.error;
 }
 
+// Sets an absolute stock count on every selected item and opts them into
+// tracking (setting a specific stock number without track_stock=true would
+// be a silent no-op -- see food_items_stock_quantity_check /
+// adjust_stock_for_order in 20260815000600, both gated on track_stock).
+export async function bulkSetStock(ids, quantity) {
+  if (!ids.length) return;
+  const q = Math.max(0, Math.floor(Number(quantity)) || 0);
+  const { error } = await supabase.from("food_items").update({ track_stock: true, stock_quantity: q }).in("id", ids);
+  throwIfError(error);
+}
+
+// Turns tracking off for the selected items -- they behave like every item
+// did before this feature existed (always orderable, no low-stock badge).
+export async function bulkStopTrackingStock(ids) {
+  if (!ids.length) return;
+  const { error } = await supabase.from("food_items").update({ track_stock: false, stock_quantity: null }).in("id", ids);
+  throwIfError(error);
+}
+
+/* =========================================================================
+   CSV IMPORT / EXPORT (doc §17-19) -- frontend-only, no new RPC needed.
+   Export walks the items already loaded in the UI; import reuses the same
+   upsertFoodItem() single-item write the manual editor uses (sequential,
+   not Promise.all, so one bad row's error doesn't wreck the ordering and a
+   partial-failure summary can name each broken row) -- same "menus are
+   small, simple beats clever" reasoning as the bulk actions above.
+========================================================================= */
+
+const CSV_COLUMNS = [
+  "id", "sku", "name", "category", "price", "description", "is_vegetarian",
+  "available", "active", "featured", "preparation_time_min",
+  "track_stock", "stock_quantity", "low_stock_threshold",
+];
+
+function csvField(value) {
+  const s = value === null || value === undefined ? "" : String(value);
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+// Turns the vendor's currently-loaded menu into a CSV string. Every column
+// import understands is included, so "export, tweak a few prices in a
+// spreadsheet, re-import" round-trips cleanly without dropping fields.
+export function foodItemsToCsv(items, categories) {
+  const categoryName = (id) => categories.find((c) => c.id === id)?.name || "";
+  const rows = items.map((item) => [
+    item.id, item.sku || "", item.name, categoryName(item.category_id), item.price,
+    item.description || "", item.is_vegetarian, item.available, item.active, item.featured,
+    item.preparation_time_min, item.track_stock, item.stock_quantity ?? "", item.low_stock_threshold,
+  ]);
+  return [CSV_COLUMNS, ...rows].map((row) => row.map(csvField).join(",")).join("\r\n");
+}
+
+// A minimal RFC-4180-ish CSV parser -- handles quoted fields with embedded
+// commas/newlines/escaped quotes, which a naive text.split(",") would break
+// on the moment a description field contains a comma.
+export function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let field = "";
+  let inQuotes = false;
+  const src = String(text ?? "");
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (src[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else {
+        field += c;
+      }
+    } else if (c === '"') {
+      inQuotes = true;
+    } else if (c === ",") {
+      row.push(field); field = "";
+    } else if (c === "\n" || c === "\r") {
+      if (c === "\r" && src[i + 1] === "\n") i++;
+      row.push(field); field = "";
+      if (row.length > 1 || row[0] !== "") rows.push(row);
+      row = [];
+    } else {
+      field += c;
+    }
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+function parseCsvBool(value, fallback) {
+  if (value === undefined || value === "") return fallback;
+  return ["true", "1", "yes", "y"].includes(String(value).trim().toLowerCase());
+}
+
+// Parses raw CSV text into ready-to-save item rows plus a list of
+// human-readable per-row problems (unknown category, bad price, etc.) --
+// nothing is written to the DB here, so the caller can show a preview and
+// let the vendor back out before anything actually saves.
+export function parseFoodItemsCsv(text, categories) {
+  const rows = parseCsv(text);
+  if (rows.length < 2) return { rows: [], errors: ["CSV is empty or has no data rows"] };
+
+  const header = rows[0].map((h) => h.trim().toLowerCase());
+  const idx = (name) => header.indexOf(name);
+  const col = {
+    id: idx("id"), sku: idx("sku"), name: idx("name"), category: idx("category"), price: idx("price"),
+    description: idx("description"), is_vegetarian: idx("is_vegetarian"), available: idx("available"),
+    active: idx("active"), featured: idx("featured"), prep: idx("preparation_time_min"),
+    track_stock: idx("track_stock"), stock: idx("stock_quantity"), low_stock: idx("low_stock_threshold"),
+  };
+  if (col.name === -1 || col.price === -1) {
+    return { rows: [], errors: ['CSV must have at least "name" and "price" columns'] };
+  }
+
+  const catByName = new Map(categories.map((c) => [c.name.trim().toLowerCase(), c.id]));
+  const parsedRows = [];
+  const errors = [];
+
+  rows.slice(1).forEach((r, i) => {
+    if (r.every((c) => c.trim() === "")) return; // skip blank rows
+    const lineNo = i + 2;
+    const name = (r[col.name] || "").trim();
+    if (!name) { errors.push(`Row ${lineNo}: missing name`); return; }
+
+    const priceRaw = r[col.price];
+    const price = Number(priceRaw);
+    if (!Number.isFinite(price) || price < 0) {
+      errors.push(`Row ${lineNo} (${name}): invalid price "${priceRaw}"`);
+      return;
+    }
+
+    let categoryId = null;
+    const categoryName = col.category >= 0 ? (r[col.category] || "").trim() : "";
+    if (categoryName) {
+      const match = catByName.get(categoryName.toLowerCase());
+      if (match) categoryId = match;
+      else errors.push(`Row ${lineNo} (${name}): unknown category "${categoryName}" — left uncategorised`);
+    }
+
+    const trackStock = col.track_stock >= 0 ? parseCsvBool(r[col.track_stock], false) : false;
+    const stockRaw = col.stock >= 0 ? (r[col.stock] || "").trim() : "";
+    let stockQuantity = null;
+    if (trackStock && stockRaw !== "") {
+      const n = Number(stockRaw);
+      if (!Number.isFinite(n) || n < 0) errors.push(`Row ${lineNo} (${name}): invalid stock_quantity "${stockRaw}"`);
+      else stockQuantity = Math.floor(n);
+    }
+
+    parsedRows.push({
+      id: col.id >= 0 ? (r[col.id] || "").trim() || null : null,
+      sku: col.sku >= 0 ? (r[col.sku] || "").trim() : "",
+      name,
+      category_id: categoryId,
+      price,
+      description: col.description >= 0 ? (r[col.description] || "").trim() : "",
+      is_vegetarian: col.is_vegetarian >= 0 ? parseCsvBool(r[col.is_vegetarian], true) : true,
+      available: col.available >= 0 ? parseCsvBool(r[col.available], true) : true,
+      active: col.active >= 0 ? parseCsvBool(r[col.active], true) : true,
+      featured: col.featured >= 0 ? parseCsvBool(r[col.featured], false) : false,
+      preparation_time_min: col.prep >= 0 && r[col.prep] ? Number(r[col.prep]) || 10 : 10,
+      track_stock: trackStock,
+      stock_quantity: stockQuantity,
+      low_stock_threshold: col.low_stock >= 0 && r[col.low_stock] ? Number(r[col.low_stock]) || 5 : 5,
+    });
+  });
+
+  return { rows: parsedRows, errors };
+}
+
+// Applies parsed rows: matches each row against the vendor's existing menu
+// by id, then sku, then name (first match wins, in that order of
+// confidence) and updates it; anything unmatched is created fresh. Reuses
+// upsertFoodItem so the same column-whitelisting/defaulting logic as the
+// manual editor applies -- CSV can't sneak in a column the form doesn't
+// already allow.
+export async function bulkImportFoodItems(canteenId, parsedRows, existingItems) {
+  const byId = new Map(existingItems.map((i) => [i.id, i]));
+  const bySku = new Map(existingItems.filter((i) => i.sku).map((i) => [i.sku.trim().toLowerCase(), i]));
+  const byName = new Map(existingItems.map((i) => [i.name.trim().toLowerCase(), i]));
+
+  let created = 0;
+  let updated = 0;
+  const errors = [];
+
+  for (const row of parsedRows) {
+    const match =
+      (row.id && byId.get(row.id)) ||
+      (row.sku && bySku.get(row.sku.toLowerCase())) ||
+      byName.get(row.name.trim().toLowerCase());
+    try {
+      await upsertFoodItem({ ...row, id: match?.id, canteen_id: canteenId });
+      if (match) updated++; else created++;
+    } catch (err) {
+      errors.push(`${row.name}: ${err.message || "failed to save"}`);
+    }
+  }
+
+  return { created, updated, errors };
+}
+
 // The print shop vendor manages page pricing (Black & White / Colour)
 // instead of a SKU catalog -- that's what actually drives create_print_job's
 // price calculation. Both rows are provisioned with owner_id set at
@@ -151,9 +349,14 @@ export async function updatePrintRate(id, pricePerPage) {
 ========================================================================= */
 
 // Active queue: everything from the moment payment clears to the moment
-// it's picked up/delivered. Older terminal orders (COMPLETED/CANCELLED/...)
-// are deliberately excluded here -- see listCanteenOrderHistory for those.
-const ACTIVE_STATUSES = ["RECEIVED", "ACCEPTED", "PREPARING", "READY", "OUT_FOR_DELIVERY"];
+// it's picked up/delivered. CANCEL_REQUESTED is included -- it's not a
+// terminal status (CANCEL_REQUESTED -> CANCELLED/PREPARING/READY are all
+// valid, see order_status_transitions), so excluding it here was a real bug:
+// an order the vendor tried to cancel used to vanish into history with no
+// action ever able to move it to a terminal state. Older terminal orders
+// (COMPLETED/CANCELLED/REFUNDED/...) are deliberately excluded -- see
+// listCanteenOrderHistory for those.
+const ACTIVE_STATUSES = ["RECEIVED", "ACCEPTED", "PREPARING", "READY", "OUT_FOR_DELIVERY", "CANCEL_REQUESTED"];
 
 export async function listActiveCanteenOrders(canteenId) {
   const { data, error } = await supabase
@@ -239,4 +442,78 @@ export function subscribeToPrintJobs(callback) {
     .on("postgres_changes", { event: "*", schema: "public", table: "print_jobs" }, callback)
     .subscribe();
   return () => supabase.removeChannel(channel);
+}
+
+/* =========================================================================
+   ORDER OPS -- priority / internal note / staff assignment
+   (20260815000900_vendor_order_ops.sql). orders has no client-side update
+   policy at all (same reasoning as transitionOrderStatus above) -- this one
+   RPC is the only writer for all three fields, ownership-checked server-side.
+========================================================================= */
+
+export async function setOrderOpsFields(orderId, { priority, internalNote, assignedStaffName }) {
+  const { data, error } = await supabase.rpc("set_order_ops_fields", {
+    p_order_id: orderId,
+    p_priority: priority,
+    p_internal_note: internalNote ?? "",
+    p_assigned_staff_name: assignedStaffName ?? "",
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function listCanteenStaff(canteenId) {
+  const { data, error } = await supabase
+    .from("canteen_staff")
+    .select("*")
+    .eq("canteen_id", canteenId)
+    .order("name");
+  throwIfError(error);
+  return data || [];
+}
+
+export async function addCanteenStaff(canteenId, name) {
+  const { data, error } = await supabase
+    .from("canteen_staff")
+    .insert({ canteen_id: canteenId, name: name.trim() })
+    .select()
+    .single();
+  throwIfError(error);
+  return data;
+}
+
+export async function setCanteenStaffActive(id, active) {
+  const { error } = await supabase.from("canteen_staff").update({ active }).eq("id", id);
+  throwIfError(error);
+}
+
+export async function removeCanteenStaff(id) {
+  const { error } = await supabase.from("canteen_staff").delete().eq("id", id);
+  throwIfError(error);
+}
+
+/* =========================================================================
+   REFUND INITIATION (doc §13, "Refund initiation") -- request_refund() (RPC,
+   fixed in the same migration to actually check canteen ownership and the
+   order's current status) records intent and flips the order to
+   REFUND_PENDING; the razorpay-refund Edge Function then makes the real
+   gateway call (needs RAZORPAY_KEY_SECRET, which never reaches the browser)
+   and closes the loop via mark_refund_completed(). Two steps, not one --
+   mirrors how create_payment_order()/create-razorpay-order split the same
+   way on the payment side.
+========================================================================= */
+
+export async function initiateRefund(orderId, amount, reason) {
+  const { data: refund, error } = await supabase.rpc("request_refund", {
+    p_order_id: orderId,
+    p_amount: amount,
+    p_reason: reason || null,
+  });
+  throwIfError(error);
+
+  const { data: result, error: fnError } = await supabase.functions.invoke("razorpay-refund", {
+    body: { refund_id: refund.id },
+  });
+  if (fnError) throw fnError;
+  return result;
 }

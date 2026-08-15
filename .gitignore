@@ -29,4 +29,6 @@ scripts/.vapid-keys.staging.local.json
 scripts/.sessions.staging.json
 scripts/.facilities-credentials.staging.local.json
 scripts/.vendor-credentials.staging.local.json
+scripts/.store-credentials.local.json
+scripts/.store-credentials.staging.local.json
 supabase/.temp/

@@ -1,38 +1,31 @@
-// One-off live verification script for the "Community & discovery depth"
-// features (club self-service CMS, marketplace seller ratings, admin/vendor
-// analytics) against the real production Supabase project -- not a
-// throwaway, kept alongside the other scripts/setup-*.mjs / live-check-*
-// scripts for future re-runs. Uses real accounts (e2e.alice/bob/carol,
-// the admin account, the Udupi vendor account) and the service_role key
-// only to seed/clean up fixtures that RLS wouldn't otherwise let a plain
-// student create (a fresh club with a real owner).
+// Live verification script for the "Community & discovery depth" features
+// (club self-service CMS, marketplace seller ratings, admin/vendor
+// analytics) -- not a throwaway, kept alongside the other
+// scripts/setup-*.mjs scripts for future re-runs. Environment-aware (see
+// docs/ENVIRONMENTS.md): defaults to staging, same as every other script in
+// this directory. Uses real accounts (e2e.alice/bob/carol, the admin
+// account, the Udupi vendor account -- password reset to a known value if
+// needed, see docs/ENVIRONMENTS.md) and the service_role key only to seed/
+// clean up fixtures that RLS wouldn't otherwise let a plain student create
+// (a fresh club with a real owner).
 //
 // Usage: node scripts/live-check-community-discovery.mjs
+//        node scripts/live-check-community-discovery.mjs --env=production --yes-production
 
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolveTarget } from "./env-target.mjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(__dirname, "..");
+const { SUPABASE_URL, ANON_KEY, SERVICE_ROLE_KEY, target } = resolveTarget();
 
-function readEnvVar(name) {
-  const contents = fs.readFileSync(path.join(root, ".env"), "utf8");
-  const match = contents.match(new RegExp(`^${name}=(.+)$`, "m"));
-  return match?.[1]?.trim();
+const VENDOR_PASSWORD = target === "staging" ? "StagingTest@2026!" : undefined;
+if (!VENDOR_PASSWORD) {
+  throw new Error("This script's Udupi vendor password is only known for staging -- pass it in for production runs.");
 }
-
-const SUPABASE_URL = readEnvVar("VITE_SUPABASE_URL");
-const ANON_KEY = readEnvVar("VITE_SUPABASE_PUBLISHABLE_KEY");
-const SERVICE_ROLE_KEY = fs.readFileSync(path.join(root, ".service_role_key.local"), "utf8").trim();
-
-const vendorCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts/.vendor-credentials.local.json"), "utf8"));
-const udupi = vendorCreds.find((v) => v.vendor === "Udupi Canteen");
 
 const ALICE = { email: "e2e.alice@nhce.edu.in", password: "TestPass!2026Alice" };
 const BOB = { email: "e2e.bob@nhce.edu.in", password: "TestPass!2026Bob" };
 const CAROL = { email: "e2e.carol@nhce.edu.in", password: "TestPass!2026Carol" };
 const ADMIN = { email: "1nh25cs265@usn.campusos.internal", password: "Sanjay@123" };
+const UDUPI_VENDOR = { email: "udupi.canteen@nhce.edu.in", password: VENDOR_PASSWORD };
 
 let passCount = 0;
 let failCount = 0;
@@ -99,7 +92,7 @@ async function main() {
   const bob = await signIn(BOB);
   const carol = await signIn(CAROL);
   const admin = await signIn(ADMIN);
-  const vendor = await signIn({ email: udupi.email, password: udupi.password });
+  const vendor = await signIn(UDUPI_VENDOR);
   const aliceC = client(alice.token);
   const bobC = client(bob.token);
   const carolC = client(carol.token);

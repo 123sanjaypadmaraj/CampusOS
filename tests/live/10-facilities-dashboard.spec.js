@@ -11,7 +11,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, expect } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
-import { seedRealSession } from './helpers/realSession.js';
+import { seedRealSession, getTestUserId } from './helpers/realSession.js';
+import { resolveServiceRoleKey } from './helpers/resolveServiceRoleKey.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..', '..');
@@ -19,7 +20,9 @@ function readEnvVar(name) {
   return fs.readFileSync(path.join(root, '.env'), 'utf8').match(new RegExp(`^${name}=(.+)$`, 'm'))?.[1]?.trim();
 }
 const SUPABASE_URL = readEnvVar('VITE_SUPABASE_URL');
-const SERVICE_ROLE_KEY = fs.readFileSync(path.join(root, '.service_role_key.local'), 'utf8').trim();
+// Was hardcoded to .service_role_key.local (production only) -- see
+// resolveServiceRoleKey.js for why that breaks on staging.
+const SERVICE_ROLE_KEY = resolveServiceRoleKey(root, SUPABASE_URL);
 
 const ALICE = 'e2e.alice@nhce.edu.in';
 const FACILITIES = 'facilities.staff@nhce.edu.in';
@@ -31,8 +34,7 @@ test.describe.serial('Facilities dashboard', () => {
     // resolve to what it creates itself (same test-isolation lesson
     // learned in 05-vendor-order-queue.spec.js).
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
-    const sessions = JSON.parse(fs.readFileSync(path.join(root, 'scripts', '.sessions.json'), 'utf8'));
-    const aliceId = sessions[ALICE].userId;
+    const aliceId = getTestUserId(ALICE);
     // Not just the "active" statuses -- RESOLVED (not yet CLOSED) is also
     // still visible in the dashboard's queue, so a run that failed after
     // resolving but before closing would otherwise leave a stale RESOLVED
@@ -58,6 +60,11 @@ test.describe.serial('Facilities dashboard', () => {
     await page.waitForLoadState('networkidle');
     await page.getByTestId('nav-facilities-button').click();
     await page.waitForLoadState('networkidle');
+    // The dashboard's default tab changed to "SOS Alerts" (was "Tickets") --
+    // select Tickets explicitly instead of relying on whatever's default.
+    // Scoped to the tab row -- the bottom-nav facilities button's own
+    // accessible name also happens to contain "Tickets" (a badge count).
+    await page.locator('.socialize-filter-row').getByRole('button', { name: 'Tickets', exact: true }).click();
 
     const ticketRow = page.locator('.resource-row', { hasText: 'Alice Test' }).first();
     await expect(ticketRow).toBeVisible({ timeout: 15000 });

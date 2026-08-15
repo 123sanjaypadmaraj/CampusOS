@@ -7,9 +7,15 @@
  */
 
 const mockFrom = jest.fn();
+const mockRpc = jest.fn();
+const mockFunctionsInvoke = jest.fn();
 
 jest.mock("../../lib/supabase", () => ({
-  supabase: { from: (...args) => mockFrom(...args) },
+  supabase: {
+    from: (...args) => mockFrom(...args),
+    rpc: (...args) => mockRpc(...args),
+    functions: { invoke: (...args) => mockFunctionsInvoke(...args) },
+  },
 }));
 
 jest.mock("../admin/api", () => ({
@@ -18,6 +24,7 @@ jest.mock("../admin/api", () => ({
   upsertFoodItem: jest.fn(),
 }));
 
+import { upsertFoodItem } from "../admin/api";
 import {
   getMyCanteen,
   listMyFoodItems,
@@ -28,6 +35,18 @@ import {
   bulkSetCategory,
   bulkArchiveFoodItems,
   bulkAdjustPrice,
+  bulkSetStock,
+  bulkStopTrackingStock,
+  foodItemsToCsv,
+  parseCsv,
+  parseFoodItemsCsv,
+  bulkImportFoodItems,
+  setOrderOpsFields,
+  listCanteenStaff,
+  addCanteenStaff,
+  setCanteenStaffActive,
+  removeCanteenStaff,
+  initiateRefund,
 } from "./api";
 
 function chain(result) {
@@ -199,5 +218,279 @@ describe("getMyPrintRateCard / updatePrintRate", () => {
     expect(builder.update).toHaveBeenCalledWith({ price_per_page: 3 });
     expect(builder.eq).toHaveBeenCalledWith("id", "rate-1");
     expect(result).toEqual({ id: "rate-1", price_per_page: 3 });
+  });
+});
+
+describe("bulk stock actions (doc §17-19)", () => {
+  it("bulkSetStock opts selected items into tracking and sets an absolute quantity", async () => {
+    const builder = chain({ error: null });
+    mockFrom.mockReturnValue(builder);
+
+    await bulkSetStock(["item-1", "item-2"], "12.9");
+
+    expect(builder.update).toHaveBeenCalledWith({ track_stock: true, stock_quantity: 12 });
+    expect(builder.in).toHaveBeenCalledWith("id", ["item-1", "item-2"]);
+  });
+
+  it("bulkSetStock never sets a negative quantity", async () => {
+    const builder = chain({ error: null });
+    mockFrom.mockReturnValue(builder);
+
+    await bulkSetStock(["item-1"], -5);
+
+    expect(builder.update).toHaveBeenCalledWith({ track_stock: true, stock_quantity: 0 });
+  });
+
+  it("bulkSetStock is a no-op for an empty selection", async () => {
+    await bulkSetStock([], 10);
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
+  it("bulkStopTrackingStock clears tracking and quantity", async () => {
+    const builder = chain({ error: null });
+    mockFrom.mockReturnValue(builder);
+
+    await bulkStopTrackingStock(["item-1"]);
+
+    expect(builder.update).toHaveBeenCalledWith({ track_stock: false, stock_quantity: null });
+  });
+});
+
+describe("foodItemsToCsv", () => {
+  it("exports every column import understands, resolving category id to name", () => {
+    const items = [
+      {
+        id: "item-1", sku: "SKU1", name: "Masala Dosa", category_id: "cat-1", price: 60,
+        description: "Crispy, with chutney", is_vegetarian: true, available: true, active: true,
+        featured: false, preparation_time_min: 12, track_stock: true, stock_quantity: 4, low_stock_threshold: 5,
+      },
+    ];
+    const categories = [{ id: "cat-1", name: "South Indian" }];
+
+    const csv = foodItemsToCsv(items, categories);
+    const lines = csv.split("\r\n");
+
+    expect(lines[0]).toBe("id,sku,name,category,price,description,is_vegetarian,available,active,featured,preparation_time_min,track_stock,stock_quantity,low_stock_threshold");
+    expect(lines[1]).toBe('item-1,SKU1,Masala Dosa,South Indian,60,"Crispy, with chutney",true,true,true,false,12,true,4,5');
+  });
+
+  it("quotes fields containing commas, quotes, or newlines", () => {
+    const items = [{ id: "1", name: "Combo, Meal", price: 10, description: 'Has a "special" sauce\nand rice' }];
+    const csv = foodItemsToCsv(items, []);
+    const dataLine = csv.split("\r\n")[1];
+
+    expect(dataLine).toContain('"Combo, Meal"');
+    expect(dataLine).toContain('"Has a ""special"" sauce\nand rice"');
+  });
+});
+
+describe("parseCsv", () => {
+  it("splits a simple CSV into rows and fields", () => {
+    expect(parseCsv("a,b,c\n1,2,3")).toEqual([["a", "b", "c"], ["1", "2", "3"]]);
+  });
+
+  it("handles quoted fields with embedded commas and escaped quotes", () => {
+    const text = 'name,note\n"Idli, Vada","Say ""hi"""';
+    expect(parseCsv(text)).toEqual([
+      ["name", "note"],
+      ["Idli, Vada", 'Say "hi"'],
+    ]);
+  });
+
+  it("handles a quoted field spanning multiple lines", () => {
+    const text = 'name,note\nItem,"line one\nline two"';
+    expect(parseCsv(text)).toEqual([
+      ["name", "note"],
+      ["Item", "line one\nline two"],
+    ]);
+  });
+});
+
+describe("parseFoodItemsCsv", () => {
+  const categories = [{ id: "cat-1", name: "Beverages" }];
+
+  it("parses a well-formed CSV into item rows", () => {
+    const csv = "name,price,category,track_stock,stock_quantity\nMasala Chai,15,Beverages,true,20";
+    const { rows, errors } = parseFoodItemsCsv(csv, categories);
+
+    expect(errors).toEqual([]);
+    expect(rows).toEqual([expect.objectContaining({
+      name: "Masala Chai", price: 15, category_id: "cat-1", track_stock: true, stock_quantity: 20,
+    })]);
+  });
+
+  it("requires at least name and price columns", () => {
+    const { rows, errors } = parseFoodItemsCsv("sku,category\nX,Y", categories);
+    expect(rows).toEqual([]);
+    expect(errors[0]).toMatch(/name.*price/i);
+  });
+
+  it("flags an invalid price but keeps parsing other rows", () => {
+    const csv = "name,price\nGood Item,50\nBad Item,notanumber";
+    const { rows, errors } = parseFoodItemsCsv(csv, categories);
+
+    expect(rows).toEqual([expect.objectContaining({ name: "Good Item", price: 50 })]);
+    expect(errors[0]).toMatch(/Row 3.*Bad Item.*invalid price/);
+  });
+
+  it("flags an unknown category but still imports the item as uncategorised", () => {
+    const csv = "name,price,category\nMystery Snack,20,Nonexistent";
+    const { rows, errors } = parseFoodItemsCsv(csv, categories);
+
+    expect(rows).toEqual([expect.objectContaining({ name: "Mystery Snack", category_id: null })]);
+    expect(errors[0]).toMatch(/unknown category/);
+  });
+
+  it("skips fully blank rows", () => {
+    const csv = "name,price\nItem A,10\n,\nItem B,20";
+    const { rows } = parseFoodItemsCsv(csv, categories);
+    expect(rows.map((r) => r.name)).toEqual(["Item A", "Item B"]);
+  });
+});
+
+describe("bulkImportFoodItems", () => {
+  beforeEach(() => upsertFoodItem.mockReset());
+
+  it("updates an existing item matched by name and creates a new one", async () => {
+    upsertFoodItem.mockResolvedValue({});
+    const existingItems = [{ id: "item-1", name: "Masala Dosa", sku: "" }];
+    const rows = [
+      { id: null, sku: "", name: "Masala Dosa", price: 65 },
+      { id: null, sku: "", name: "Filter Coffee", price: 20 },
+    ];
+
+    const result = await bulkImportFoodItems("canteen-1", rows, existingItems);
+
+    expect(result).toEqual({ created: 1, updated: 1, errors: [] });
+    expect(upsertFoodItem).toHaveBeenNthCalledWith(1, expect.objectContaining({ id: "item-1", canteen_id: "canteen-1" }));
+    expect(upsertFoodItem).toHaveBeenNthCalledWith(2, expect.objectContaining({ id: undefined, name: "Filter Coffee", canteen_id: "canteen-1" }));
+  });
+
+  it("matches by SKU when name differs", async () => {
+    upsertFoodItem.mockResolvedValue({});
+    const existingItems = [{ id: "item-1", name: "Old Name", sku: "TEA01" }];
+    const rows = [{ id: null, sku: "tea01", name: "New Name", price: 15 }];
+
+    await bulkImportFoodItems("canteen-1", rows, existingItems);
+
+    expect(upsertFoodItem).toHaveBeenCalledWith(expect.objectContaining({ id: "item-1" }));
+  });
+
+  it("collects a per-row error without aborting the rest of the import", async () => {
+    upsertFoodItem
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("duplicate name"));
+    const rows = [
+      { id: null, sku: "", name: "Item A", price: 10 },
+      { id: null, sku: "", name: "Item B", price: 20 },
+    ];
+
+    const result = await bulkImportFoodItems("canteen-1", rows, []);
+
+    expect(result.created).toBe(1);
+    expect(result.errors).toEqual(["Item B: duplicate name"]);
+  });
+});
+
+describe("setOrderOpsFields (priority / internal note / staff assignment)", () => {
+  it("calls the RPC with the order id and all three fields", async () => {
+    mockRpc.mockResolvedValue({ data: { id: "order-1", priority: "high" }, error: null });
+
+    const result = await setOrderOpsFields("order-1", { priority: "high", internalNote: "extra spicy", assignedStaffName: "Ravi" });
+
+    expect(mockRpc).toHaveBeenCalledWith("set_order_ops_fields", {
+      p_order_id: "order-1",
+      p_priority: "high",
+      p_internal_note: "extra spicy",
+      p_assigned_staff_name: "Ravi",
+    });
+    expect(result).toEqual({ id: "order-1", priority: "high" });
+  });
+
+  it("normalises missing note/staff to empty strings rather than undefined", async () => {
+    mockRpc.mockResolvedValue({ data: {}, error: null });
+
+    await setOrderOpsFields("order-1", { priority: "normal" });
+
+    expect(mockRpc).toHaveBeenCalledWith("set_order_ops_fields", expect.objectContaining({
+      p_internal_note: "", p_assigned_staff_name: "",
+    }));
+  });
+
+  it("throws the RPC error", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { message: "Not authorized to update this order" } });
+    await expect(setOrderOpsFields("order-1", { priority: "normal" })).rejects.toMatchObject({ message: "Not authorized to update this order" });
+  });
+});
+
+describe("canteen staff roster", () => {
+  it("listCanteenStaff scopes to the canteen", async () => {
+    const builder = chain({ data: [{ id: "staff-1", name: "Ravi" }], error: null });
+    mockFrom.mockReturnValue(builder);
+
+    const result = await listCanteenStaff("canteen-1");
+
+    expect(mockFrom).toHaveBeenCalledWith("canteen_staff");
+    expect(builder.eq).toHaveBeenCalledWith("canteen_id", "canteen-1");
+    expect(result).toEqual([{ id: "staff-1", name: "Ravi" }]);
+  });
+
+  it("addCanteenStaff inserts a trimmed name", async () => {
+    const builder = chain({ data: { id: "staff-1", name: "Ravi" }, error: null });
+    builder.insert = jest.fn(() => builder);
+    mockFrom.mockReturnValue(builder);
+
+    await addCanteenStaff("canteen-1", "  Ravi  ");
+
+    expect(builder.insert).toHaveBeenCalledWith({ canteen_id: "canteen-1", name: "Ravi" });
+  });
+
+  it("setCanteenStaffActive updates the active flag", async () => {
+    const builder = chain({ error: null });
+    mockFrom.mockReturnValue(builder);
+
+    await setCanteenStaffActive("staff-1", false);
+
+    expect(builder.update).toHaveBeenCalledWith({ active: false });
+    expect(builder.eq).toHaveBeenCalledWith("id", "staff-1");
+  });
+
+  it("removeCanteenStaff deletes the row", async () => {
+    const builder = chain({ error: null });
+    mockFrom.mockReturnValue(builder);
+
+    await removeCanteenStaff("staff-1");
+
+    expect(builder.delete).toHaveBeenCalled();
+    expect(builder.eq).toHaveBeenCalledWith("id", "staff-1");
+  });
+});
+
+describe("initiateRefund", () => {
+  beforeEach(() => { mockRpc.mockReset(); mockFunctionsInvoke.mockReset(); });
+
+  it("calls request_refund then the razorpay-refund Edge Function with the resulting refund id", async () => {
+    mockRpc.mockResolvedValue({ data: { id: "refund-1", amount: 120 }, error: null });
+    mockFunctionsInvoke.mockResolvedValue({ data: { ok: true, refund: { status: "completed" } }, error: null });
+
+    const result = await initiateRefund("order-1", 120, "Kitchen ran out of stock");
+
+    expect(mockRpc).toHaveBeenCalledWith("request_refund", { p_order_id: "order-1", p_amount: 120, p_reason: "Kitchen ran out of stock" });
+    expect(mockFunctionsInvoke).toHaveBeenCalledWith("razorpay-refund", { body: { refund_id: "refund-1" } });
+    expect(result).toEqual({ ok: true, refund: { status: "completed" } });
+  });
+
+  it("throws if request_refund itself fails, without ever calling the Edge Function", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { message: "Not authorized to issue refunds for this order" } });
+
+    await expect(initiateRefund("order-1", 120, "reason")).rejects.toMatchObject({ message: "Not authorized to issue refunds for this order" });
+    expect(mockFunctionsInvoke).not.toHaveBeenCalled();
+  });
+
+  it("throws if the Edge Function call fails", async () => {
+    mockRpc.mockResolvedValue({ data: { id: "refund-1" }, error: null });
+    mockFunctionsInvoke.mockResolvedValue({ data: null, error: { message: "GATEWAY_NOT_CONFIGURED" } });
+
+    await expect(initiateRefund("order-1", 120, "reason")).rejects.toMatchObject({ message: "GATEWAY_NOT_CONFIGURED" });
   });
 });

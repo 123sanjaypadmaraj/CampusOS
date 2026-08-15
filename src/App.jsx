@@ -67,6 +67,13 @@ import {
   submitStudentVerification,
   submitOrgRequest,
   touchActivity,
+  triggerSosAlert,
+  cancelMySosAlert,
+  getBestEffortLocation,
+  logClientError,
+  listMyEmergencyContacts,
+  upsertEmergencyContact,
+  deleteEmergencyContact,
 } from "./services/mvpService";
 import { openRazorpayCheckout } from "./features/payments/razorpay";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
@@ -91,6 +98,23 @@ import { globalSearch, SEARCH_ENTITY_DESTINATIONS, SEARCH_ENTITY_LABELS } from "
 import { mintCampusPass } from "./services/campusPassService";
 import { subscribeToPush, unsubscribeFromPush, getPushSubscriptionStatus, isPushSupported } from "./services/pushService";
 import QRCode from "qrcode";
+import {
+  getStores,
+  getStoreItems,
+  createStoreOrder,
+  getMyStoreOrders,
+  subscribeToStores,
+  subscribeToStoreOrders,
+} from "./services/storeService";
+import {
+  getOpportunities,
+  getMentors,
+  applyToOpportunity,
+  getMyApplications,
+  requestMentor,
+} from "./services/opportunitiesService";
+import { askCampusAssistant } from "./services/aiAssistantService";
+import { getAllRecommendations, dismissRecommendation } from "./services/recommendationsService";
 
 import {
   HiHome,
@@ -156,6 +180,8 @@ import {
   HiChatBubbleLeftRight,
   HiCog6Tooth,
   HiArrowLeft,
+  HiPencilSquare,
+  HiTrash,
 } from "react-icons/hi2";
 import { FaLinkedin, FaGithub, FaGoogle } from "react-icons/fa6";
 
@@ -176,6 +202,36 @@ const navItems = [
   ["profile", <HiUserCircle />, "Profile"],
 ];
 /* eslint-enable react/jsx-key */
+
+/* =========================================================
+   ROUTING (doc §76-78)
+   The plan's "multi-app split" section describes separate Student/Vendor/
+   Admin/Facilities frontends. CampusOS deliberately ships as ONE app / ONE
+   deployment for every role instead -- this is the route-branching layer
+   that makes that a real architectural property rather than just an
+   internal-state coincidence: every section gets a real URL, so deep
+   links, refresh, and browser back/forward all work, and a role-gated
+   section (e.g. /admin) is reachable by anyone but only *renders* for the
+   right role (renderPage() below still does the actual gating -- this
+   layer only keeps the address bar in sync with `active`).
+========================================================= */
+
+// Every `active` value renderPage() knows how to render. Anything else in
+// the URL bar (a typo, a stale bookmark, a crawler) falls back to "home",
+// matching renderPage()'s own default branch.
+const ROUTABLE_KEYS = new Set([
+  "home", "campus", "events", "services", "socialize", "messages", "profile",
+  "map", "legal", "people", "clubs", "food", "store", "ai", "admin", "vendor",
+  "facilities", "autonomous", "calendar", "notifications",
+  "print", "issues", "booking", "lost", "market", "pass", "hostel", "delivery",
+]);
+
+const keyToPath = (key) => (key === "home" ? "/" : `/${key}`);
+
+const pathToKey = (pathname) => {
+  const key = pathname.replace(/^\/+|\/+$/g, "") || "home";
+  return ROUTABLE_KEYS.has(key) ? key : "home";
+};
 
 /* =========================================================
    FREE DEMO FOOD IMAGES
@@ -368,47 +424,6 @@ const eventsSeed = [
   },
 ];
 
-const opportunities = [
-  {
-    company: "Campus Innovation Lab",
-    role: "AI Research Intern",
-    type: "Research",
-    tags: ["Python", "ML"],
-    deadline: "18 Aug",
-  },
-  {
-    company: "Tech Startup Hub",
-    role: "React Developer",
-    type: "Internship",
-    tags: ["React", "Node"],
-    deadline: "21 Aug",
-  },
-  {
-    company: "Robotics Lab",
-    role: "Embedded Systems Intern",
-    type: "Research",
-    tags: ["ESP32", "C++"],
-    deadline: "25 Aug",
-  },
-];
-
-const mentors = [
-  {
-    name: "Prof. Rahul Nair",
-    role: "Robotics & Embedded Systems",
-    skills: ["ESP32", "ROS", "CAD"],
-  },
-  {
-    name: "Dr. Meera Thomas",
-    role: "AI / Computer Vision",
-    skills: ["Python", "CV", "LLMs"],
-  },
-  {
-    name: "Arjun Menon",
-    role: "Startup & Product",
-    skills: ["React", "Product", "Pitching"],
-  },
-];
 
 const peopleSeed = [
   {
@@ -769,51 +784,6 @@ const foodItems = [
    STORE
 ========================================================= */
 
-const storeItems = [
-  {
-    id: 1,
-    name: "Engineering Record",
-    price: 45,
-    stock: 34,
-    category: "Records",
-  },
-  {
-    id: 2,
-    name: "A4 Sheets — 100",
-    price: 30,
-    stock: 120,
-    category: "Paper",
-  },
-  {
-    id: 3,
-    name: "Scientific Calculator",
-    price: 650,
-    stock: 12,
-    category: "Electronics",
-  },
-  {
-    id: 4,
-    name: "Black Gel Pen",
-    price: 10,
-    stock: 240,
-    category: "Stationery",
-  },
-  {
-    id: 5,
-    name: "Drawing Sheets",
-    price: 20,
-    stock: 82,
-    category: "Paper",
-  },
-  {
-    id: 6,
-    name: "Lab Coat",
-    price: 420,
-    stock: 18,
-    category: "Academic",
-  },
-];
-
 /* =========================================================
    CAMPUS SERVICES
 ========================================================= */
@@ -1022,7 +992,13 @@ const autonomousDevices = [
 
 function App() {
   const online = useOnlineStatus();
-  const [active, setActive] = useState("home");
+  // Lazily read the initial section straight from the URL (not just
+  // "home") so a deep link or a page refresh lands you back where you
+  // were instead of always bouncing to Home -- see the ROUTING block
+  // above.
+  const [active, setActive] = useState(() =>
+    typeof window !== "undefined" ? pathToKey(window.location.pathname) : "home"
+  );
   const [search, setSearch] = useState("");
   const [loginOpen, setLoginOpen] = useState(false);
   const [user, setUser] = useState(null);
@@ -1040,6 +1016,12 @@ function App() {
   const [printFile, setPrintFile] = useState(null);
   const [dbCanteens, setDbCanteens] = useState([]);
   const [dbFoodItems, setDbFoodItems] = useState([]);
+  const [dbStoreItems, setDbStoreItems] = useState([]);
+  const [dbStoresLoading, setDbStoresLoading] = useState(true);
+  const [myStoreOrders, setMyStoreOrders] = useState([]);
+  const [dbOpportunities, setDbOpportunities] = useState([]);
+  const [dbMentors, setDbMentors] = useState([]);
+  const [myApplicationIds, setMyApplicationIds] = useState([]);
   const [dbLoading, setDbLoading] = useState(true);
   const [dbError, setDbError] = useState("");
   const [authUser, setAuthUser] =
@@ -1067,6 +1049,7 @@ function App() {
   const [resources, setResources] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [lostItems, setLostItems] = useState([]);
+  const [lostItemsLoaded, setLostItemsLoaded] = useState(false);
   const [marketListings, setMarketListings] = useState([]);
   const [verification, setVerification] = useState(null);
   const [unreadMessageCount, setUnreadMessageCount] = useState(0);
@@ -1098,7 +1081,7 @@ function App() {
     setProfile(null);
     setUser(null);
 
-    setActive("home");
+    go("home");
 
     notify(
       "You have been logged out"
@@ -1119,8 +1102,25 @@ function App() {
   const go = (key) => {
     setActive(key);
     setModal(null);
+    // Keep the address bar in sync with whatever section is actually
+    // rendering. Unroutable keys (shouldn't happen -- every call site
+    // passes a value renderPage() handles) fall back to "/" rather than
+    // writing a dead URL into history.
+    const path = keyToPath(ROUTABLE_KEYS.has(key) ? key : "home");
+    if (window.location.pathname !== path) {
+      window.history.pushState({ key }, "", path);
+    }
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
+
+  // Browser back/forward: reflect the URL the user just landed on without
+  // pushing a new history entry (that would fight the browser's own
+  // stack).
+  useEffect(() => {
+    const onPopState = () => setActive(pathToKey(window.location.pathname));
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   // Shared by "Message seller" (Marketplace), "Message" (Connect/People) and
   // a tapped message notification -- all three just need "open the
@@ -1163,9 +1163,47 @@ function App() {
   };
 
   const addStore = (item) => {
-    setStoreCart((cart) => [...cart, item]);
-    notify(`${item.name} added to store cart`);
+    setStoreCart((cart) => {
+      if (cart.length && cart[0].storeId && item.storeId && cart[0].storeId !== item.storeId) {
+        notify("You can only order from one store at a time.");
+        return cart;
+      }
+      notify(`${item.name} added to store cart`);
+      return mergeCartItem(cart, item);
+    });
   };
+
+  const checkoutStore = async () => {
+    if (!authUser) {
+      setLoginOpen(true);
+      notify("Sign in before placing an order");
+      return;
+    }
+    if (!storeCart.length) {
+      notify("Your store cart is empty");
+      return;
+    }
+    const storeId = storeCart[0]?.storeId;
+    if (!storeId) {
+      notify("Please pick items from the store first");
+      return;
+    }
+    try {
+      const idempotencyKey =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `${authUser.id}-${Date.now()}`;
+
+      const order = await createStoreOrder({ storeId, cart: storeCart, idempotencyKey });
+      setMyStoreOrders((current) => [order, ...current]);
+      setStoreCart([]);
+      setModal(null);
+      notify(`Order placed! Pickup code: ${order.pickup_code}`);
+    } catch (error) {
+      notify(error.message || "Could not place order");
+    }
+  };
+
   const checkoutFood = async () => {
     try {
 
@@ -1247,6 +1285,11 @@ function App() {
         });
       } catch (paymentError) {
         console.error("Payment start failed:", paymentError);
+        logClientError(paymentError.message || "Payment start failed", {
+          stack: paymentError.stack,
+          severity: "error",
+          context: { flow: "food_order_payment", orderId: order.id },
+        });
         notify(
           paymentError.message?.includes("GATEWAY_NOT_CONFIGURED") ||
           paymentError.message?.includes("not configured")
@@ -1261,6 +1304,12 @@ function App() {
         "Food order:",
         error
       );
+
+      logClientError(error.message || "Food order creation failed", {
+        stack: error.stack,
+        severity: "error",
+        context: { flow: "food_order_create" },
+      });
 
       notify(
         error.message ||
@@ -1641,6 +1690,62 @@ function App() {
     }, [campusId]);
 
     useEffect(() => {
+      let mounted = true;
+
+      async function loadStore() {
+        try {
+          setDbStoresLoading(true);
+          // Every active store's catalog, flattened into one shopping grid --
+          // same "one flat list" shape the old hardcoded storeItems array
+          // had, just backed by real per-store items now. Each item carries
+          // its store_id/store name so the cart can enforce "one store at a
+          // time" (create_store_order requires it) and the receipt can show
+          // who it's from.
+          const stores = await getStores(campusId);
+          const perStore = await Promise.all(stores.map((s) => getStoreItems(s.id)));
+          const flattened = stores.flatMap((s, i) =>
+            perStore[i].map((item) => ({ ...item, storeId: s.id, storeName: s.name, vendor: s.name }))
+          );
+          if (!mounted) return;
+          setDbStoreItems(flattened);
+        } catch (error) {
+          console.error("Store loading error:", error);
+        } finally {
+          if (mounted) setDbStoresLoading(false);
+        }
+      }
+
+      loadStore();
+      const unsub = subscribeToStores(() => loadStore());
+
+      return () => {
+        mounted = false;
+        unsub?.();
+      };
+    }, [campusId]);
+
+    useEffect(() => {
+      let mounted = true;
+
+      Promise.all([getOpportunities(campusId), getMentors(campusId)])
+        .then(([opps, mentorList]) => {
+          if (!mounted) return;
+          setDbOpportunities(opps);
+          setDbMentors(mentorList);
+        })
+        .catch((error) => console.error("Opportunities/mentors loading error:", error));
+
+      return () => { mounted = false; };
+    }, [campusId]);
+
+    useEffect(() => {
+      if (!authUser?.id) { setMyApplicationIds([]); return; }
+      getMyApplications(authUser.id)
+        .then((apps) => setMyApplicationIds(apps.map((a) => a.opportunity_id)))
+        .catch(() => {});
+    }, [authUser?.id]);
+
+    useEffect(() => {
       if (!authUser?.id) return;
 
       const unsubscribeNotifications = subscribeToUserNotifications(
@@ -1680,6 +1785,18 @@ function App() {
       };
     }, [authUser?.id]);
 
+    useEffect(() => {
+      if (!authUser?.id) { setMyStoreOrders([]); return; }
+
+      const loadMyStoreOrders = () => {
+        getMyStoreOrders(authUser.id).then(setMyStoreOrders).catch(() => {});
+      };
+
+      loadMyStoreOrders();
+      const unsub = subscribeToStoreOrders(authUser.id, loadMyStoreOrders);
+      return () => unsub?.();
+    }, [authUser?.id]);
+
     const reloadUnreadMessages = () => {
       if (!authUser?.id) { setUnreadMessageCount(0); return; }
       getUnreadMessageCount().then(setUnreadMessageCount).catch(() => {});
@@ -1706,7 +1823,7 @@ function App() {
       const loadCampusData = () => {
         getPeople({ campusId }).then(setPeople).catch((error) => console.error("People loading failed", error));
         getResources(campusId).then(setResources).catch((error) => console.error("Resource loading failed", error));
-        getLostFoundItems(campusId).then(setLostItems).catch((error) => console.error("Lost & found loading failed", error));
+        getLostFoundItems(campusId).then(setLostItems).catch((error) => console.error("Lost & found loading failed", error)).finally(() => setLostItemsLoaded(true));
         getMarketplaceListings(campusId).then(setMarketListings).catch((error) => console.error("Marketplace loading failed", error));
       };
 
@@ -1764,6 +1881,27 @@ function App() {
         .catch((error) => console.error("LinkedIn verification sync failed", error));
     }, [authUser?.identities, profile?.id, profile?.linkedin_verified_at]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // A direct link, bookmark, or refresh into a role-gated route
+    // (/admin, /vendor, /facilities) shouldn't sit there showing a
+    // "restricted" screen forever -- bounce back to Home and fix the URL
+    // once we actually know the signed-in role (renderPage() below is
+    // still the real gate; this just keeps the address bar honest once
+    // that gate says no). Waits for backendLoading to clear so a
+    // still-loading profile doesn't get misread as "no access" and
+    // bounce a legitimate admin/vendor/facilities user before their
+    // role has even loaded.
+    useEffect(() => {
+      if (backendLoading) return;
+      const roleGatedButAllowed =
+        (active !== "admin" || profile?.role === "college_admin" || profile?.role === "super_admin") &&
+        (active !== "vendor" || profile?.role === "vendor") &&
+        (active !== "facilities" ||
+          profile?.role === "facilities_staff" ||
+          profile?.role === "college_admin" ||
+          profile?.role === "super_admin");
+      if (!roleGatedButAllowed) go("home");
+    }, [active, backendLoading, profile?.role]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const renderPage = () => {
     if (active === "home") {
       return (
@@ -1776,6 +1914,7 @@ function App() {
           openModal={setModal}
           foodCart={foodCart}
           storeCart={storeCart}
+          authUser={authUser}
         />
       );
     }
@@ -1806,8 +1945,10 @@ function App() {
           notify={notify}
           events={events.length ? events : eventsSeed}
           eventsLoading={eventsLoading}
-          opportunities={opportunities}
-          mentors={mentors}
+          opportunities={dbOpportunities}
+          mentors={dbMentors}
+          appliedIds={myApplicationIds}
+          onApplied={(id) => setMyApplicationIds((ids) => [...ids, id])}
           go={go}
           authUser={authUser}
           profile={profile}
@@ -1914,17 +2055,18 @@ function App() {
       return (
         <Store
           notify={notify}
-          items={storeItems}
+          items={dbStoreItems}
+          loading={dbStoresLoading}
           cart={storeCart}
           addStore={addStore}
           openModal={setModal}
-          orders={orders}
+          orders={myStoreOrders}
         />
       );
     }
 
     if (active === "ai") {
-      return <CampusAI notify={notify} go={go} />;
+      return <CampusAI notify={notify} go={go} authUser={authUser} openLogin={() => setLoginOpen(true)} />;
     }
 
     if (active === "admin") {
@@ -2010,6 +2152,7 @@ function App() {
           serviceRequests={serviceRequests}
           printJobs={printJobs}
           lostItems={lostItems}
+          lostItemsLoaded={lostItemsLoaded}
           marketListings={marketListings}
           onBookingsChange={setBookings}
           onRequestsChange={setServiceRequests}
@@ -2217,6 +2360,7 @@ function App() {
           type="store"
           onClose={() => setModal(null)}
           notify={notify}
+          onCheckout={checkoutStore}
         />
       )}
 
@@ -2229,7 +2373,12 @@ function App() {
       )}
 
       {modal === "sos" && (
-        <SOSModal onClose={() => setModal(null)} notify={notify} />
+        <SOSModal
+          onClose={() => setModal(null)}
+          notify={notify}
+          authUser={authUser}
+          openLogin={() => setLoginOpen(true)}
+        />
       )}
 
       {modal === "navigation" && (
@@ -2259,6 +2408,7 @@ function Home({
   openModal,
   foodCart,
   storeCart,
+  authUser,
 }) {
   return (
     <>
@@ -2434,6 +2584,8 @@ function Home({
           />
         </div>
       </section>
+
+      {authUser && <RecommendedForYou authUser={authUser} go={go} notify={notify} />}
 
       <section className="page-section feature-strip">
         <div>
@@ -2651,6 +2803,153 @@ function Campus({
         </aside>
       </div>
     </section>
+  );
+}
+
+/* =========================================================================
+   RECOMMENDED FOR YOU (doc §108 -- dashboard personalization)
+   Food/events/clubs/opportunities scored server-side from signals the
+   student already gave the app (skills, course/dept/year, club memberships,
+   past orders/registrations/applications). "Recommended people" reuses the
+   existing "People you may know" feature instead of duplicating it here --
+   see the Find Your People page.
+========================================================================= */
+function RecommendedForYou({ authUser, go, notify }) {
+  const [recs, setRecs] = useState(null); // null = loading
+  const [dismissed, setDismissed] = useState(new Set());
+
+  useEffect(() => {
+    if (!authUser?.id) return;
+    let cancelled = false;
+    getAllRecommendations(6)
+      .then((data) => { if (!cancelled) setRecs(data); })
+      .catch((error) => { console.error("getAllRecommendations failed", error); if (!cancelled) setRecs({ food: [], events: [], clubs: [], opportunities: [] }); });
+    return () => { cancelled = true; };
+  }, [authUser?.id]);
+
+  const handleDismiss = async (entityType, entityId) => {
+    setDismissed((prev) => new Set(prev).add(`${entityType}:${entityId}`));
+    try {
+      await dismissRecommendation(entityType, entityId);
+    } catch (error) {
+      notify(error.message || "Could not update recommendations");
+    }
+  };
+
+  if (!recs) return null;
+
+  const visible = (entityType, items) =>
+    (items || []).filter((item) => !dismissed.has(`${entityType}:${item.id}`));
+
+  const foodItems = visible("food_item", recs.food);
+  const eventItems = visible("event", recs.events);
+  const clubItems = visible("club", recs.clubs);
+  const oppItems = visible("opportunity", recs.opportunities);
+
+  if (!foodItems.length && !eventItems.length && !clubItems.length && !oppItems.length) return null;
+
+  return (
+    <section className="page-section recommended-section">
+      <div className="section-head">
+        <div>
+          <span className="section-kicker">FOR YOU</span>
+          <h2>Recommended for you.</h2>
+          <p>Based on your clubs, skills and activity -- not a guess.</p>
+        </div>
+        <button className="text-btn" onClick={() => go("profile")}>
+          Personalization settings <HiArrowRight />
+        </button>
+      </div>
+
+      <div className="recommend-rows">
+        {foodItems.length > 0 && (
+          <div className="recommend-row">
+            <h4>Food</h4>
+            <div className="recommend-cards">
+              {foodItems.map((item) => (
+                <RecommendCard
+                  key={item.id}
+                  title={item.name}
+                  meta={`₹${item.price} · ${item.canteen_name}`}
+                  reason={item.reason}
+                  onClick={() => go("food")}
+                  onDismiss={() => handleDismiss("food_item", item.id)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {eventItems.length > 0 && (
+          <div className="recommend-row">
+            <h4>Events</h4>
+            <div className="recommend-cards">
+              {eventItems.map((item) => (
+                <RecommendCard
+                  key={item.id}
+                  title={item.title}
+                  meta={new Date(item.event_date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                  reason={item.reason}
+                  onClick={() => go("events")}
+                  onDismiss={() => handleDismiss("event", item.id)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {clubItems.length > 0 && (
+          <div className="recommend-row">
+            <h4>Clubs</h4>
+            <div className="recommend-cards">
+              {clubItems.map((item) => (
+                <RecommendCard
+                  key={item.id}
+                  title={item.name}
+                  meta={item.category || "Club"}
+                  reason={item.reason}
+                  onClick={() => go("campus")}
+                  onDismiss={() => handleDismiss("club", item.id)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {oppItems.length > 0 && (
+          <div className="recommend-row">
+            <h4>Opportunities</h4>
+            <div className="recommend-cards">
+              {oppItems.map((item) => (
+                <RecommendCard
+                  key={item.id}
+                  title={`${item.role} @ ${item.company}`}
+                  meta={item.type}
+                  reason={item.reason}
+                  onClick={() => go("events")}
+                  onDismiss={() => handleDismiss("opportunity", item.id)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function RecommendCard({ title, meta, reason, onClick, onDismiss }) {
+  return (
+    <div className="recommend-card">
+      <button className="recommend-dismiss" title="Not interested" onClick={(e) => { e.stopPropagation(); onDismiss(); }}>
+        <HiXMark />
+      </button>
+      <div onClick={onClick}>
+        <b>{title}</b>
+        <small>{meta}</small>
+        <span className="recommend-reason"><HiSparkles /> {reason}</span>
+      </div>
+    </div>
   );
 }
 
@@ -3134,6 +3433,8 @@ function Events({
   eventsLoading,
   opportunities: opps,
   mentors: mentorList,
+  appliedIds = [],
+  onApplied,
   authUser,
   profile,
   openLogin,
@@ -3144,6 +3445,8 @@ function Events({
   onProfileUpdated,
 }) {
   const [confirmingEvent, setConfirmingEvent] = useState(null);
+  const [applyingTo, setApplyingTo] = useState(null);
+  const [requestingMentor, setRequestingMentor] = useState(null);
 
   return (
     <section className="page-section events-page">
@@ -3256,21 +3559,35 @@ function Events({
       </div>
 
       <div className="opportunity-grid">
-        {opps.map((item) => (
-          <article className="opportunity-card" key={item.role}>
-            <div className="company-avatar">
-              <HiBriefcase />
-            </div>
-            <div>
-              <h3>{item.role}</h3>
-              <p>{item.company} · {item.type}</p>
-            </div>
-            <span className="deadline">{item.deadline}</span>
-            <button onClick={() => notify(`${item.role} opened`)}>
-              View <HiArrowRight />
-            </button>
-          </article>
-        ))}
+        {opps.length === 0 && (
+          <EmptyState icon={<HiBriefcase />} title="No opportunities posted yet" text="Check back soon — admins post internships and research openings here." />
+        )}
+        {opps.map((item) => {
+          const applied = appliedIds.includes(item.id);
+          return (
+            <article className="opportunity-card" key={item.id}>
+              <div className="company-avatar">
+                <HiBriefcase />
+              </div>
+              <div>
+                <h3>{item.role}</h3>
+                <p>{item.company} · {item.type}</p>
+              </div>
+              <span className="deadline">{item.deadline ? new Date(item.deadline).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "Open"}</span>
+              <button
+                disabled={applied}
+                onClick={() => {
+                  if (applied) return;
+                  if (item.apply_url) { window.open(item.apply_url, "_blank", "noreferrer"); return; }
+                  if (!authUser) { openLogin(); notify("Sign in to apply"); return; }
+                  setApplyingTo(item);
+                }}
+              >
+                {applied ? "Applied" : item.apply_url ? "Apply externally" : "Apply"} <HiArrowRight />
+              </button>
+            </article>
+          );
+        })}
       </div>
 
       <div className="section-head inner-head">
@@ -3281,20 +3598,43 @@ function Events({
       </div>
 
       <div className="mentor-grid">
+        {mentorList.length === 0 && (
+          <EmptyState icon={<HiUserGroup />} title="No mentors listed yet" text="Check back soon — admins curate this list." />
+        )}
         {mentorList.map((mentor) => (
-          <article className="mentor-card" key={mentor.name}>
+          <article className="mentor-card" key={mentor.id}>
             <div className="big-avatar small">{mentor.name[0]}</div>
             <div>
               <h3>{mentor.name}</h3>
               <p>{mentor.role}</p>
-              <small>{mentor.skills.join(" · ")}</small>
+              <small>{(mentor.skills || []).join(" · ")}</small>
             </div>
-            <button onClick={() => notify(`Mentor request sent to ${mentor.name}`)}>
+            <button onClick={() => {
+              if (!authUser) { openLogin(); notify("Sign in to request mentorship"); return; }
+              setRequestingMentor(mentor);
+            }}>
               <HiChatBubbleLeftRight />
             </button>
           </article>
         ))}
       </div>
+
+      {applyingTo && (
+        <OpportunityApplyModal
+          opportunity={applyingTo}
+          onClose={() => setApplyingTo(null)}
+          onApplied={() => { onApplied?.(applyingTo.id); setApplyingTo(null); }}
+          notify={notify}
+        />
+      )}
+
+      {requestingMentor && (
+        <MentorRequestModal
+          mentor={requestingMentor}
+          onClose={() => setRequestingMentor(null)}
+          notify={notify}
+        />
+      )}
 
       {confirmingEvent && (
         <EventRegistrationConfirmModal
@@ -3315,6 +3655,75 @@ function Events({
         />
       )}
     </section>
+  );
+}
+
+function OpportunityApplyModal({ opportunity, onClose, onApplied, notify }) {
+  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  return (
+    <ModalShell kicker="APPLY" title={`${opportunity.role} at ${opportunity.company}`} onClose={onClose}>
+      {opportunity.description && <p style={{ color: "var(--muted)", fontSize: 13, lineHeight: 1.6 }}>{opportunity.description}</p>}
+      {opportunity.tags?.length > 0 && (
+        <div className="tags" style={{ marginBottom: 14 }}>
+          {opportunity.tags.map((t) => <span key={t}>{t}</span>)}
+        </div>
+      )}
+      <label>A short note to the poster (optional)
+        <textarea rows={4} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Why you're a good fit…" />
+      </label>
+      <button
+        className="primary wide"
+        disabled={saving}
+        onClick={async () => {
+          try {
+            setSaving(true);
+            await applyToOpportunity(opportunity.id, message);
+            notify("Application submitted");
+            onApplied();
+          } catch (error) {
+            notify(error.message || "Could not submit application");
+          } finally {
+            setSaving(false);
+          }
+        }}
+      >
+        {saving ? "Submitting…" : "Submit application"}
+      </button>
+    </ModalShell>
+  );
+}
+
+function MentorRequestModal({ mentor, onClose, notify }) {
+  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  return (
+    <ModalShell kicker="MENTORSHIP" title={`Request ${mentor.name}`} onClose={onClose}>
+      {mentor.bio && <p style={{ color: "var(--muted)", fontSize: 13, lineHeight: 1.6 }}>{mentor.bio}</p>}
+      <label>What do you need help with? (optional)
+        <textarea rows={4} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="A quick note helps them respond faster…" />
+      </label>
+      <button
+        className="primary wide"
+        disabled={saving}
+        onClick={async () => {
+          try {
+            setSaving(true);
+            await requestMentor(mentor.id, message);
+            notify(`Request sent to ${mentor.name}`);
+            onClose();
+          } catch (error) {
+            notify(error.message || "Could not send request");
+          } finally {
+            setSaving(false);
+          }
+        }}
+      >
+        {saving ? "Sending…" : "Send request"}
+      </button>
+    </ModalShell>
   );
 }
 
@@ -3448,7 +3857,7 @@ function EventRegistrationConfirmModal({ event, profile, authUser, onClose, onCo
    SERVICES
 ========================================================= */
 
-function Services({ go, notify, foodCart, storeCart, printFile }) {
+function Services({ go, notify, foodCart, storeCart, printFile, openModal }) {
   return (
     <section className="page-section services-page">
       <PageHeader
@@ -3538,7 +3947,7 @@ function Services({ go, notify, foodCart, storeCart, printFile }) {
           icon={<HiExclamationTriangle />}
           title="Emergency"
           text="Campus SOS"
-          onClick={() => notify("Open Emergency from the service card")}
+          onClick={() => openModal?.("sos")}
         />
         <MiniService
           icon={<HiTruck />}
@@ -4035,14 +4444,22 @@ function FoodCard({ item, add }) {
    STORE
 ========================================================= */
 
-function Store({ items, cart, addStore, openModal }) {
+function Store({ items, loading, cart, addStore, openModal, orders = [] }) {
   const [q, setQ] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("All");
 
-  const filtered = items.filter((item) =>
-    `${item.name} ${item.category}`.toLowerCase().includes(q.toLowerCase())
+  const categories = useMemo(
+    () => ["All", ...Array.from(new Set(items.map((item) => item.category).filter(Boolean)))],
+    [items]
   );
 
-  const total = cart.reduce((sum, item) => sum + item.price, 0);
+  const filtered = items.filter((item) => {
+    if (categoryFilter !== "All" && item.category !== categoryFilter) return false;
+    return `${item.name} ${item.category} ${item.storeName || ""}`.toLowerCase().includes(q.toLowerCase());
+  });
+
+  const total = cart.reduce((sum, item) => sum + Number(item.price) * Number(item.quantity || 1), 0);
+  const activeOrders = orders.filter((o) => !["COMPLETED", "CANCELLED"].includes(o.status));
 
   return (
     <section className="page-section">
@@ -4057,6 +4474,22 @@ function Store({ items, cart, addStore, openModal }) {
         }
       />
 
+      {activeOrders.length > 0 && (
+        <div className="resource-list" style={{ marginBottom: 24 }}>
+          {activeOrders.map((order) => (
+            <article className="resource-row" key={order.id}>
+              <div>
+                <b>Order #{order.id.slice(0, 8)} · {order.status}</b>
+                <small>
+                  {order.stores?.name} · {order.store_order_items.map((i) => `${i.quantity}× ${i.item_name}`).join(", ")}
+                </small>
+              </div>
+              <span className="listing-tag" style={{ fontWeight: 800 }}>Pickup code: {order.pickup_code}</span>
+            </article>
+          ))}
+        </div>
+      )}
+
       <div className="searchbar compact wide-search">
         <HiMagnifyingGlass />
         <input
@@ -4067,39 +4500,28 @@ function Store({ items, cart, addStore, openModal }) {
       </div>
 
       <div className="category-row">
-        {["All", "Stationery", "Records", "Paper", "Electronics", "Academic"].map(
-          (category) => (
-            <button
-              key={category}
-              onClick={() =>
-                setQ(category === "All" ? "" : category)
-              }
-            >
-              {category}
-            </button>
-          )
-        )}
-      </div>
-
-      <div className="product-grid">
-        {filtered.map((item) => (
-          <article className="product-card" key={item.id}>
-            <div className="product-placeholder">
-              <HiBookOpen />
-            </div>
-            <span className="event-club">{item.category}</span>
-            <h3>{item.name}</h3>
-            <p>{item.stock} in stock</p>
-
-            <div className="product-bottom">
-              <b>₹{item.price}</b>
-              <button onClick={() => addStore(item)}>
-                <HiPlus /> Add
-              </button>
-            </div>
-          </article>
+        {categories.map((category) => (
+          <button
+            key={category}
+            className={category === categoryFilter ? "active" : undefined}
+            onClick={() => setCategoryFilter(category)}
+          >
+            {category}
+          </button>
         ))}
       </div>
+
+      {loading ? (
+        <LoadingState label="Loading the campus store…" />
+      ) : filtered.length === 0 ? (
+        <EmptyState icon={<HiBookOpen />} title="Nothing here yet" text="No store items match your search." />
+      ) : (
+        <div className="product-grid">
+          {filtered.map((item) => (
+            <StoreProductCard key={item.id} item={item} addStore={addStore} />
+          ))}
+        </div>
+      )}
 
       {cart.length > 0 && (
         <div className="floating-cart">
@@ -4126,6 +4548,64 @@ function Store({ items, cart, addStore, openModal }) {
   );
 }
 
+// A store item may have zero or more product variants (size/colour/etc,
+// supabase/migrations/20260815000900_..._variants_stock_analytics.sql).
+// Each card owns its own selection state so choosing a variant on one
+// product never affects any other card in the grid. Variant price/
+// availability come from the selected variant row, not the parent item,
+// once any variant exists.
+function StoreProductCard({ item, addStore }) {
+  const variants = useMemo(
+    () => (item.store_item_variants || []).filter((v) => v.active).sort((a, b) => a.name.localeCompare(b.name)),
+    [item.store_item_variants]
+  );
+  const hasVariants = variants.length > 0;
+  const [variantId, setVariantId] = useState(hasVariants ? variants[0].id : null);
+  const selectedVariant = hasVariants ? variants.find((v) => v.id === variantId) || variants[0] : null;
+  const price = selectedVariant ? selectedVariant.price : item.price;
+  const canAdd = !hasVariants || (selectedVariant && selectedVariant.available);
+
+  return (
+    <article className="product-card">
+      <div className="product-placeholder">
+        {item.image_url ? <img src={item.image_url} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <HiBookOpen />}
+      </div>
+      <span className="event-club">{item.category}</span>
+      <h3>{item.name}</h3>
+      <p>{item.storeName}</p>
+
+      {hasVariants && (
+        <select value={selectedVariant.id} onChange={(e) => setVariantId(e.target.value)} style={{ marginBottom: 8, width: "100%" }}>
+          {variants.map((v) => (
+            <option key={v.id} value={v.id} disabled={!v.available}>
+              {v.name} · ₹{v.price}{!v.available ? " · out of stock" : ""}
+            </option>
+          ))}
+        </select>
+      )}
+
+      <div className="product-bottom">
+        <b>₹{price}</b>
+        <button
+          disabled={!canAdd}
+          onClick={() => addStore({
+            id: item.id,
+            name: hasVariants ? `${item.name} (${selectedVariant.name})` : item.name,
+            price,
+            category: item.category,
+            storeId: item.storeId,
+            storeName: item.storeName,
+            vendor: item.storeName,
+            variantId: hasVariants ? selectedVariant.id : undefined,
+          })}
+        >
+          <HiPlus /> {canAdd ? "Add" : "Out of stock"}
+        </button>
+      </div>
+    </article>
+  );
+}
+
 /* =========================================================
    LINKEDIN-STYLE PROFILE
 ========================================================= */
@@ -4133,6 +4613,7 @@ function Store({ items, cart, addStore, openModal }) {
 function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfileUpdated, stats = {}, verification, onVerificationChanged, campusId, go }) {
   const [verifyModalOpen, setVerifyModalOpen] = useState(false);
   const [vendorModalOpen, setVendorModalOpen] = useState(false);
+  const [emergencyContactsModalOpen, setEmergencyContactsModalOpen] = useState(false);
   if (!user) {
     return (
       <section className="page-section profile-page">
@@ -4315,6 +4796,46 @@ function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfil
         )}
       </div>
 
+      <div className="profile-box profile-wide-box">
+        <span className="section-kicker">EMERGENCY CONTACTS</span>
+        <p>
+          Add next-of-kin or guardian contacts a campus responder can reach
+          on your behalf during a real emergency. A campus admin verifies
+          each number before responders trust it.
+        </p>
+        <button className="primary" onClick={() => setEmergencyContactsModalOpen(true)}>
+          <HiPhone /> Manage emergency contacts
+        </button>
+      </div>
+
+      <div className="profile-box profile-wide-box">
+        <span className="section-kicker">PERSONALIZATION</span>
+        <div className="push-toggle-row">
+          <div>
+            <b>Recommended for you</b>
+            <small>
+              {profile?.personalization_enabled !== false
+                ? "Food, events, clubs and opportunities are ranked using your skills, clubs and activity. You can dismiss any recommendation with the × on its card."
+                : "Off -- your dashboard shows popular campus picks instead of anything based on your activity."}
+            </small>
+          </div>
+          <button
+            className={profile?.personalization_enabled !== false ? "chip active" : "chip"}
+            onClick={async () => {
+              try {
+                const next = await updateProfile(profile.id, { personalization_enabled: !(profile?.personalization_enabled !== false) });
+                onProfileUpdated(next);
+                notify(next.personalization_enabled ? "Personalized recommendations on" : "Personalized recommendations off");
+              } catch (error) {
+                notify(error.message || "Could not update personalization setting");
+              }
+            }}
+          >
+            {profile?.personalization_enabled !== false ? "On" : "Off"}
+          </button>
+        </div>
+      </div>
+
       {profile?.role === "student" && (
         <div className="profile-box profile-wide-box">
           <span className="section-kicker">RUN A CAMPUS BUSINESS</span>
@@ -4395,7 +4916,178 @@ function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfil
           notify={notify}
         />
       )}
+
+      {emergencyContactsModalOpen && (
+        <EmergencyContactsModal
+          onClose={() => setEmergencyContactsModalOpen(false)}
+          notify={notify}
+        />
+      )}
     </section>
+  );
+}
+
+const EMERGENCY_RELATIONSHIPS = [
+  ["parent", "Parent"], ["guardian", "Guardian"], ["sibling", "Sibling"],
+  ["spouse", "Spouse"], ["relative", "Relative"], ["friend", "Friend"], ["other", "Other"],
+];
+
+// Student self-service on the next-of-kin directory (doc §113). Contacts
+// start unverified -- a facilities/admin reviewer confirms the number
+// separately (Admin CMS -> Emergency Contacts) -- and editing an already
+// verified contact resets it back to unverified server-side, since the
+// point of verification is confirming *this exact* number is real.
+function EmergencyContactsModal({ onClose, notify }) {
+  const [contacts, setContacts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [editing, setEditing] = useState(null); // null = not editing, {} = new, {...} = existing
+  const [saving, setSaving] = useState(false);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      setContacts(await listMyEmergencyContacts());
+    } catch (err) {
+      setError(err.message || "Could not load your emergency contacts");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const remove = async (contact) => {
+    if (!window.confirm(`Remove ${contact.contact_name} as an emergency contact?`)) return;
+    try {
+      await deleteEmergencyContact(contact.id);
+      notify("Emergency contact removed");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not remove this contact");
+    }
+  };
+
+  const save = async (form) => {
+    try {
+      setSaving(true);
+      await upsertEmergencyContact({
+        id: editing?.id || null,
+        contactName: form.contact_name,
+        relationship: form.relationship,
+        phone: form.phone,
+        altPhone: form.alt_phone,
+        email: form.email,
+        isPrimary: form.is_primary,
+      });
+      notify(editing?.id ? "Emergency contact updated" : "Emergency contact added");
+      setEditing(null);
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not save this contact");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell kicker="EMERGENCY CONTACTS" title="Your next-of-kin contacts" onClose={onClose}>
+      {editing ? (
+        <EmergencyContactForm
+          initial={editing}
+          saving={saving}
+          onCancel={() => setEditing(null)}
+          onSave={save}
+        />
+      ) : (
+        <>
+          {loading && <LoadingState label="Loading your contacts…" />}
+          {!loading && error && <ErrorState text={error} onRetry={reload} />}
+          {!loading && !error && contacts.length === 0 && (
+            <EmptyState icon={<HiPhone />} title="No emergency contacts yet" text="Add at least one so a responder can reach someone on your behalf in a real emergency." />
+          )}
+          {!loading && !error && contacts.map((contact) => (
+            <div key={contact.id} className="resource-row">
+              <div>
+                <b>
+                  {contact.contact_name}{" "}
+                  <small>({EMERGENCY_RELATIONSHIPS.find(([k]) => k === contact.relationship)?.[1] || contact.relationship})</small>
+                  {contact.is_primary && <span className="social-type" style={{ marginLeft: 6 }}>PRIMARY</span>}
+                </b>
+                <small>
+                  {contact.phone}{contact.alt_phone ? ` · alt ${contact.alt_phone}` : ""}
+                  {" · "}
+                  {contact.verified ? (
+                    <span><HiShieldCheck /> Verified</span>
+                  ) : (
+                    "Pending verification"
+                  )}
+                </small>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => setEditing(contact)}><HiPencilSquare /></button>
+                <button onClick={() => remove(contact)}><HiTrash /></button>
+              </div>
+            </div>
+          ))}
+          {!loading && !error && contacts.length < 5 && (
+            <button className="primary wide" onClick={() => setEditing({})}>
+              <HiPlus /> Add emergency contact
+            </button>
+          )}
+        </>
+      )}
+    </ModalShell>
+  );
+}
+
+function EmergencyContactForm({ initial, saving, onCancel, onSave }) {
+  const [form, setForm] = useState({
+    contact_name: initial?.contact_name || "",
+    relationship: initial?.relationship || "parent",
+    phone: initial?.phone || "",
+    alt_phone: initial?.alt_phone || "",
+    email: initial?.email || "",
+    is_primary: initial?.is_primary || false,
+  });
+  const change = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+
+  return (
+    <div>
+      <label>
+        Name
+        <input value={form.contact_name} onChange={(e) => change("contact_name", e.target.value)} placeholder="Contact's full name" />
+      </label>
+      <label>
+        Relationship
+        <select value={form.relationship} onChange={(e) => change("relationship", e.target.value)}>
+          {EMERGENCY_RELATIONSHIPS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+        </select>
+      </label>
+      <label>
+        Phone
+        <input value={form.phone} onChange={(e) => change("phone", e.target.value)} placeholder="+91XXXXXXXXXX" />
+      </label>
+      <label>
+        Alternate phone (optional)
+        <input value={form.alt_phone} onChange={(e) => change("alt_phone", e.target.value)} placeholder="Optional" />
+      </label>
+      <label>
+        Email (optional)
+        <input value={form.email} onChange={(e) => change("email", e.target.value)} placeholder="Optional" />
+      </label>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, flexDirection: "row" }}>
+        <input type="checkbox" checked={form.is_primary} onChange={(e) => change("is_primary", e.target.checked)} style={{ width: "auto" }} />
+        Make this my primary contact
+      </label>
+      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+        <button className="primary wide" disabled={saving} onClick={() => onSave(form)}>
+          {saving ? "Saving…" : "Save contact"}
+        </button>
+        <button disabled={saving} onClick={onCancel}>Cancel</button>
+      </div>
+    </div>
   );
 }
 
@@ -4962,7 +5654,7 @@ const serviceDetailData = {
   },
 };
 
-function ServiceDetail({ serviceId, notify, go, openModal, openLogin, authUser, user, campusId, resources, bookings, serviceRequests, printJobs, lostItems, marketListings, onBookingsChange, onRequestsChange, onLostItemsChange, onMarketListingsChange, onOpenConversation }) {
+function ServiceDetail({ serviceId, notify, go, openModal, openLogin, authUser, user, campusId, resources, bookings, serviceRequests, printJobs, lostItems, lostItemsLoaded, marketListings, onBookingsChange, onRequestsChange, onLostItemsChange, onMarketListingsChange, onOpenConversation }) {
   const data = serviceDetailData[serviceId];
 
   return (
@@ -5022,7 +5714,7 @@ function ServiceDetail({ serviceId, notify, go, openModal, openLogin, authUser, 
       )}
 
       {serviceId === "lost" && (
-        <LostService notify={notify} authUser={authUser} openLogin={openLogin} campusId={campusId} items={lostItems} onChange={onLostItemsChange} />
+        <LostService notify={notify} authUser={authUser} openLogin={openLogin} campusId={campusId} items={lostItems} loaded={lostItemsLoaded} onChange={onLostItemsChange} />
       )}
 
       {serviceId === "market" && (
@@ -5128,34 +5820,105 @@ function BookingService({ notify, authUser, openLogin, resources: dbResources = 
   );
 }
 
-function LostService({ notify, authUser, openLogin, campusId, items: dbItems = [], onChange }) {
+const LOST_FOUND_CATEGORIES = ["Electronics", "ID card", "Bag", "Documents", "Keys", "Clothing", "Other"];
+
+function LostService({ notify, authUser, openLogin, campusId, items: dbItems = [], loaded = true, onChange }) {
   const [reporting, setReporting] = useState(false);
+  const [itemType, setItemType] = useState("lost");
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [category, setCategory] = useState("Other");
   const [location, setLocation] = useState("");
-  const items = dbItems.length ? dbItems.map((item) => [item.title, `${item.item_type} · ${item.location}`, item.id]) : [
-    ["Black backpack", "Found near Block B · 18 min ago"],
-    ["Student ID card", "Found near Main Gate · 1 hr ago"],
-    ["AirPods case", "Found near Library · Yesterday"],
-  ];
+
+  const resetForm = () => {
+    setItemType("lost");
+    setTitle("");
+    setDescription("");
+    setCategory("Other");
+    setLocation("");
+  };
+
+  if (loaded && dbItems.length === 0 && !reporting) {
+    return (
+      <div className="resource-list">
+        <EmptyState
+          icon={<HiMagnifyingGlassCircle />}
+          title="No open reports right now"
+          text="Nobody has reported a lost or found item yet. Be the first."
+        />
+        <button className="primary" onClick={() => setReporting(true)}>
+          <HiPlus /> Report an item
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="resource-list">
-      {items.map(([name, location, itemId]) => (
-        <article className="resource-row" key={itemId || name}>
+      {!loaded && <LoadingState label="Loading lost & found reports…" />}
+      {loaded && dbItems.map((item) => (
+        <article className="resource-row" key={item.id}>
           <div className="resource-icon"><HiMagnifyingGlassCircle /></div>
           <div>
-            <b>{name}</b>
-            <small>{location}</small>
+            <b>{item.title}</b>
+            <small>
+              {item.item_type === "found" ? "Found" : "Lost"} · {item.category} · {item.location}
+              {item.status === "claim_pending" ? " · Claim pending staff verification" : ""}
+            </small>
           </div>
-          <button onClick={async () => { if (!authUser) { openLogin?.(); notify("Sign in to claim an item"); return; } if (!itemId) return notify("Demo item — add the production SQL migration first"); const proof = window.prompt("Describe how you can prove this item is yours (e.g. a unique mark, what's inside, receipt details). Staff will verify before handover."); if (!proof?.trim()) return; try { await claimLostFoundItem({ itemId, userId: authUser.id, proof }); onChange?.((items) => items.filter((item) => item.id !== itemId)); notify("Claim submitted — staff will verify and contact you"); } catch (error) { notify(error.message || "Could not claim item"); } }}>
-            Claim
-          </button>
+          {item.status === "claim_pending" ? (
+            <strong>Pending</strong>
+          ) : (
+            <button onClick={async () => {
+              if (!authUser) { openLogin?.(); notify("Sign in to claim an item"); return; }
+              const proof = window.prompt("Describe how you can prove this item is yours (e.g. a unique mark, what's inside, receipt details). Staff will verify before handover.");
+              if (!proof?.trim()) return;
+              try {
+                await claimLostFoundItem({ itemId: item.id, userId: authUser.id, proof });
+                onChange?.((items) => items.map((i) => (i.id === item.id ? { ...i, status: "claim_pending" } : i)));
+                notify("Claim submitted — staff will verify and contact you");
+              } catch (error) {
+                notify(error.message || "Could not claim item");
+              }
+            }}>
+              Claim
+            </button>
+          )}
         </article>
       ))}
       <button className="primary" onClick={() => setReporting(true)}>
-        <HiPlus /> Report lost item
+        <HiPlus /> Report an item
       </button>
-      {reporting && <ModalShell kicker="LOST & FOUND" title="Report lost item" onClose={() => setReporting(false)}><label>Item title<input value={title} onChange={(e) => setTitle(e.target.value)} /></label><label>Last seen location<input value={location} onChange={(e) => setLocation(e.target.value)} /></label><button className="primary wide" onClick={async () => { if (!authUser) { openLogin?.(); notify("Sign in to report an item"); return; } try { const item = await createLostFoundItem({ userId: authUser.id, campusId, itemType: "lost", title, location }); onChange?.((items) => [item, ...items]); setReporting(false); notify("Lost item reported"); } catch (error) { notify(error.message || "Could not report item"); } }}>Submit report</button></ModalShell>}
+      {reporting && (
+        <ModalShell kicker="LOST & FOUND" title="Report an item" onClose={() => { setReporting(false); resetForm(); }}>
+          <div className="segmented-toggle">
+            <button type="button" className={itemType === "lost" ? "active" : ""} onClick={() => setItemType("lost")}>I lost something</button>
+            <button type="button" className={itemType === "found" ? "active" : ""} onClick={() => setItemType("found")}>I found something</button>
+          </div>
+          <label>Item title<input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Black backpack" /></label>
+          <label>Category
+            <select value={category} onChange={(e) => setCategory(e.target.value)}>
+              {LOST_FOUND_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </label>
+          <label>{itemType === "found" ? "Where you found it" : "Last seen location"}<input value={location} onChange={(e) => setLocation(e.target.value)} /></label>
+          <label>Description (optional)<textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Distinguishing details help the other person prove ownership" /></label>
+          <button className="primary wide" onClick={async () => {
+            if (!authUser) { openLogin?.(); notify("Sign in to report an item"); return; }
+            try {
+              const item = await createLostFoundItem({ userId: authUser.id, campusId, itemType, title, description, category, location });
+              onChange?.((items) => [item, ...items]);
+              setReporting(false);
+              resetForm();
+              notify(itemType === "found" ? "Found item reported — thanks for helping out" : "Lost item reported");
+            } catch (error) {
+              notify(error.message || "Could not report item");
+            }
+          }}>
+            Submit report
+          </button>
+        </ModalShell>
+      )}
     </div>
   );
 }
@@ -5596,63 +6359,53 @@ function CampusMap({ notify, openModal }) {
    CAMPUS AI
 ========================================================= */
 
-function CampusAI({ notify, go }) {
+function CampusAI({ notify, go, authUser, openLogin }) {
   const [message, setMessage] = useState("");
+  const [asking, setAsking] = useState(false);
 
   const [conversation, setConversation] = useState([
     {
       role: "ai",
       text:
-        "Hi. I can help you discover people, events, services, rooms and opportunities across Campus OS.",
+        "Hi! I'm a real assistant with live access to CampusOS — ask me about the food menu, upcoming events, open opportunities, mentors, the store, or your own orders and registrations.",
     },
   ]);
 
   const suggestions = [
-    "Find me a Flutter developer",
-    "Where is Lab 302?",
-    "What is happening tomorrow?",
-    "Show print services",
-    "Find a robotics mentor",
+    "What's on the food menu right now?",
+    "What events are coming up?",
+    "Any internships or research openings?",
+    "Find me a robotics mentor",
+    "What are my recent orders?",
   ];
 
-  const answer = (text) => {
-    const value = text.toLowerCase();
+  const ask = async (value = message) => {
+    if (!value.trim() || asking) return;
 
-    if (value.includes("flutter")) {
-      return "Rahul has the strongest simulated match at 87%. He works with Flutter, Firebase, ML and UI/UX.";
+    if (!authUser) {
+      openLogin?.();
+      notify("Sign in to chat with the campus assistant");
+      return;
     }
 
-    if (value.includes("lab")) {
-      return "Lab 302 is in Block C, 3rd Floor. It is currently occupied in this demo.";
-    }
-
-    if (value.includes("tomorrow")) {
-      return "Tomorrow's highlights include the Campus Hackathon preparation session and the AI Club meetup.";
-    }
-
-    if (value.includes("print")) {
-      return "I can route you to Print Hub. Upload your PDF, configure pages and generate a pickup QR.";
-    }
-
-    if (value.includes("mentor")) {
-      return "I found two robotics mentors. Prof. Rahul Nair is the closest simulated match.";
-    }
-
-    return "I can help you discover campus people, events, services, rooms and opportunities. Try one of the suggestions below.";
-  };
-
-  const ask = (value = message) => {
-    if (!value.trim()) return;
-
-    const response = answer(value);
-
-    setConversation((current) => [
-      ...current,
-      { role: "user", text: value },
-      { role: "ai", text: response },
-    ]);
-
+    const nextConversation = [...conversation, { role: "user", text: value }];
+    setConversation(nextConversation);
     setMessage("");
+    setAsking(true);
+
+    try {
+      const reply = await askCampusAssistant(
+        nextConversation.map((m) => ({ role: m.role, content: m.text }))
+      );
+      setConversation((current) => [...current, { role: "ai", text: reply }]);
+    } catch (error) {
+      setConversation((current) => [
+        ...current,
+        { role: "ai", text: error.message || "Something went wrong — try again in a moment." },
+      ]);
+    } finally {
+      setAsking(false);
+    }
   };
 
   return (
@@ -5682,9 +6435,16 @@ function CampusAI({ notify, go }) {
             </div>
           ))}
 
+          {asking && (
+            <div className="ai-message ai">
+              <span><HiSparkles /></span>
+              <p style={{ color: "var(--muted)" }}>Thinking…</p>
+            </div>
+          )}
+
           <div className="ai-suggestions">
             {suggestions.map((suggestion) => (
-              <button key={suggestion} onClick={() => ask(suggestion)}>
+              <button key={suggestion} disabled={asking} onClick={() => ask(suggestion)}>
                 {suggestion}
                 <HiArrowRight />
               </button>
@@ -5697,9 +6457,10 @@ function CampusAI({ notify, go }) {
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && ask()}
-            placeholder="Ask Campus AI..."
+            placeholder={authUser ? "Ask Campus AI..." : "Sign in to ask Campus AI..."}
+            disabled={asking}
           />
-          <button onClick={() => ask()}>
+          <button disabled={asking || !message.trim()} onClick={() => ask()}>
             <HiPaperAirplane />
           </button>
         </div>
@@ -7046,33 +7807,116 @@ function CartModal({ title,cart,onClose,notify,type,onCheckout}) {
   );
 }
 
-function SOSModal({ onClose, notify }) {
+const SOS_HOLD_MS = 1500;
+
+function SOSModal({ onClose, notify, authUser, openLogin }) {
+  const [holding, setHolding] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(null); // { id, alertType, respondersNotified }
+  const [cancelling, setCancelling] = useState(false);
+  const holdTimer = useRef(null);
+
+  const send = async (alertType) => {
+    if (!authUser) {
+      openLogin?.();
+      notify("Sign in to send an SOS alert");
+      return;
+    }
+    setHolding(false);
+    setSending(true);
+    try {
+      // Best-effort: never let a denied/slow location permission block or
+      // delay dispatch -- getBestEffortLocation() always resolves (null on
+      // denial/timeout), it never rejects.
+      const location = await getBestEffortLocation();
+      const result = await triggerSosAlert({ alertType, location });
+      setSent({ id: result.id, alertType, respondersNotified: result.responders_notified });
+      notify(
+        result.responders_notified > 0
+          ? `Alert sent — ${result.responders_notified} responder${result.responders_notified === 1 ? "" : "s"} notified`
+          : "Alert sent — no facilities staff are on record for your campus yet, but it's logged"
+      );
+    } catch (err) {
+      notify(err.message || "Could not send the alert -- if this is a real emergency, call campus security directly");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const startHold = () => {
+    if (sending || sent) return;
+    setHolding(true);
+    holdTimer.current = setTimeout(() => send("general"), SOS_HOLD_MS);
+  };
+  const cancelHold = () => {
+    clearTimeout(holdTimer.current);
+    setHolding(false);
+  };
+  useEffect(() => () => clearTimeout(holdTimer.current), []);
+
+  const cancelAlert = async () => {
+    if (!sent) return;
+    try {
+      setCancelling(true);
+      await cancelMySosAlert(sent.id);
+      notify("Alert cancelled");
+      setSent(null);
+    } catch (err) {
+      notify(err.message || "Could not cancel -- a responder may already be on it");
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  if (sent) {
+    return (
+      <ModalShell kicker="EMERGENCY" title="Campus SOS" onClose={onClose}>
+        <div className="sos-card sos-card-sent">
+          <span><HiShieldCheck /></span>
+          <b>Alert sent</b>
+          <small>
+            {sent.respondersNotified > 0
+              ? `${sent.respondersNotified} campus responder${sent.respondersNotified === 1 ? "" : "s"} notified. Stay where you are if it's safe to.`
+              : "Logged, but no facilities staff are on record for your campus yet."}
+          </small>
+          <button className="ghost" disabled={cancelling} onClick={cancelAlert}>
+            {cancelling ? "Cancelling…" : "This was a false alarm — cancel"}
+          </button>
+        </div>
+      </ModalShell>
+    );
+  }
+
   return (
     <ModalShell kicker="EMERGENCY" title="Campus SOS" onClose={onClose}>
       <div className="sos-card">
         <span><HiShieldCheck /></span>
         <b>Hold for emergency</b>
         <small>
-          Campus security will receive your location in the production system.
+          Real campus responders are notified with your location (if you allow it) the moment this reaches the hold threshold.
         </small>
         <button
-          onClick={() => {
-            notify("SOS simulation activated");
-            onClose();
-          }}
+          className={holding ? "sos-hold-btn holding" : "sos-hold-btn"}
+          style={holding ? { "--sos-hold-ms": `${SOS_HOLD_MS}ms` } : undefined}
+          disabled={sending}
+          onPointerDown={startHold}
+          onPointerUp={cancelHold}
+          onPointerLeave={cancelHold}
+          onPointerCancel={cancelHold}
         >
-          <HiPhone /> Hold to activate SOS
+          <span className="sos-hold-fill" />
+          <span className="sos-hold-label"><HiPhone /> {sending ? "Sending…" : "Hold to activate SOS"}</span>
         </button>
       </div>
 
       <div className="emergency-actions">
-        <button onClick={() => notify("Campus security call simulated")}>
+        <button disabled={sending} onClick={() => send("security")}>
           <HiPhone /> Security
         </button>
-        <button onClick={() => notify("Medical response requested")}>
+        <button disabled={sending} onClick={() => send("medical")}>
           <HiExclamationTriangle /> Medical
         </button>
-        <button onClick={() => notify("Campus help requested")}>
+        <button disabled={sending} onClick={() => send("help")}>
           <HiUserGroup /> Campus help
         </button>
       </div>

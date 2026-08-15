@@ -61,6 +61,13 @@ export async function upsertFoodItem(item) {
     available: item.available !== false,
     active: item.active !== false,
     featured: Boolean(item.featured),
+    track_stock: Boolean(item.track_stock),
+    stock_quantity: item.track_stock && item.stock_quantity !== "" && item.stock_quantity != null && Number.isFinite(Number(item.stock_quantity))
+      ? Math.max(0, Math.floor(Number(item.stock_quantity)))
+      : null,
+    low_stock_threshold: Number.isFinite(Number(item.low_stock_threshold))
+      ? Math.max(0, Math.floor(Number(item.low_stock_threshold)))
+      : 5,
   };
   const query = item.id
     ? supabase.from("food_items").update(payload).eq("id", item.id)
@@ -207,4 +214,13 @@ export {
   listPendingOrgRequests,
   approveOrgRequest,
   rejectOrgRequest,
+  listLostFoundItemsAdmin,
+  verifyLostFoundHandover,
+  setLostFoundItemStatusAdmin,
+  deleteLostFoundItemAdmin,
+  createLostFoundItem,
+  listErrorLogs,
+  setErrorLogResolved,
+  listPendingEmergencyContacts,
+  verifyEmergencyContact,
 } from "../../services/mvpService";

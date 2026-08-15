@@ -1,0 +1,57 @@
+name: Uptime check (production)
+
+# Doc §96-98 "monitoring" -- the other half of error_logs (which only
+# catches errors the *app* observes, i.e. requires the app to still be
+# reachable in the first place). This checks the two things that being
+# reachable actually depends on: the deployed frontend and the Supabase
+# REST API. No third-party uptime service/account -- a failed scheduled
+# run is itself the alert: GitHub emails the repo's watchers/admins
+# automatically when a scheduled workflow run fails, with zero extra setup.
+#
+# Staging is deliberately NOT checked here -- it's expected to occasionally
+# be broken mid-development; alerting on that would just be noise. This is
+# production only.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      # The anon/publishable key, not a secret by design (it's shipped in
+      # every page load already, protected by RLS -- not by being hidden).
+      # Hardcoded rather than routed through a GitHub secret to avoid an
+      # unnecessary manual setup step for something with no confidentiality
+      # to protect. Rotate here too if it's ever rotated in Supabase.
+      PROD_ANON_KEY: sb_publishable_oI9SZm9xq3UzxzkGINUG7w_vZ38QDIm
+    steps:
+      - name: Frontend responds
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 https://campusos-amber.vercel.app)
+          echo "campusos-amber.vercel.app -> $code"
+          if [ "$code" -lt 200 ] || [ "$code" -ge 400 ]; then
+            echo "::error::Frontend returned HTTP $code"
+            exit 1
+          fi
+
+      - name: Supabase REST API responds
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
+            -H "apikey: $PROD_ANON_KEY" \
+            "https://dzjzjlylsfpmymkcavrq.supabase.co/rest/v1/")
+          echo "supabase REST -> $code"
+          if [ "$code" -lt 200 ] || [ "$code" -ge 400 ]; then
+            echo "::error::Supabase REST API returned HTTP $code"
+            exit 1
+          fi
+
+      - name: A real table actually reads back (not just that PostgREST is up)
+        run: |
+          body=$(curl -s --max-time 15 \
+            -H "apikey: $PROD_ANON_KEY" \
+            "https://dzjzjlylsfpmymkcavrq.supabase.co/rest/v1/campuses?select=id&limit=1")
+          echo "campuses -> $body"
+          echo "$body" | grep -q '"id"' || { echo "::error::campuses query returned no rows/unexpected shape: $body"; exit 1; }

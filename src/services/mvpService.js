@@ -12,6 +12,67 @@ import { isValidUsn, usnToEmail } from "../features/auth/usn";
 */
 
 /* =========================================================================
+   ERROR LOGGING (monitoring -- see supabase/migrations/20260814005200_error_logs.sql)
+   Fire-and-forget by design: a broken error-reporting call must never itself
+   throw and cascade into a second failure on top of whatever it was trying
+   to report. Callable while signed out too (log_client_error() is granted
+   to `anon`) -- most of what matters here is exactly the crash that happens
+   before/during sign-in.
+========================================================================= */
+
+// De-dupes identical errors within one tab session so a render loop or a
+// polling failure doesn't flood error_logs with hundreds of copies of the
+// same message before rl_error_logs (60/hour) even kicks in.
+const _loggedErrorFingerprints = new Set();
+
+export async function logClientError(message, { stack, severity = "error", context = {} } = {}) {
+  try {
+    if (!message) return;
+    const fingerprint = `${severity}:${String(message).slice(0, 200)}`;
+    if (_loggedErrorFingerprints.has(fingerprint)) return;
+    _loggedErrorFingerprints.add(fingerprint);
+
+    await supabase.rpc("log_client_error", {
+      p_message: String(message).slice(0, 2000),
+      p_stack: stack ? String(stack).slice(0, 8000) : null,
+      p_url: typeof window !== "undefined" ? window.location.href : null,
+      p_user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
+      p_severity: severity,
+      p_context: context || {},
+      p_source: "client",
+    });
+  } catch {
+    // Never let error logging itself throw -- there is nowhere further to
+    // report that failure to.
+  }
+}
+
+// Admin CMS "Errors" tab. RLS (error_logs_read_admin/_update_admin) already
+// restricts this to system.errors.read/admin -- a non-admin caller just
+// gets an empty list / a blocked update, not a 403 thrown here.
+export async function listErrorLogs({ severity = null, source = null, resolved = null, limit = 100 } = {}) {
+  let query = supabase
+    .from("error_logs")
+    .select("*, reporter:profiles!error_logs_user_id_fkey(name)")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (severity) query = query.eq("severity", severity);
+  if (source) query = query.eq("source", source);
+  if (resolved !== null) query = query.eq("resolved", resolved);
+  const { data, error } = await query;
+  throwIfError(error);
+  return data || [];
+}
+
+export async function setErrorLogResolved(id, resolved) {
+  // resolved_by/resolved_at are set server-side by a trigger regardless of
+  // what's sent here -- see set_error_log_resolution_meta() in the migration.
+  const { data, error } = await supabase.from("error_logs").update({ resolved }).eq("id", id).select().single();
+  throwIfError(error);
+  return data;
+}
+
+/* =========================================================================
    HELPERS
 ========================================================================= */
 
@@ -473,6 +534,9 @@ export async function updateProfile(
     ...(typeof updates.open_to_projects === "boolean"
       ? { open_to_projects: updates.open_to_projects }
       : {}),
+    ...(typeof updates.personalization_enabled === "boolean"
+      ? { personalization_enabled: updates.personalization_enabled }
+      : {}),
     skills: Array.isArray(updates.skills)
       ? updates.skills
       : [],
@@ -870,6 +934,47 @@ export async function claimLostFoundItem({ itemId, userId, proof }) {
   });
   throwIfError(error);
   return data;
+}
+
+// Admin CMS "Lost & Found" tab -- every status, not just 'open' (getLostFoundItems
+// above only fetches 'open', which is right for the student-facing list but
+// hides claim_pending/resolved from the moderation view).
+export async function listLostFoundItemsAdmin(campusId, { status = null, limit = 100 } = {}) {
+  let query = supabase
+    .from("lost_found_items")
+    .select("*, reporter:profiles!lost_found_items_user_id_fkey(name), claimant:profiles!lost_found_items_claimed_by_fkey(name)")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (campusId) query = query.eq("campus_id", campusId);
+  if (status) query = query.eq("status", status);
+  const { data, error } = await query;
+  throwIfError(error);
+  return data || [];
+}
+
+// Approve/reject a pending claim -- verify_lost_found_handover() (0009) is
+// gated to moderation.act/admin server-side regardless of who calls it.
+export async function verifyLostFoundHandover(itemId, approve) {
+  const { data, error } = await supabase.rpc("verify_lost_found_handover", {
+    p_item_id: itemId,
+    p_approve: approve,
+  });
+  throwIfError(error);
+  return data;
+}
+
+// Direct admin overrides (mark resolved without a claim, or remove a
+// bogus/spam report) -- covered by the lost_found_admin_manage/_delete RLS
+// policies (20260815000200), not by either RPC above.
+export async function setLostFoundItemStatusAdmin(itemId, status) {
+  const { data, error } = await supabase.from("lost_found_items").update({ status }).eq("id", itemId).select().single();
+  throwIfError(error);
+  return data;
+}
+
+export async function deleteLostFoundItemAdmin(itemId) {
+  const { error } = await supabase.from("lost_found_items").delete().eq("id", itemId);
+  throwIfError(error);
 }
 
 export async function getMarketplaceListings(campusId, search = "", { limit = 30, cursor = null } = {}) {
@@ -2211,6 +2316,15 @@ export async function createCampusServiceRequest({
 export async function getResources(
   campusId
 ) {
+  // `available` is the canonical column (see supabase/migrations/
+  // 20260814000700_services_bookings.sql) -- `active` was only ever a
+  // legacy alias some pre-existing installs happened to carry (backfilled
+  // into `available` at migration time, not kept in sync afterward). This
+  // used to query `active` directly, which 42703'd outright on the staging
+  // project (whose resources table never had an `active` column at all),
+  // silently emptying the resource list and falling back to hardcoded mock
+  // data with no real resource ids -- "Book" then couldn't open the booking
+  // modal, only a "not configured" toast.
   let query = supabase
     .from("resources")
     .select(`
@@ -2218,7 +2332,7 @@ export async function getResources(
       campus_id,
       name,
       resource_type,
-      active,
+      available,
       locations (
         id,
         name,
@@ -2227,7 +2341,7 @@ export async function getResources(
         room
       )
     `)
-    .eq("active", true)
+    .eq("available", true)
     .order("name");
 
   if (campusId) {
@@ -2708,4 +2822,154 @@ export async function getAuditLogs(limit = 50) {
 
   throwIfError(error);
   return data;
+}
+
+/* =========================================================================
+   SOS / EMERGENCY (supabase/migrations/20260815000300_sos_alerts.sql)
+   Real dispatch: a persisted alert, fanned out to facilities_staff/admins
+   as a preference-proof 'emergency' notification, with an audited
+   acknowledge/resolve lifecycle -- not a UI-only simulation.
+========================================================================= */
+
+// Best-effort geolocation: resolves with { latitude, longitude, accuracy }
+// on success, or null on denial/timeout/unsupported browser -- an SOS
+// trigger must never block on (or be blocked by) location permission.
+export function getBestEffortLocation({ timeout = 5000 } = {}) {
+  return new Promise((resolve) => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      resolve(null);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+        accuracy: pos.coords.accuracy,
+      }),
+      () => resolve(null),
+      { timeout, maximumAge: 60000 }
+    );
+  });
+}
+
+export async function triggerSosAlert({ alertType = "general", location } = {}) {
+  const { data, error } = await supabase.rpc("trigger_sos_alert", {
+    p_alert_type: alertType,
+    p_latitude: location?.latitude ?? null,
+    p_longitude: location?.longitude ?? null,
+    p_location_accuracy_m: location?.accuracy ?? null,
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function cancelMySosAlert(alertId) {
+  const { data, error } = await supabase.rpc("cancel_my_sos_alert", { p_alert_id: alertId });
+  throwIfError(error);
+  return data;
+}
+
+export async function listActiveSosAlerts() {
+  const { data, error } = await supabase.rpc("list_active_sos_alerts");
+  throwIfError(error);
+  return data || [];
+}
+
+export async function acknowledgeSosAlert(alertId) {
+  const { data, error } = await supabase.rpc("acknowledge_sos_alert", { p_alert_id: alertId });
+  throwIfError(error);
+  return data;
+}
+
+export async function resolveSosAlert(alertId, notes = null) {
+  const { data, error } = await supabase.rpc("resolve_sos_alert", { p_alert_id: alertId, p_notes: notes });
+  throwIfError(error);
+  return data;
+}
+
+export function subscribeToSosAlerts(callback) {
+  const channel = supabase
+    .channel("sos-alerts-realtime")
+    .on("postgres_changes", { event: "*", schema: "public", table: "sos_alerts" }, callback)
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
+/* =========================================================================
+   EMERGENCY CONTACTS (doc §113, supabase/migrations/20260815000600_emergency_contacts.sql)
+   A verified next-of-kin directory per student, feeding the SOS responder
+   flow above -- a responder can pull a student's contacts, but only in the
+   context of a real active/acknowledged alert (get_emergency_contacts_for_alert),
+   not by browsing the directory at will.
+========================================================================= */
+
+export async function listMyEmergencyContacts() {
+  const { data, error } = await supabase
+    .from("emergency_contacts")
+    .select("*")
+    .order("is_primary", { ascending: false })
+    .order("created_at", { ascending: true });
+  throwIfError(error);
+  return data || [];
+}
+
+export async function upsertEmergencyContact({
+  id = null,
+  contactName,
+  relationship,
+  phone,
+  altPhone = null,
+  email = null,
+  isPrimary = false,
+}) {
+  if (!contactName || !contactName.trim()) throw new Error("Contact name is required.");
+  if (!isValidPhone(phone)) throw new Error("Enter a valid phone number for this contact.");
+  if (altPhone && altPhone.trim() && !isValidPhone(altPhone)) {
+    throw new Error("Enter a valid alternate phone number, or leave it blank.");
+  }
+  const { data, error } = await supabase.rpc("upsert_emergency_contact", {
+    p_id: id,
+    p_contact_name: contactName.trim(),
+    p_relationship: relationship,
+    p_phone: phone.trim(),
+    p_alt_phone: altPhone ? altPhone.trim() : null,
+    p_email: email ? email.trim() : null,
+    p_is_primary: Boolean(isPrimary),
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function deleteEmergencyContact(id) {
+  const { error } = await supabase.rpc("delete_emergency_contact", { p_id: id });
+  throwIfError(error);
+}
+
+// Facilities/admin verification queue (emergency_contacts.verify permission).
+export async function listPendingEmergencyContacts() {
+  const { data, error } = await supabase.rpc("admin_list_pending_emergency_contacts");
+  throwIfError(error);
+  return data || [];
+}
+
+export async function verifyEmergencyContact(id, verified, notes = null) {
+  const { data, error } = await supabase.rpc("verify_emergency_contact", {
+    p_id: id,
+    p_verified: verified,
+    p_notes: notes,
+  });
+  throwIfError(error);
+  return data;
+}
+
+// SOS responder pulling a student's contacts for a specific, real,
+// currently-active alert -- see the RPC's own comment for why this is
+// scoped this way instead of a plain directory read.
+export async function getEmergencyContactsForAlert(alertId) {
+  const { data, error } = await supabase.rpc("get_emergency_contacts_for_alert", { p_alert_id: alertId });
+  throwIfError(error);
+  return data || [];
 }

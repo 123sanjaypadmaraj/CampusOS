@@ -10,4 +10,9 @@ export {
   transitionTicketStatus,
   listPendingBookings,
   setBookingStatus,
+  listActiveSosAlerts,
+  acknowledgeSosAlert,
+  resolveSosAlert,
+  subscribeToSosAlerts,
+  getEmergencyContactsForAlert,
 } from "../../services/mvpService";

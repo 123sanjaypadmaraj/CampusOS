@@ -10,7 +10,8 @@ import { fileURLToPath } from 'node:url';
 import { test, expect } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import fs from 'node:fs';
-import { seedRealSession } from './helpers/realSession.js';
+import { seedRealSession, getTestUserId } from './helpers/realSession.js';
+import { resolveServiceRoleKey } from './helpers/resolveServiceRoleKey.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..', '..');
@@ -18,7 +19,9 @@ function readEnvVar(name) {
   return fs.readFileSync(path.join(root, '.env'), 'utf8').match(new RegExp(`^${name}=(.+)$`, 'm'))?.[1]?.trim();
 }
 const SUPABASE_URL = readEnvVar('VITE_SUPABASE_URL');
-const SERVICE_ROLE_KEY = fs.readFileSync(path.join(root, '.service_role_key.local'), 'utf8').trim();
+// Was hardcoded to .service_role_key.local (production only) -- see
+// resolveServiceRoleKey.js for why that breaks on staging.
+const SERVICE_ROLE_KEY = resolveServiceRoleKey(root, SUPABASE_URL);
 const TEST_PDF = path.join(__dirname, 'fixtures', 'test-document.pdf');
 
 const ALICE = 'e2e.alice@nhce.edu.in';
@@ -29,8 +32,7 @@ test.describe.serial('Print job queue', () => {
 
   test.beforeAll(async () => {
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
-    const sessions = JSON.parse(fs.readFileSync(path.join(root, 'scripts', '.sessions.json'), 'utf8'));
-    const aliceId = sessions[ALICE].userId;
+    const aliceId = getTestUserId(ALICE);
     await admin.from('print_jobs').delete().eq('user_id', aliceId).neq('status', 'COLLECTED');
   });
 
