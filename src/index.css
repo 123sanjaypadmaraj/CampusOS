@@ -5014,6 +5014,43 @@
 
 .stat-sub { display: block; color: var(--muted); font-size: 11px; margin-top: 4px; }
 
+/* ---- vendor dashboard overview: quick-link shortcut cards ---- */
+
+.vendor-quicklink-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+}
+
+.vendor-quicklink-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 16px 18px;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.vendor-quicklink-card:hover { border-color: var(--purple); box-shadow: 0 0 0 3px var(--soft); }
+
+.vendor-quicklink-icon {
+  flex-shrink: 0;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: var(--soft);
+  color: var(--purple);
+  font-size: 19px;
+}
+
+.vendor-quicklink-card b { display: block; font: 800 14px Manrope; color: var(--text); }
+.vendor-quicklink-card small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+
 .chart-card {
   background: var(--surface);
   border: 1px solid var(--border);
