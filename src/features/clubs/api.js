@@ -1,13 +1,21 @@
 // Data layer for the club self-service leadership dashboard. Distinct from
 // src/features/admin/api.js's club functions (those are admin-only, gated
 // by current_user_is_admin()/'clubs.manage'): everything here is usable by
-// any club's own owner/president/vice_president/secretary/coordinator, per
-// the RLS + RPCs added in supabase/migrations/20260814004800_club_self_service.sql.
+// any club's own owner/president/vice_president/secretary/coordinator/
+// treasurer/event_manager, per the RLS + RPCs added in
+// supabase/migrations/20260814004800_club_self_service.sql and
+// supabase/migrations/20260815001100_club_cms_complete.sql (applications/
+// recruitment, documents, gallery, announcements, meeting attendance,
+// membership history).
 
 import { supabase } from "../../lib/supabase";
 
 function throwIfError(error) {
   if (error) throw error;
+}
+
+function safeFileName(name) {
+  return (name || "file").replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
 // Powers the "Manage club" entry point on the Clubs Hub -- which clubs (if
@@ -85,4 +93,179 @@ export async function setClubMemberRole(memberId, role) {
 export async function removeClubMember(memberId) {
   const { error } = await supabase.rpc("remove_club_member", { p_member_id: memberId });
   throwIfError(error);
+}
+
+/* =========================================================================
+   RECRUITMENT + APPLICATIONS
+========================================================================= */
+
+// Owner/president-only (enforced by the same clubs_write RLS updateClubProfile
+// already relies on) -- toggles how the "Join" button on the Clubs Hub behaves.
+export async function updateClubRecruitment(clubId, { recruitmentMode, recruitmentMessage }) {
+  const { data, error } = await supabase
+    .from("clubs")
+    .update({ recruitment_mode: recruitmentMode, recruitment_message: recruitmentMessage?.trim() || null })
+    .eq("id", clubId)
+    .select()
+    .single();
+  throwIfError(error);
+  return data;
+}
+
+export async function applyToClub(clubId, message) {
+  const { data, error } = await supabase.rpc("apply_to_club", { p_club_id: clubId, p_message: message || null });
+  throwIfError(error);
+  return data;
+}
+
+export async function cancelClubApplication(applicationId) {
+  const { error } = await supabase.rpc("cancel_club_application", { p_application_id: applicationId });
+  throwIfError(error);
+}
+
+export async function reviewClubApplication(applicationId, decision, note) {
+  const { data, error } = await supabase.rpc("review_club_application", {
+    p_application_id: applicationId, p_decision: decision, p_note: note || null,
+  });
+  throwIfError(error);
+  return data;
+}
+
+// Powers the "Applied — pending" state on the Clubs Hub card for the
+// signed-in student, across every club at once.
+export async function getMyClubApplications(userId) {
+  if (!userId) return [];
+  const { data, error } = await supabase
+    .from("club_applications")
+    .select("id, club_id, status, created_at")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+  throwIfError(error);
+  return data || [];
+}
+
+/* =========================================================================
+   DOCUMENTS -- private 'club-files' bucket, path `${clubId}/${filename}`.
+========================================================================= */
+
+export async function uploadClubDocument(clubId, { title, description, category }, file, uploadedBy) {
+  if (!file) throw new Error("Choose a file to upload.");
+  const path = `${clubId}/${Date.now()}-${safeFileName(file.name)}`;
+  const { error: uploadError } = await supabase.storage
+    .from("club-files")
+    .upload(path, file, { cacheControl: "3600", upsert: false, contentType: file.type || "application/octet-stream" });
+  throwIfError(uploadError);
+
+  const { data, error } = await supabase
+    .from("club_documents")
+    .insert({
+      club_id: clubId, title: title?.trim() || file.name, description: description?.trim() || "",
+      category: category?.trim() || "", file_path: path, uploaded_by: uploadedBy,
+    })
+    .select()
+    .single();
+  throwIfError(error);
+  return data;
+}
+
+// Signed link, briefly valid -- 'club-files' is a private bucket, so there's
+// no permanent public URL to store or embed.
+export async function getClubDocumentUrl(path) {
+  const { data, error } = await supabase.storage.from("club-files").createSignedUrl(path, 300);
+  throwIfError(error);
+  return data?.signedUrl;
+}
+
+export async function deleteClubDocument(document) {
+  const { error: dbError } = await supabase.from("club_documents").delete().eq("id", document.id);
+  throwIfError(dbError);
+  if (document.file_path) {
+    await supabase.storage.from("club-files").remove([document.file_path]);
+  }
+}
+
+/* =========================================================================
+   GALLERY -- public 'club-gallery' bucket, path `${clubId}/${filename}`.
+========================================================================= */
+
+export async function uploadClubGalleryImage(clubId, caption, file, uploadedBy) {
+  if (!file) throw new Error("Choose a photo to upload.");
+  const path = `${clubId}/${Date.now()}-${safeFileName(file.name)}`;
+  const { error: uploadError } = await supabase.storage
+    .from("club-gallery")
+    .upload(path, file, { cacheControl: "3600", upsert: false, contentType: file.type || "image/jpeg" });
+  throwIfError(uploadError);
+
+  const { data: pub } = supabase.storage.from("club-gallery").getPublicUrl(path);
+
+  const { data, error } = await supabase
+    .from("club_gallery")
+    .insert({ club_id: clubId, image_url: pub?.publicUrl, caption: caption?.trim() || "", uploaded_by: uploadedBy })
+    .select()
+    .single();
+  throwIfError(error);
+  return data;
+}
+
+export async function deleteClubGalleryItem(item) {
+  const { error } = await supabase.from("club_gallery").delete().eq("id", item.id);
+  throwIfError(error);
+}
+
+/* =========================================================================
+   ANNOUNCEMENTS -- club-scoped, distinct from admin's campus-wide feed.
+========================================================================= */
+
+export async function publishClubAnnouncement(clubId, { title, body, pinned }) {
+  const { data, error } = await supabase.rpc("publish_club_announcement", {
+    p_club_id: clubId, p_title: title, p_body: body || null, p_pinned: pinned || false,
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function setClubAnnouncementPinned(announcementId, pinned) {
+  const { error } = await supabase.from("club_announcements").update({ pinned }).eq("id", announcementId);
+  throwIfError(error);
+}
+
+export async function deleteClubAnnouncement(announcementId) {
+  const { error } = await supabase.from("club_announcements").delete().eq("id", announcementId);
+  throwIfError(error);
+}
+
+/* =========================================================================
+   MEETINGS & ATTENDANCE -- distinct from event check-in; these are
+   internal club meetings, not published campus events.
+========================================================================= */
+
+export async function upsertClubMeeting(clubId, meeting, createdBy) {
+  const payload = {
+    club_id: clubId, title: meeting.title, meeting_date: meeting.meeting_date, notes: meeting.notes || "",
+  };
+  if (!meeting.id) payload.created_by = createdBy;
+  const query = meeting.id
+    ? supabase.from("club_meetings").update(payload).eq("id", meeting.id)
+    : supabase.from("club_meetings").insert(payload);
+  const { data, error } = await query.select().single();
+  throwIfError(error);
+  return data;
+}
+
+export async function deleteClubMeeting(meetingId) {
+  const { error } = await supabase.from("club_meetings").delete().eq("id", meetingId);
+  throwIfError(error);
+}
+
+// entries: [{ user_id, status }]
+export async function markMeetingAttendance(meetingId, entries) {
+  const { data, error } = await supabase.rpc("mark_meeting_attendance", { p_meeting_id: meetingId, p_entries: entries });
+  throwIfError(error);
+  return data || [];
+}
+
+export async function getMeetingAttendance(meetingId) {
+  const { data, error } = await supabase.from("club_meeting_attendance").select("*").eq("meeting_id", meetingId);
+  throwIfError(error);
+  return data || [];
 }

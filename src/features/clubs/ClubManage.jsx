@@ -7,6 +7,14 @@ import {
   HiUserGroup,
   HiCalendarDays,
   HiArrowLeft,
+  HiDocumentText,
+  HiPhoto,
+  HiMegaphone,
+  HiClipboardDocumentCheck,
+  HiClock,
+  HiCheck,
+  HiXCircle,
+  HiArrowDownTray,
 } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import { TrendChart, StatTile } from "../../components/ui/Charts";
@@ -25,11 +33,15 @@ function Modal({ title, kicker, onClose, children }) {
   );
 }
 
-const LEADER_ROLES = ["owner", "president", "vice_president", "secretary", "coordinator"];
+const LEADER_ROLES = ["owner", "president", "vice_president", "secretary", "coordinator", "treasurer", "event_manager"];
 const ALL_ROLES = [...LEADER_ROLES, "member"];
 const ROLE_LABEL = {
   owner: "Owner", president: "President", vice_president: "Vice President",
-  secretary: "Secretary", coordinator: "Coordinator", member: "Member",
+  secretary: "Secretary", coordinator: "Coordinator", treasurer: "Treasurer",
+  event_manager: "Event Manager", member: "Member",
+};
+const RECRUITMENT_LABEL = {
+  open: "Open — instant join", application: "Application required", closed: "Closed — not recruiting",
 };
 
 // The leadership dashboard for a single club. `myLeadership` is the row
@@ -73,17 +85,29 @@ export default function ClubManage({ clubId, campusId, authUser, notify, onBack 
         </div>
       </div>
 
-      <div className="chips" style={{ marginBottom: 24 }}>
+      <div className="chips" style={{ marginBottom: 24, flexWrap: "wrap" }}>
         <button className={tab === "overview" ? "chip active" : "chip"} onClick={() => setTab("overview")}>Overview</button>
         <button className={tab === "members" ? "chip active" : "chip"} onClick={() => setTab("members")}>Members ({data.members.length})</button>
+        <button className={tab === "applications" ? "chip active" : "chip"} onClick={() => setTab("applications")}>Applications {data.applications.length > 0 ? `(${data.applications.length})` : ""}</button>
         <button className={tab === "events" ? "chip active" : "chip"} onClick={() => setTab("events")}>Events ({data.events.length})</button>
+        <button className={tab === "meetings" ? "chip active" : "chip"} onClick={() => setTab("meetings")}>Attendance</button>
+        <button className={tab === "announcements" ? "chip active" : "chip"} onClick={() => setTab("announcements")}>Announcements</button>
+        <button className={tab === "gallery" ? "chip active" : "chip"} onClick={() => setTab("gallery")}>Gallery</button>
+        <button className={tab === "documents" ? "chip active" : "chip"} onClick={() => setTab("documents")}>Documents</button>
+        <button className={tab === "history" ? "chip active" : "chip"} onClick={() => setTab("history")}>History</button>
         <button className={tab === "analytics" ? "chip active" : "chip"} onClick={() => setTab("analytics")}>Analytics</button>
       </div>
 
       {tab === "overview" && <OverviewTab club={data.club} canEdit={isAdminRole} notify={notify} onSaved={reload} />}
       {tab === "members" && <MembersTab members={data.members} canManage={isAdminRole} authUser={authUser} notify={notify} onChange={reload} />}
+      {tab === "applications" && <ApplicationsTab applications={data.applications} notify={notify} onChange={reload} />}
       {tab === "events" && <EventsTab clubId={clubId} campusId={campusId} events={data.events} authUser={authUser} notify={notify} onChange={reload} />}
-      {tab === "analytics" && <AnalyticsTab club={data.club} events={data.events} growth={data.member_growth} />}
+      {tab === "meetings" && <MeetingsTab clubId={clubId} meetings={data.meetings} members={data.members} authUser={authUser} notify={notify} onChange={reload} />}
+      {tab === "announcements" && <AnnouncementsTab clubId={clubId} announcements={data.announcements} notify={notify} onChange={reload} />}
+      {tab === "gallery" && <GalleryTab clubId={clubId} gallery={data.gallery} authUser={authUser} notify={notify} onChange={reload} />}
+      {tab === "documents" && <DocumentsTab clubId={clubId} documents={data.documents} authUser={authUser} notify={notify} onChange={reload} />}
+      {tab === "history" && <HistoryTab history={data.membership_history} />}
+      {tab === "analytics" && <AnalyticsTab club={data.club} events={data.events} growth={data.member_growth} meetings={data.meetings} applications={data.applications} />}
     </section>
   );
 }
@@ -96,43 +120,92 @@ function OverviewTab({ club, canEdit, notify, onSaved }) {
   const [saving, setSaving] = useState(false);
   const change = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
+  const [recruitForm, setRecruitForm] = useState({
+    recruitmentMode: club.recruitment_mode || "open", recruitmentMessage: club.recruitment_message || "",
+  });
+  const [savingRecruit, setSavingRecruit] = useState(false);
+
   return (
-    <div className="profile-box" style={{ maxWidth: 560 }}>
-      <h3>Club profile</h3>
-      {!canEdit && <p style={{ marginBottom: 12 }}>Only the club&rsquo;s owner or president can edit these details. Ask them, or manage members/events from here.</p>}
-      <label>Name
-        <input value={form.name} onChange={(e) => change("name", e.target.value)} disabled={!canEdit} />
-      </label>
-      <label>Category
-        <input value={form.category} onChange={(e) => change("category", e.target.value)} disabled={!canEdit} placeholder="e.g. Technical, Cultural, Sports" />
-      </label>
-      <label>Description
-        <textarea value={form.description} onChange={(e) => change("description", e.target.value)} disabled={!canEdit} rows={4} />
-      </label>
-      <label>Logo URL (optional)
-        <input value={form.logoUrl} onChange={(e) => change("logoUrl", e.target.value)} disabled={!canEdit} placeholder="https://…" />
-      </label>
-      {canEdit && (
-        <button
-          className="primary wide"
-          disabled={saving || !form.name.trim()}
-          onClick={async () => {
-            try {
-              setSaving(true);
-              await clubApi.updateClubProfile(club.id, form);
-              notify("Club profile saved");
-              onSaved();
-            } catch (err) {
-              notify(err.message || "Could not save club profile");
-            } finally {
-              setSaving(false);
-            }
-          }}
-        >
-          {saving ? "Saving…" : "Save changes"}
-        </button>
-      )}
-    </div>
+    <>
+      <div className="profile-box" style={{ maxWidth: 560 }}>
+        <h3>Club profile</h3>
+        {!canEdit && <p style={{ marginBottom: 12 }}>Only the club&rsquo;s owner or president can edit these details. Ask them, or manage members/events from here.</p>}
+        <label>Name
+          <input value={form.name} onChange={(e) => change("name", e.target.value)} disabled={!canEdit} />
+        </label>
+        <label>Category
+          <input value={form.category} onChange={(e) => change("category", e.target.value)} disabled={!canEdit} placeholder="e.g. Technical, Cultural, Sports" />
+        </label>
+        <label>Description
+          <textarea value={form.description} onChange={(e) => change("description", e.target.value)} disabled={!canEdit} rows={4} />
+        </label>
+        <label>Logo URL (optional)
+          <input value={form.logoUrl} onChange={(e) => change("logoUrl", e.target.value)} disabled={!canEdit} placeholder="https://…" />
+        </label>
+        {canEdit && (
+          <button
+            className="primary wide"
+            disabled={saving || !form.name.trim()}
+            onClick={async () => {
+              try {
+                setSaving(true);
+                await clubApi.updateClubProfile(club.id, form);
+                notify("Club profile saved");
+                onSaved();
+              } catch (err) {
+                notify(err.message || "Could not save club profile");
+              } finally {
+                setSaving(false);
+              }
+            }}
+          >
+            {saving ? "Saving…" : "Save changes"}
+          </button>
+        )}
+      </div>
+
+      <div className="profile-box" style={{ maxWidth: 560, marginTop: 16 }}>
+        <h3>Recruitment</h3>
+        {!canEdit && <p style={{ marginBottom: 12 }}>Currently: <b>{RECRUITMENT_LABEL[club.recruitment_mode] || club.recruitment_mode}</b></p>}
+        {canEdit && (
+          <>
+            <label>How students join
+              <select value={recruitForm.recruitmentMode} onChange={(e) => setRecruitForm((f) => ({ ...f, recruitmentMode: e.target.value }))}>
+                <option value="open">Open — instant join</option>
+                <option value="application">Application required — a leader reviews each request</option>
+                <option value="closed">Closed — not accepting new members</option>
+              </select>
+            </label>
+            <label>Message shown to applicants (optional)
+              <textarea
+                rows={2}
+                value={recruitForm.recruitmentMessage}
+                onChange={(e) => setRecruitForm((f) => ({ ...f, recruitmentMessage: e.target.value }))}
+                placeholder="e.g. Tell us why you want to join and any relevant experience."
+              />
+            </label>
+            <button
+              className="primary wide"
+              disabled={savingRecruit}
+              onClick={async () => {
+                try {
+                  setSavingRecruit(true);
+                  await clubApi.updateClubRecruitment(club.id, recruitForm);
+                  notify("Recruitment settings saved");
+                  onSaved();
+                } catch (err) {
+                  notify(err.message || "Could not save recruitment settings");
+                } finally {
+                  setSavingRecruit(false);
+                }
+              }}
+            >
+              {savingRecruit ? "Saving…" : "Save recruitment settings"}
+            </button>
+          </>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -301,10 +374,14 @@ function ClubEventForm({ event, clubId, campusId, authUser, onClose, onSaved, no
   );
 }
 
-function AnalyticsTab({ club, events, growth }) {
+function AnalyticsTab({ club, events, growth, meetings, applications }) {
   const upcoming = events.filter((e) => new Date(e.event_date) > new Date() && e.registration_status !== "CANCELLED").length;
   const totalAttendance = events.reduce((sum, e) => sum + (e.attendees || 0), 0);
   const avgAttendance = events.length ? Math.round(totalAttendance / events.length) : 0;
+
+  const totalMarked = meetings.reduce((sum, m) => sum + (m.marked || 0), 0);
+  const totalPresent = meetings.reduce((sum, m) => sum + (m.present || 0), 0);
+  const meetingAttendanceRate = totalMarked ? Math.round((totalPresent / totalMarked) * 100) : null;
 
   return (
     <div>
@@ -313,12 +390,429 @@ function AnalyticsTab({ club, events, growth }) {
         <StatTile label="Total events" value={club.events} sub={`${upcoming} upcoming`} />
         <StatTile label="Total registrations" value={totalAttendance} />
         <StatTile label="Avg. per event" value={avgAttendance} />
+        <StatTile label="Meetings logged" value={meetings.length} />
+        <StatTile label="Meeting attendance rate" value={meetingAttendanceRate === null ? "—" : `${meetingAttendanceRate}%`} />
+        <StatTile label="Pending applications" value={applications.length} />
       </div>
       <TrendChart
         title="New members (last 30 days)"
         points={growth.map((g) => ({ x: g.day, y: g.new_members }))}
         emptyText="No new members in the last 30 days"
       />
+    </div>
+  );
+}
+
+function ApplicationsTab({ applications, notify, onChange }) {
+  const [busyId, setBusyId] = useState(null);
+
+  const decide = async (app, decision) => {
+    try {
+      setBusyId(app.id);
+      await clubApi.reviewClubApplication(app.id, decision);
+      notify(decision === "approved" ? `${app.name || "Applicant"} approved` : `${app.name || "Applicant"} rejected`);
+      onChange();
+    } catch (err) {
+      notify(err.message || "Could not review this application");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (!applications.length) {
+    return <EmptyState icon={<HiClipboardDocumentCheck />} title="No pending applications" text="New requests to join will show up here." />;
+  }
+
+  return (
+    <div className="resource-list">
+      {applications.map((app) => (
+        <article className="resource-row" key={app.id}>
+          <div className="resource-icon"><HiClipboardDocumentCheck /></div>
+          <div>
+            <b>{app.name || "Unnamed"}</b>
+            <small>
+              {app.usn || app.course || "—"}{app.year ? ` · Year ${app.year}` : ""} · Applied {new Date(app.created_at).toLocaleDateString()}
+            </small>
+            {app.message && <small style={{ display: "block", marginTop: 4 }}>&ldquo;{app.message}&rdquo;</small>}
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button disabled={busyId === app.id} onClick={() => decide(app, "approved")}><HiCheck /> Approve</button>
+            <button className="ghost" disabled={busyId === app.id} onClick={() => decide(app, "rejected")}><HiXCircle /> Reject</button>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function AnnouncementsTab({ clubId, announcements, notify, onChange }) {
+  const [form, setForm] = useState({ title: "", body: "", pinned: false });
+  const [posting, setPosting] = useState(false);
+
+  const post = async () => {
+    try {
+      setPosting(true);
+      await clubApi.publishClubAnnouncement(clubId, form);
+      notify("Announcement posted to every member");
+      setForm({ title: "", body: "", pinned: false });
+      onChange();
+    } catch (err) {
+      notify(err.message || "Could not post announcement");
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className="profile-box" style={{ maxWidth: 560, marginBottom: 20 }}>
+        <h3>New announcement</h3>
+        <label>Title<input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} /></label>
+        <label>Message<textarea rows={3} value={form.body} onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))} /></label>
+        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input type="checkbox" checked={form.pinned} onChange={(e) => setForm((f) => ({ ...f, pinned: e.target.checked }))} style={{ width: "auto" }} />
+          Pin to top
+        </label>
+        <button className="primary wide" disabled={posting || !form.title.trim()} onClick={post}>
+          {posting ? "Posting…" : "Post to all members"}
+        </button>
+      </div>
+
+      {announcements.length === 0 && <EmptyState icon={<HiMegaphone />} title="No announcements yet" />}
+      <div className="resource-list">
+        {announcements.map((a) => (
+          <article className="resource-row" key={a.id}>
+            <div className="resource-icon"><HiMegaphone /></div>
+            <div>
+              <b>{a.pinned ? "📌 " : ""}{a.title}</b>
+              <small>{a.author_name || "Club leader"} · {new Date(a.created_at).toLocaleString()}</small>
+              {a.body && <small style={{ display: "block", marginTop: 4 }}>{a.body}</small>}
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button
+                className="ghost"
+                onClick={async () => {
+                  try { await clubApi.setClubAnnouncementPinned(a.id, !a.pinned); onChange(); }
+                  catch (err) { notify(err.message || "Could not update announcement"); }
+                }}
+              >
+                {a.pinned ? "Unpin" : "Pin"}
+              </button>
+              <button
+                className="ghost"
+                onClick={async () => {
+                  if (!window.confirm("Delete this announcement?")) return;
+                  try { await clubApi.deleteClubAnnouncement(a.id); notify("Announcement deleted"); onChange(); }
+                  catch (err) { notify(err.message || "Could not delete announcement"); }
+                }}
+              >
+                <HiTrash />
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function GalleryTab({ clubId, gallery, authUser, notify, onChange }) {
+  const [caption, setCaption] = useState("");
+  const [uploading, setUploading] = useState(false);
+
+  const onFile = async (file) => {
+    if (!file) return;
+    try {
+      setUploading(true);
+      await clubApi.uploadClubGalleryImage(clubId, caption, file, authUser?.id);
+      notify("Photo added");
+      setCaption("");
+      onChange();
+    } catch (err) {
+      notify(err.message || "Could not upload photo");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className="profile-box" style={{ maxWidth: 560, marginBottom: 20 }}>
+        <h3>Add a photo</h3>
+        <label>Caption (optional)<input value={caption} onChange={(e) => setCaption(e.target.value)} /></label>
+        <label className="file-drop">
+          <input type="file" accept="image/png,image/jpeg,image/webp" disabled={uploading} onChange={(e) => onFile(e.target.files?.[0])} />
+          {uploading ? "Uploading…" : "Choose a photo…"}
+        </label>
+      </div>
+
+      {gallery.length === 0 && <EmptyState icon={<HiPhoto />} title="No photos yet" />}
+      <div className="club-gallery-grid">
+        {gallery.map((g) => (
+          <figure className="club-gallery-item" key={g.id}>
+            <img src={g.image_url} alt={g.caption || "Club photo"} loading="lazy" />
+            {g.caption && <figcaption>{g.caption}</figcaption>}
+            <button
+              className="club-gallery-remove"
+              title="Remove photo"
+              onClick={async () => {
+                if (!window.confirm("Remove this photo?")) return;
+                try { await clubApi.deleteClubGalleryItem(g); notify("Photo removed"); onChange(); }
+                catch (err) { notify(err.message || "Could not remove photo"); }
+              }}
+            >
+              <HiTrash />
+            </button>
+          </figure>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DocumentsTab({ clubId, documents, authUser, notify, onChange }) {
+  const [form, setForm] = useState({ title: "", description: "", category: "" });
+  const [uploading, setUploading] = useState(false);
+
+  const onFile = async (file) => {
+    if (!file) return;
+    try {
+      setUploading(true);
+      await clubApi.uploadClubDocument(clubId, form, file, authUser?.id);
+      notify("Document uploaded");
+      setForm({ title: "", description: "", category: "" });
+      onChange();
+    } catch (err) {
+      notify(err.message || "Could not upload document");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const view = async (doc) => {
+    try {
+      const url = await clubApi.getClubDocumentUrl(doc.file_path);
+      if (url) window.open(url, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      notify(err.message || "Could not open this document");
+    }
+  };
+
+  return (
+    <div>
+      <div className="profile-box" style={{ maxWidth: 560, marginBottom: 20 }}>
+        <h3>Upload a document</h3>
+        <label>Title<input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} /></label>
+        <label>Category (optional)<input value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} placeholder="e.g. Constitution, Minutes, Form" /></label>
+        <label>Description (optional)<textarea rows={2} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} /></label>
+        <label className="file-drop">
+          <input type="file" accept=".pdf,.doc,.docx,image/png,image/jpeg" disabled={uploading} onChange={(e) => onFile(e.target.files?.[0])} />
+          {uploading ? "Uploading…" : "Choose a file…"}
+        </label>
+      </div>
+
+      {documents.length === 0 && <EmptyState icon={<HiDocumentText />} title="No documents yet" />}
+      <div className="resource-list">
+        {documents.map((d) => (
+          <article className="resource-row" key={d.id}>
+            <div className="resource-icon"><HiDocumentText /></div>
+            <div>
+              <b>{d.title}</b>
+              <small>{d.category || "Document"} · {d.uploaded_by_name || "Club leader"} · {new Date(d.created_at).toLocaleDateString()}</small>
+              {d.description && <small style={{ display: "block", marginTop: 4 }}>{d.description}</small>}
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={() => view(d)}><HiArrowDownTray /> View</button>
+              <button
+                className="ghost"
+                onClick={async () => {
+                  if (!window.confirm(`Delete "${d.title}"?`)) return;
+                  try { await clubApi.deleteClubDocument(d); notify("Document deleted"); onChange(); }
+                  catch (err) { notify(err.message || "Could not delete document"); }
+                }}
+              >
+                <HiTrash />
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MeetingsTab({ clubId, meetings, members, authUser, notify, onChange }) {
+  const [modal, setModal] = useState(null);
+  const [attendanceFor, setAttendanceFor] = useState(null);
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
+        <button className="primary" onClick={() => setModal({})}><HiPlus /> Log a meeting</button>
+      </div>
+      {meetings.length === 0 && <EmptyState icon={<HiClock />} title="No meetings logged yet" text="Log a meeting to start tracking attendance." />}
+      <div className="resource-list">
+        {meetings.map((m) => (
+          <article className="resource-row" key={m.id}>
+            <div className="resource-icon"><HiClock /></div>
+            <div>
+              <b>{m.title}</b>
+              <small>
+                {new Date(m.meeting_date).toLocaleString()} · {m.present}/{m.marked} present
+                {m.marked > 0 ? "" : " · attendance not marked yet"}
+              </small>
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={() => setAttendanceFor(m)}><HiClipboardDocumentCheck /> Attendance</button>
+              <button
+                className="ghost"
+                onClick={async () => {
+                  if (!window.confirm(`Delete "${m.title}"? This also deletes its attendance record.`)) return;
+                  try { await clubApi.deleteClubMeeting(m.id); notify("Meeting deleted"); onChange(); }
+                  catch (err) { notify(err.message || "Could not delete meeting"); }
+                }}
+              >
+                <HiTrash />
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+      {modal && (
+        <ClubMeetingForm
+          meeting={modal}
+          clubId={clubId}
+          authUser={authUser}
+          onClose={() => setModal(null)}
+          onSaved={() => { setModal(null); onChange(); }}
+          notify={notify}
+        />
+      )}
+      {attendanceFor && (
+        <AttendanceModal
+          meeting={attendanceFor}
+          members={members}
+          onClose={() => setAttendanceFor(null)}
+          onSaved={() => { setAttendanceFor(null); onChange(); }}
+          notify={notify}
+        />
+      )}
+    </div>
+  );
+}
+
+function ClubMeetingForm({ meeting, clubId, authUser, onClose, onSaved, notify }) {
+  const [form, setForm] = useState({
+    title: meeting.title || "",
+    meeting_date: meeting.meeting_date ? new Date(meeting.meeting_date).toISOString().slice(0, 16) : "",
+    notes: meeting.notes || "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  return (
+    <Modal kicker="CLUB MEETING" title={meeting.id ? "Edit meeting" : "Log a meeting"} onClose={onClose}>
+      <label>Title<input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} /></label>
+      <label>Date &amp; time<input type="datetime-local" value={form.meeting_date} onChange={(e) => setForm((f) => ({ ...f, meeting_date: e.target.value }))} /></label>
+      <label>Notes (optional)<textarea rows={3} value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} /></label>
+      <button
+        className="primary wide"
+        disabled={saving || !form.title.trim() || !form.meeting_date}
+        onClick={async () => {
+          try {
+            setSaving(true);
+            await clubApi.upsertClubMeeting(clubId, { ...meeting, ...form, meeting_date: new Date(form.meeting_date).toISOString() }, authUser?.id);
+            notify("Meeting saved");
+            onSaved();
+          } catch (err) {
+            notify(err.message || "Could not save meeting");
+          } finally {
+            setSaving(false);
+          }
+        }}
+      >
+        {saving ? "Saving…" : "Save meeting"}
+      </button>
+    </Modal>
+  );
+}
+
+const ATTENDANCE_STATUSES = ["present", "absent", "excused"];
+
+function AttendanceModal({ meeting, members, onClose, onSaved, notify }) {
+  const [statuses, setStatuses] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    clubApi.getMeetingAttendance(meeting.id).then((rows) => {
+      const map = {};
+      rows.forEach((r) => { map[r.user_id] = r.status; });
+      setStatuses(map);
+    }).finally(() => setLoading(false));
+  }, [meeting.id]);
+
+  const setStatus = (userId, status) => setStatuses((s) => ({ ...s, [userId]: status }));
+
+  return (
+    <Modal kicker="ATTENDANCE" title={meeting.title} onClose={onClose}>
+      {loading ? <LoadingState label="Loading attendance…" /> : (
+        <>
+          <div className="resource-list" style={{ maxHeight: 360, overflowY: "auto" }}>
+            {members.map((m) => (
+              <div className="club-roster-row" key={m.id}>
+                <div><b>{m.name || "Unnamed"}</b></div>
+                <select value={statuses[m.user_id] || "present"} onChange={(e) => setStatus(m.user_id, e.target.value)}>
+                  {ATTENDANCE_STATUSES.map((s) => <option key={s} value={s}>{s[0].toUpperCase() + s.slice(1)}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+          <button
+            className="primary wide"
+            disabled={saving}
+            onClick={async () => {
+              try {
+                setSaving(true);
+                const entries = members.map((m) => ({ user_id: m.user_id, status: statuses[m.user_id] || "present" }));
+                await clubApi.markMeetingAttendance(meeting.id, entries);
+                notify("Attendance saved");
+                onSaved();
+              } catch (err) {
+                notify(err.message || "Could not save attendance");
+              } finally {
+                setSaving(false);
+              }
+            }}
+          >
+            {saving ? "Saving…" : "Save attendance"}
+          </button>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+const HISTORY_LABEL = {
+  joined: "joined the club", left: "left the club", removed: "was removed from the club", role_changed: "role changed",
+};
+
+function HistoryTab({ history }) {
+  if (!history.length) return <EmptyState icon={<HiClock />} title="No membership history yet" />;
+  return (
+    <div className="resource-list">
+      {history.map((h) => (
+        <article className="resource-row" key={h.id}>
+          <div className="resource-icon"><HiClock /></div>
+          <div>
+            <b>{h.name || "A member"}</b>
+            <small>
+              {HISTORY_LABEL[h.event_type] || h.event_type}
+              {h.event_type === "role_changed" && h.role ? ` to ${ROLE_LABEL[h.role] || h.role}${h.previous_role ? ` (from ${ROLE_LABEL[h.previous_role] || h.previous_role})` : ""}` : ""}
+              {" · "}{new Date(h.created_at).toLocaleString()}
+            </small>
+          </div>
+        </article>
+      ))}
     </div>
   );
 }

@@ -5072,6 +5072,23 @@
 .club-roster-row:last-child { border-bottom: none; }
 .club-roster-row select { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; background: var(--surface); color: var(--text); font-size: 11px; }
 
+.club-gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+.club-gallery-item {
+  position: relative; margin: 0; border-radius: 14px; overflow: hidden;
+  border: 1px solid var(--border); background: var(--surface-2);
+}
+.club-gallery-item img { display: block; width: 100%; height: 140px; object-fit: cover; }
+.club-gallery-item figcaption { padding: 8px 10px; font-size: 11px; color: var(--muted); }
+.club-gallery-remove {
+  position: absolute; top: 6px; right: 6px; border: none; border-radius: 999px;
+  width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.55); color: #fff; cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .club-gallery-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+}
+
 /* =========================================================
    MARKETPLACE + SELLER RATINGS
 ========================================================= */
@@ -5116,9 +5133,11 @@
 .message-thread-row small.listing-tag { color: var(--purple); font-weight: 700; }
 .message-thread-row i { position: absolute; right: 14px; top: 14px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; font-size: 10px; font-style: normal; background: var(--purple); color: #fff; display: grid; place-items: center; }
 .messages-thread { display: flex; flex-direction: column; min-height: 520px; }
-.messages-thread-head { padding: 16px; border-bottom: 1px solid var(--border); }
+.messages-thread-head { padding: 16px; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .messages-thread-head b { display: block; font-size: 14px; }
 .messages-thread-head small { color: var(--muted); font-size: 11px; }
+.messages-thread-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.messages-thread-actions button { font-size: 11px; padding: 6px 10px; }
 .messages-thread-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; max-height: 460px; }
 .message-bubble { max-width: 70%; padding: 10px 13px; border-radius: 14px; background: var(--surface-2); }
 .message-bubble p { margin: 0; font-size: 13px; white-space: pre-wrap; word-break: break-word; }
@@ -5126,9 +5145,20 @@
 .message-bubble.mine { align-self: flex-end; background: var(--purple); }
 .message-bubble.mine p { color: #fff; }
 .message-bubble.mine small { color: #ffffffaa; }
+.message-attachment-img { display: block; max-width: 220px; max-height: 220px; border-radius: 10px; cursor: pointer; object-fit: cover; }
+.message-attachment-img.loading { width: 160px; height: 120px; background: var(--border); opacity: 0.5; }
 .messages-compose { display: flex; gap: 10px; padding: 14px 16px; border-top: 1px solid var(--border); }
 .messages-compose input { flex: 1; height: 44px; border: 1px solid var(--border); border-radius: 10px; padding: 0 14px; background: var(--surface); color: var(--text); outline: none; }
 .messages-compose button { width: 44px; height: 44px; border-radius: 10px; display: grid; place-items: center; background: var(--purple); color: #fff; }
+.messages-compose .attach-btn { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+.messages-compose.blocked { color: var(--muted); font-size: 12px; align-items: center; justify-content: center; }
+.messages-search { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--muted); }
+.messages-search input { flex: 1; border: none; background: transparent; outline: none; color: var(--text); font-size: 12px; }
+.blocked-tag { color: var(--muted); font-weight: 400; }
+.blocked-user-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.blocked-user-row:last-child { border-bottom: none; }
+.availability-chip { display: inline-block; margin-top: 2px; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; }
+.availability-chip.away { background: color-mix(in srgb, #f0a83c 20%, transparent); color: #b57515; }
 @media (max-width: 720px) { .messages-layout { grid-template-columns: 1fr; } .messages-list { max-height: 220px; } }
 
 /* =========================================================

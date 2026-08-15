@@ -198,7 +198,7 @@ function ModerationTab({ notify, authUser }) {
       list.forEach((report) => {
         setContext((current) => ({ ...current, [report.id]: "loading" }));
         adminApi
-          .getReportContext(report.target_type, report.target_id)
+          .getReportContext(report.target_type, report.target_id, report.reporter_id)
           .then((ctx) => setContext((current) => ({ ...current, [report.id]: ctx || "none" })))
           .catch(() => setContext((current) => ({ ...current, [report.id]: "none" })));
       });
@@ -912,7 +912,7 @@ function ClubMembersModal({ club, onClose, notify }) {
     adminApi.listClubMembers(club.id).then(setMembers).catch((err) => setError(err.message || "Could not load members"));
   }, [club.id]);
 
-  const roles = ["member", "coordinator", "secretary", "vice_president", "president", "owner"];
+  const roles = ["member", "coordinator", "secretary", "treasurer", "event_manager", "vice_president", "president", "owner"];
 
   return (
     <Modal kicker="CLUB MEMBERS" title={club.name} onClose={onClose}>

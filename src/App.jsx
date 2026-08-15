@@ -78,6 +78,7 @@ import {
 import { openRazorpayCheckout } from "./features/payments/razorpay";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
 import { LoadingState, EmptyState, ErrorState, OfflineBanner } from "./components/ui/States";
+import { TrendChart, StatTile } from "./components/ui/Charts";
 import AdminCMS from "./features/admin/AdminCMS";
 import VendorDashboard from "./features/vendor/VendorDashboard";
 import FacilitiesDashboard from "./features/facilities/FacilitiesDashboard";
@@ -93,6 +94,11 @@ import {
   getConversationMessages,
   subscribeToConversationList,
   subscribeToConversationMessages,
+  uploadMessageAttachment,
+  getMessageAttachmentUrl,
+  blockUser,
+  unblockUser,
+  listBlockedUsers,
 } from "./services/messagingService";
 import { globalSearch, SEARCH_ENTITY_DESTINATIONS, SEARCH_ENTITY_LABELS } from "./services/searchService";
 import { mintCampusPass } from "./services/campusPassService";
@@ -115,6 +121,7 @@ import {
 } from "./services/opportunitiesService";
 import { askCampusAssistant } from "./services/aiAssistantService";
 import { getAllRecommendations, dismissRecommendation } from "./services/recommendationsService";
+import { getStudentActivitySummary, getStudentSpendingSeries } from "./services/studentAnalyticsService";
 
 import {
   HiHome,
@@ -182,6 +189,8 @@ import {
   HiArrowLeft,
   HiPencilSquare,
   HiTrash,
+  HiPhoto,
+  HiNoSymbol,
 } from "react-icons/hi2";
 import { FaLinkedin, FaGithub, FaGoogle } from "react-icons/fa6";
 
@@ -225,6 +234,15 @@ const ROUTABLE_KEYS = new Set([
   "facilities", "autonomous", "calendar", "notifications",
   "print", "issues", "booking", "lost", "market", "pass", "hostel", "delivery",
 ]);
+
+// A vendor account (canteen or print shop) is a purpose-built ordering
+// console, not a student app with an extra tab bolted on -- Campus/Events/
+// Services/Connect/Messages/Home are all irrelevant to someone whose whole
+// job is "manage my own menu/queue" (the ask that added this: "just like
+// how a swiggy/zomato vendor can see their details"). Only their dashboard,
+// profile, notifications (order alerts), and the legal page Profile links
+// to stay reachable; everything else bounces back to the dashboard below.
+const VENDOR_ALLOWED_KEYS = new Set(["vendor", "profile", "notifications", "legal"]);
 
 const keyToPath = (key) => (key === "home" ? "/" : `/${key}`);
 
@@ -1892,6 +1910,18 @@ function App() {
     // role has even loaded.
     useEffect(() => {
       if (backendLoading) return;
+
+      // Vendor accounts are further restricted to their own dashboard --
+      // "home" isn't a safe fallback for them the way it is for everyone
+      // else (their whole nav is the dashboard + profile), so this branch
+      // bounces to "vendor" instead of falling through to the shared check
+      // below, which would otherwise send a vendor to a Home page they
+      // don't have a nav button to get back out of.
+      if (profile?.role === "vendor") {
+        if (!VENDOR_ALLOWED_KEYS.has(active)) go("vendor");
+        return;
+      }
+
       const roleGatedButAllowed =
         (active !== "admin" || profile?.role === "college_admin" || profile?.role === "super_admin") &&
         (active !== "vendor" || profile?.role === "vendor") &&
@@ -2171,7 +2201,7 @@ function App() {
       <header className="topbar">
         <button
           className="brand"
-          onClick={() => go("home")}
+          onClick={() => go(profile?.role === "vendor" ? "vendor" : "home")}
           aria-label="Campus OS home"
         >
           <span className="brand-mark">C</span>
@@ -2192,7 +2222,7 @@ function App() {
         </div>
 
         <div className="top-actions">
-          {authUser && (
+          {authUser && profile?.role !== "vendor" && (
             <button
               className="icon-btn"
               onClick={() => setGlobalSearchOpen(true)}
@@ -2257,7 +2287,11 @@ function App() {
       <main>{renderPage()}</main>
 
       <nav className="bottom-nav">
-        {navItems.map(([key, icon, label]) => (
+        {/* A vendor account is a purpose-built ordering console, not the
+            full student nav plus an extra tab -- swap the whole bar for
+            just Dashboard + Profile rather than filtering navItems down to
+            one real entry and bolting a second button on after it. */}
+        {(profile?.role === "vendor" ? [["vendor", <HiShoppingBag key="vendor-icon" />, "Dashboard"], ["profile", <HiUserCircle key="profile-icon" />, "Profile"]] : navItems).map(([key, icon, label]) => (
           <button
             key={key}
             className={active === key ? "active" : ""}
@@ -2283,16 +2317,6 @@ function App() {
           >
             <span><HiCog6Tooth /></span>
             <small>Admin</small>
-          </button>
-        )}
-        {profile?.role === "vendor" && (
-          <button
-            className={active === "vendor" ? "active" : ""}
-            onClick={() => go("vendor")}
-            data-testid="nav-vendor-button"
-          >
-            <span><HiShoppingBag /></span>
-            <small>Dashboard</small>
           </button>
         )}
         {profile?.role === "facilities_staff" && (
@@ -3216,9 +3240,23 @@ function Clubs({ notify, clubs: clubList, authUser, setLoginOpen, campusId }) {
   const [requestModalOpen, setRequestModalOpen] = useState(false);
   const [leadership, setLeadership] = useState({});
   const [managingClubId, setManagingClubId] = useState(null);
+  const [applications, setApplications] = useState({}); // club_id -> latest application row
+  const [applyClub, setApplyClub] = useState(null);
+
+  const reloadApplications = () => {
+    if (!authUser?.id) { setApplications({}); return; }
+    clubApi.getMyClubApplications(authUser.id).then((rows) => {
+      const map = {};
+      // Latest first (already ordered by created_at desc) -- keep only the
+      // newest application per club so a rejected-then-reapplied history
+      // doesn't shadow the fresh pending one.
+      (rows || []).forEach((row) => { if (!map[row.club_id]) map[row.club_id] = row; });
+      setApplications(map);
+    }).catch(() => {});
+  };
 
   useEffect(() => {
-    if (!authUser?.id) { setLeadership({}); return; }
+    if (!authUser?.id) { setLeadership({}); setApplications({}); return; }
     getMyClubs(authUser.id).then((myClubs) => {
       const map = {};
       (myClubs || []).forEach((item) => {
@@ -3231,7 +3269,8 @@ function Clubs({ notify, clubs: clubList, authUser, setLoginOpen, campusId }) {
       (rows || []).forEach((row) => { map[row.club_id] = row.role; });
       setLeadership(map);
     }).catch(() => {});
-  }, [authUser?.id]);
+    reloadApplications();
+  }, [authUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (managingClubId) {
     return (
@@ -3258,15 +3297,52 @@ function Clubs({ notify, clubs: clubList, authUser, setLoginOpen, campusId }) {
         await leaveClub({ clubId: club.id, userId: authUser.id });
         setJoinedClubs((prev) => ({ ...prev, [club.id]: false }));
         notify(`Left ${club.name}`);
-      } else {
-        await joinClub({ clubId: club.id, userId: authUser.id });
-        setJoinedClubs((prev) => ({ ...prev, [club.id]: true }));
-        notify(`Joined ${club.name}!`);
+        return;
       }
+
+      if (club.recruitment_mode === "closed") {
+        notify(`${club.name} isn't accepting new members right now`);
+        return;
+      }
+      if (club.recruitment_mode === "application") {
+        setApplyClub(club);
+        return;
+      }
+
+      await joinClub({ clubId: club.id, userId: authUser.id });
+      setJoinedClubs((prev) => ({ ...prev, [club.id]: true }));
+      notify(`Joined ${club.name}!`);
     } catch (err) {
       console.error(err);
-      notify("Club action failed");
+      notify(err.message || "Club action failed");
     }
+  };
+
+  // For an "application"-mode club: what to show instead of a plain
+  // Join/Leave toggle, driven by the latest application row (if any).
+  const joinButtonFor = (club) => {
+    if (joinedClubs[club.id]) return { label: "Leave", action: () => handleToggleJoin(club), className: "ghost" };
+    if (club.recruitment_mode === "closed") return { label: "Recruitment closed", disabled: true, className: "ghost" };
+    if (club.recruitment_mode === "application") {
+      const app = applications[club.id];
+      if (app?.status === "pending") {
+        return {
+          label: "Application pending", className: "ghost",
+          action: async () => {
+            if (!window.confirm("Withdraw your pending application?")) return;
+            try {
+              await clubApi.cancelClubApplication(app.id);
+              notify("Application withdrawn");
+              reloadApplications();
+            } catch (err) {
+              notify(err.message || "Could not withdraw application");
+            }
+          },
+        };
+      }
+      return { label: app?.status === "rejected" ? "Apply again" : "Apply to join", action: () => handleToggleJoin(club), className: "primary" };
+    }
+    return { label: "Join", action: () => handleToggleJoin(club), className: "primary" };
   };
 
   return (
@@ -3311,12 +3387,14 @@ function Clubs({ notify, clubs: clubList, authUser, setLoginOpen, campusId }) {
                 >
                   View club <HiArrowRight />
                 </button>
-                <button
-                  className={isMember ? "ghost" : "primary"}
-                  onClick={() => handleToggleJoin(club)}
-                >
-                  {isMember ? "Leave" : "Join"}
-                </button>
+                {(() => {
+                  const btn = joinButtonFor(club);
+                  return (
+                    <button className={btn.className} disabled={btn.disabled} onClick={btn.action}>
+                      {btn.label}
+                    </button>
+                  );
+                })()}
                 {leadership[club.id] && (
                   <button className="primary" onClick={() => setManagingClubId(club.id)}>
                     Manage club
@@ -3339,16 +3417,34 @@ function Clubs({ notify, clubs: clubList, authUser, setLoginOpen, campusId }) {
             <span>Category: {selectedClub.category}</span>
             <span>Members: {selectedClub.members}</span>
           </div>
-          <button
-            className="primary wide"
-            onClick={() => {
-              handleToggleJoin(selectedClub);
-              setSelectedClub(null);
-            }}
-          >
-            {joinedClubs[selectedClub.id] ? "Leave Club" : "Join Club"}
-          </button>
+          {selectedClub.recruitment_mode === "application" && selectedClub.recruitment_message && !joinedClubs[selectedClub.id] && (
+            <p style={{ marginBottom: 12 }}>{selectedClub.recruitment_message}</p>
+          )}
+          {(() => {
+            const btn = joinButtonFor(selectedClub);
+            return (
+              <button
+                className="primary wide"
+                disabled={btn.disabled}
+                onClick={() => {
+                  setSelectedClub(null);
+                  btn.action();
+                }}
+              >
+                {btn.label}
+              </button>
+            );
+          })()}
         </ModalShell>
+      )}
+
+      {applyClub && (
+        <ApplyClubModal
+          club={applyClub}
+          onClose={() => setApplyClub(null)}
+          onApplied={() => { setApplyClub(null); reloadApplications(); }}
+          notify={notify}
+        />
       )}
 
       {requestModalOpen && (
@@ -3361,6 +3457,41 @@ function Clubs({ notify, clubs: clubList, authUser, setLoginOpen, campusId }) {
         />
       )}
     </section>
+  );
+}
+
+// Application-mode clubs (recruitment_mode = 'application') route "Join"
+// through here instead of an instant insert -- a leader has to approve it
+// (see ApplicationsTab in features/clubs/ClubManage.jsx).
+function ApplyClubModal({ club, onClose, onApplied, notify }) {
+  const [message, setMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  return (
+    <ModalShell kicker="CLUB APPLICATION" title={`Apply to join ${club.name}`} onClose={onClose}>
+      {club.recruitment_message && <p style={{ marginBottom: 12 }}>{club.recruitment_message}</p>}
+      <label>Why do you want to join? (optional)
+        <textarea rows={4} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Tell the club a bit about yourself…" />
+      </label>
+      <button
+        className="primary wide"
+        disabled={submitting}
+        onClick={async () => {
+          try {
+            setSubmitting(true);
+            await clubApi.applyToClub(club.id, message);
+            notify("Application sent — a club leader will review it");
+            onApplied();
+          } catch (err) {
+            notify(err.message || "Could not submit application");
+          } finally {
+            setSubmitting(false);
+          }
+        }}
+      >
+        {submitting ? "Submitting…" : "Submit application"}
+      </button>
+    </ModalShell>
   );
 }
 
@@ -4614,6 +4745,26 @@ function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfil
   const [verifyModalOpen, setVerifyModalOpen] = useState(false);
   const [vendorModalOpen, setVendorModalOpen] = useState(false);
   const [emergencyContactsModalOpen, setEmergencyContactsModalOpen] = useState(false);
+  // My Activity (doc §14 student analytics) -- real data via
+  // student_activity_summary()/student_spending_series(), replacing the
+  // permanently-hardcoded `clubs: 0` this page shipped with. Declared above
+  // the early `if (!user)` return since hooks can't be conditional; the
+  // effect itself no-ops when signed out.
+  const [activitySummary, setActivitySummary] = useState(null);
+  const [spendingSeries, setSpendingSeries] = useState([]);
+  useEffect(() => {
+    if (!user) { setActivitySummary(null); setSpendingSeries([]); return; }
+    let cancelled = false;
+    Promise.all([getStudentActivitySummary(), getStudentSpendingSeries(30)])
+      .then(([summary, series]) => {
+        if (cancelled) return;
+        setActivitySummary(summary);
+        setSpendingSeries(series);
+      })
+      .catch((error) => console.error("My Activity loading failed:", error));
+    return () => { cancelled = true; };
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!user) {
     return (
       <section className="page-section profile-page">
@@ -4768,10 +4919,47 @@ function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfil
           <div className="stats">
             <b>{stats.posts || 0}<span>Posts</span></b>
             <b>{stats.events || 0}<span>Events</span></b>
-            <b>{stats.clubs || 0}<span>Clubs</span></b>
+            <b>{activitySummary?.clubs_joined_count ?? 0}<span>Clubs</span></b>
             <b>{profile?.open_to_projects ? "Open" : "Closed"}<span>Projects</span></b>
           </div>
         </div>
+      </div>
+
+      <div className="profile-box profile-wide-box">
+        <span className="section-kicker">MY ACTIVITY</span>
+        <h3>Spending, orders &amp; campus activity</h3>
+        {activitySummary && (
+          <>
+            <div className="analytics-grid">
+              <StatTile
+                label="Total spent"
+                value={`₹${Number(activitySummary.total_spent || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+                sub={`${activitySummary.food_orders_count || 0} food · ${activitySummary.store_orders_count || 0} store orders`}
+              />
+              <StatTile
+                label="Events"
+                value={activitySummary.events_registered_count || 0}
+                sub={`${activitySummary.events_attended_count || 0} already happened`}
+              />
+              <StatTile
+                label="Marketplace"
+                value={activitySummary.marketplace_listings_count || 0}
+                sub={`${activitySummary.marketplace_sold_count || 0} sold`}
+              />
+              <StatTile
+                label="Opportunities"
+                value={activitySummary.opportunities_applied_count || 0}
+                sub={`${activitySummary.mentor_requests_count || 0} mentor requests`}
+              />
+            </div>
+            <TrendChart
+              title="Spending, last 30 days"
+              points={spendingSeries.map((d) => ({ x: d.day, y: d.total_spent }))}
+              valueFormatter={(v) => `₹${Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+              emptyText="No orders in the last 30 days"
+            />
+          </>
+        )}
       </div>
 
       <div className="profile-box profile-wide-box">
@@ -4834,6 +5022,54 @@ function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfil
             {profile?.personalization_enabled !== false ? "On" : "Off"}
           </button>
         </div>
+      </div>
+
+      <div className="profile-box profile-wide-box">
+        <span className="section-kicker">SELLER AVAILABILITY</span>
+        <div className="push-toggle-row">
+          <div>
+            <b>Marketplace availability</b>
+            <small>
+              {profile?.availability_status === "away"
+                ? "Buyers messaging you about a listing will see you're away."
+                : "Buyers messaging you about a listing will see you're active and likely to reply soon."}
+            </small>
+          </div>
+          <button
+            className={profile?.availability_status === "away" ? "chip" : "chip active"}
+            onClick={async () => {
+              try {
+                const nextStatus = profile?.availability_status === "away" ? "available" : "away";
+                const next = await updateProfile(profile.id, { availability_status: nextStatus });
+                onProfileUpdated(next);
+                notify(nextStatus === "away" ? "Set to Away" : "Set to Active");
+              } catch (error) {
+                notify(error.message || "Could not update availability");
+              }
+            }}
+          >
+            {profile?.availability_status === "away" ? "Away" : "Active"}
+          </button>
+        </div>
+        {profile?.availability_status === "away" && (
+          <label style={{ marginTop: 10, display: "block" }}>
+            Away message (optional)
+            <input
+              defaultValue={profile?.availability_message || ""}
+              placeholder="e.g. Back on Monday"
+              onBlur={async (e) => {
+                const value = e.target.value.trim();
+                if (value === (profile?.availability_message || "")) return;
+                try {
+                  const next = await updateProfile(profile.id, { availability_message: value || null });
+                  onProfileUpdated(next);
+                } catch (error) {
+                  notify(error.message || "Could not update away message");
+                }
+              }}
+            />
+          </label>
+        )}
       </div>
 
       {profile?.role === "student" && (
@@ -6825,6 +7061,59 @@ function NotificationsPage({ notifications, markRead, notify, onOpenConversation
    MESSAGES
 ========================================================= */
 
+function MessageAttachmentImage({ path }) {
+  const [url, setUrl] = useState(null);
+  useEffect(() => {
+    let mounted = true;
+    getMessageAttachmentUrl(path).then((u) => { if (mounted) setUrl(u); }).catch(() => {});
+    return () => { mounted = false; };
+  }, [path]);
+  if (!url) return <div className="message-attachment-img loading" />;
+  return <img className="message-attachment-img" src={url} alt="Attachment" onClick={() => window.open(url, "_blank")} />;
+}
+
+function BlockedUsersModal({ onClose, notify }) {
+  const [blocked, setBlocked] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const reload = () => {
+    setLoading(true);
+    listBlockedUsers().then(setBlocked).catch((err) => notify(err.message || "Could not load blocked users")).finally(() => setLoading(false));
+  };
+  useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <div className="feature-modal" onMouseDown={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose}><HiXMark /></button>
+        <span className="section-kicker">MESSAGES</span>
+        <h2>Blocked users</h2>
+        {loading && <LoadingState label="Loading…" />}
+        {!loading && blocked.length === 0 && <EmptyState icon={<HiNoSymbol />} title="No one blocked" text="Users you block won't be able to message you." />}
+        {!loading && blocked.map((b) => (
+          <div key={b.user_id} className="blocked-user-row">
+            <span>{b.name}</span>
+            <button
+              className="ghost"
+              onClick={async () => {
+                try {
+                  await unblockUser(b.user_id);
+                  notify(`Unblocked ${b.name}`);
+                  reload();
+                } catch (err) {
+                  notify(err.message || "Could not unblock this user");
+                }
+              }}
+            >
+              Unblock
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Messages({ notify, authUser, openConversationId, onConversationOpened, onUnreadChange }) {
   const [conversations, setConversations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -6832,7 +7121,12 @@ function Messages({ notify, authUser, openConversationId, onConversationOpened, 
   const [msgs, setMsgs] = useState([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [search, setSearch] = useState("");
+  const [blockedIds, setBlockedIds] = useState(new Set());
+  const [managingBlocks, setManagingBlocks] = useState(false);
+  const [attaching, setAttaching] = useState(false);
   const threadEndRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   const reloadConversations = async () => {
     try {
@@ -6847,8 +7141,13 @@ function Messages({ notify, authUser, openConversationId, onConversationOpened, 
     }
   };
 
+  const reloadBlocked = () => {
+    listBlockedUsers().then((rows) => setBlockedIds(new Set(rows.map((r) => r.user_id)))).catch(() => {});
+  };
+
   useEffect(() => {
     reloadConversations();
+    reloadBlocked();
     const unsub = subscribeToConversationList(() => reloadConversations());
     return () => unsub?.();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -6891,6 +7190,14 @@ function Messages({ notify, authUser, openConversationId, onConversationOpened, 
   }, [msgs.length]);
 
   const activeConversation = conversations.find((c) => c.conversation_id === activeId);
+  const activeIsBlocked = activeConversation && blockedIds.has(activeConversation.other_user_id);
+
+  const filteredConversations = search.trim()
+    ? conversations.filter((c) => {
+        const q = search.trim().toLowerCase();
+        return c.other_user_name?.toLowerCase().includes(q) || c.listing_title?.toLowerCase().includes(q);
+      })
+    : conversations;
 
   const send = async () => {
     const body = draft.trim();
@@ -6908,11 +7215,68 @@ function Messages({ notify, authUser, openConversationId, onConversationOpened, 
     }
   };
 
+  const sendAttachment = async (file) => {
+    if (!file || !activeId) return;
+    try {
+      setAttaching(true);
+      const path = await uploadMessageAttachment(activeId, file);
+      await sendMessage(activeId, draft.trim(), path);
+      setDraft("");
+      const rows = await getConversationMessages(activeId);
+      setMsgs(rows);
+    } catch (error) {
+      notify(error.message || "Could not send this photo");
+    } finally {
+      setAttaching(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const toggleBlock = async () => {
+    if (!activeConversation) return;
+    const { other_user_id: otherId, other_user_name: otherName } = activeConversation;
+    if (activeIsBlocked) {
+      try {
+        await unblockUser(otherId);
+        notify(`Unblocked ${otherName}`);
+        reloadBlocked();
+      } catch (err) {
+        notify(err.message || "Could not unblock this user");
+      }
+      return;
+    }
+    if (!window.confirm(`Block ${otherName || "this user"}? They won't be able to message you anymore.`)) return;
+    try {
+      await blockUser(otherId);
+      notify(`Blocked ${otherName}`);
+      reloadBlocked();
+    } catch (err) {
+      notify(err.message || "Could not block this user");
+    }
+  };
+
+  const reportConversation = async () => {
+    if (!activeId) return;
+    const reason = window.prompt("Why are you reporting this conversation? (harassment, spam, scam, etc.)");
+    if (!reason?.trim()) return;
+    try {
+      await reportContent("conversation", activeId, reason.trim());
+      notify("Reported to campus moderators");
+    } catch (err) {
+      notify(err.message || "Could not report this conversation");
+    }
+  };
+
   if (loading) return <LoadingState label="Loading your messages…" />;
 
   return (
     <section className="page-section">
-      <PageHeader kicker="MESSAGES" title="Messages" text="Marketplace conversations and classmate DMs, in one place." />
+      <PageHeader
+        kicker="MESSAGES"
+        title="Messages"
+        text="Marketplace conversations and classmate DMs, in one place."
+        action={<button className="ghost" onClick={() => setManagingBlocks(true)}><HiNoSymbol /> Blocked users</button>}
+      />
 
       {conversations.length === 0 && !activeId && (
         <EmptyState
@@ -6925,7 +7289,14 @@ function Messages({ notify, authUser, openConversationId, onConversationOpened, 
       {(conversations.length > 0 || activeId) && (
         <div className="messages-layout">
           <div className="messages-list">
-            {conversations.map((c) => (
+            {conversations.length > 3 && (
+              <div className="messages-search">
+                <HiMagnifyingGlass />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search conversations…" />
+              </div>
+            )}
+            {filteredConversations.length === 0 && <EmptyState title="No matches" text="Try a different name or listing." />}
+            {filteredConversations.map((c) => (
               <button
                 key={c.conversation_id}
                 className={`message-thread-row ${c.conversation_id === activeId ? "active" : ""}`}
@@ -6933,7 +7304,7 @@ function Messages({ notify, authUser, openConversationId, onConversationOpened, 
               >
                 <div className="big-avatar small">{c.other_user_name?.[0] || "?"}</div>
                 <div>
-                  <b>{c.other_user_name || "Campus member"}</b>
+                  <b>{c.other_user_name || "Campus member"}{blockedIds.has(c.other_user_id) && <span className="blocked-tag"> · Blocked</span>}</b>
                   {c.listing_title && <small className="listing-tag">Re: {c.listing_title}</small>}
                   <small>{c.last_message_body ? c.last_message_body.slice(0, 60) : "Say hello…"}</small>
                 </div>
@@ -6948,37 +7319,67 @@ function Messages({ notify, authUser, openConversationId, onConversationOpened, 
             {activeId && (
               <>
                 <div className="messages-thread-head">
-                  <b>{activeConversation?.other_user_name || "Conversation"}</b>
-                  {activeConversation?.listing_title && <small>About: {activeConversation.listing_title}</small>}
+                  <div>
+                    <b>{activeConversation?.other_user_name || "Conversation"}</b>
+                    {activeConversation?.listing_title && <small>About: {activeConversation.listing_title}</small>}
+                    {activeConversation?.other_user_availability_status === "away" && (
+                      <small className="availability-chip away">
+                        Away{activeConversation.other_user_availability_message ? ` · ${activeConversation.other_user_availability_message}` : ""}
+                      </small>
+                    )}
+                  </div>
+                  <div className="messages-thread-actions">
+                    <button className="ghost" onClick={toggleBlock}>{activeIsBlocked ? "Unblock" : "Block"}</button>
+                    <button className="ghost" onClick={reportConversation}>Report</button>
+                  </div>
                 </div>
 
                 <div className="messages-thread-body">
                   {msgs.map((m) => (
                     <div key={m.id} className={`message-bubble ${m.sender_id === authUser?.id ? "mine" : "theirs"}`}>
-                      <p>{m.body}</p>
+                      {m.attachment_path && <MessageAttachmentImage path={m.attachment_path} />}
+                      {m.body && <p>{m.body}</p>}
                       <small>{new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</small>
                     </div>
                   ))}
                   <div ref={threadEndRef} />
                 </div>
 
-                <div className="messages-compose">
-                  <input
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-                    placeholder="Type a message…"
-                    disabled={sending}
-                  />
-                  <button className="primary" disabled={sending || !draft.trim()} onClick={send}>
-                    <HiPaperAirplane />
-                  </button>
-                </div>
+                {activeIsBlocked ? (
+                  <div className="messages-compose blocked">
+                    <span>You&apos;ve blocked this person. Unblock them to send a message.</span>
+                  </div>
+                ) : (
+                  <div className="messages-compose">
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      ref={fileInputRef}
+                      style={{ display: "none" }}
+                      onChange={(e) => sendAttachment(e.target.files?.[0])}
+                    />
+                    <button className="attach-btn" disabled={sending || attaching} onClick={() => fileInputRef.current?.click()} aria-label="Attach photo">
+                      <HiPhoto />
+                    </button>
+                    <input
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+                      placeholder={attaching ? "Sending photo…" : "Type a message…"}
+                      disabled={sending || attaching}
+                    />
+                    <button className="primary" disabled={sending || attaching || !draft.trim()} onClick={send}>
+                      <HiPaperAirplane />
+                    </button>
+                  </div>
+                )}
               </>
             )}
           </div>
         </div>
       )}
+
+      {managingBlocks && <BlockedUsersModal notify={notify} onClose={() => { setManagingBlocks(false); reloadBlocked(); }} />}
     </section>
   );
 }

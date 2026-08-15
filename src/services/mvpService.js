@@ -537,6 +537,12 @@ export async function updateProfile(
     ...(typeof updates.personalization_enabled === "boolean"
       ? { personalization_enabled: updates.personalization_enabled }
       : {}),
+    ...(updates.availability_status !== undefined
+      ? { availability_status: updates.availability_status }
+      : {}),
+    ...(updates.availability_message !== undefined
+      ? { availability_message: updates.availability_message?.trim?.() || updates.availability_message || null }
+      : {}),
     skills: Array.isArray(updates.skills)
       ? updates.skills
       : [],
@@ -704,10 +710,11 @@ export async function listOpenReports(limit = 50) {
   return data || [];
 }
 
-export async function getReportContext(targetType, targetId) {
+export async function getReportContext(targetType, targetId, reporterId = null) {
   const { data, error } = await supabase.rpc("get_report_context", {
     p_target_type: targetType,
     p_target_id: targetId,
+    p_reporter_id: reporterId,
   });
   throwIfError(error);
   return data?.[0] || null;
@@ -1444,7 +1451,9 @@ export async function getClubs(
       members,
       events,
       description,
-      logo_url
+      logo_url,
+      recruitment_mode,
+      recruitment_message
     `)
     .eq("active", true)
     .order("name");

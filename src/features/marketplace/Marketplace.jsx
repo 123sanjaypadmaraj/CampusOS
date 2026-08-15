@@ -93,7 +93,10 @@ export default function Marketplace({ notify, authUser, openLogin, campusId, lis
               <b>{item.title}</b>
               <span className="listing-price">₹{item.price}</span>
               <div className="listing-meta">
-                <span>{item.profiles?.name || "Campus seller"}</span>
+                <span>
+                  {item.profiles?.name || "Campus seller"}
+                  {item.profiles?.availability_status === "away" && <span className="availability-chip away" style={{ marginLeft: 6 }}>Away</span>}
+                </span>
                 {summary ? (
                   <span className="rating-summary"><Stars value={summary.avg_rating} /> <b>{summary.avg_rating}</b> ({summary.rating_count})</span>
                 ) : (
@@ -227,7 +230,14 @@ function ListingDetailModal({ listing, authUser, openLogin, campusId, notify, on
         <span className="listing-price">₹{listing.price}</span>
       </div>
 
-      <h3 style={{ fontSize: 14, margin: "16px 0 8px" }}>Seller: {listing.profiles?.name || "Campus seller"}</h3>
+      <h3 style={{ fontSize: 14, margin: "16px 0 8px" }}>
+        Seller: {listing.profiles?.name || "Campus seller"}
+        {listing.profiles?.availability_status === "away" && (
+          <span className="availability-chip away" style={{ marginLeft: 8 }}>
+            Away{listing.profiles?.availability_message ? ` · ${listing.profiles.availability_message}` : ""}
+          </span>
+        )}
+      </h3>
       {summary ? (
         <div className="rating-summary" style={{ marginBottom: 12 }}>
           <Stars value={summary.avg_rating} /> <b>{summary.avg_rating}</b> · {summary.rating_count} rating{summary.rating_count === 1 ? "" : "s"}
