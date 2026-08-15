@@ -170,9 +170,22 @@ export function subscribeToConversationMessages(conversationId, callback) {
 // threads and new last-messages across every conversation the signed-in
 // user participates in. Same "no filter, RLS narrows it" idiom as
 // subscribeToMarketplace()/subscribeToLostFound() in mvpService.js.
+//
+// Unlike those single-subscriber feeds, this one has TWO independent
+// callers at once in practice (the App-level unread-badge counter, mounted
+// for the whole session, and the Messages page itself while it's open) --
+// a shared fixed topic name broke real production use: supabase-js reuses
+// an existing channel instance for a topic it's already seen, so the
+// second caller's .on() landed on an already-`subscribe()`d channel and
+// threw ("cannot add postgres_changes callbacks... after subscribe()"),
+// crashing the whole page. Multiple independently-named channels listening
+// to the same postgres_changes stream is normal/supported, so a per-call
+// unique suffix is enough -- caught live via tests/live/23-marketplace-
+// messaging.spec.js, not by any unit test (those mock the channel entirely).
+let conversationListSubscriberCount = 0;
 export function subscribeToConversationList(callback) {
   const channel = supabase
-    .channel("public:conversations_realtime")
+    .channel(`public:conversations_realtime:${++conversationListSubscriberCount}`)
     .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, callback)
     .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, callback)
     .subscribe();

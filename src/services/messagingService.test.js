@@ -223,7 +223,7 @@ describe("messagingService", () => {
 
     subscribeToConversationList(jest.fn());
 
-    expect(supabase.channel).toHaveBeenCalledWith("public:conversations_realtime");
+    expect(supabase.channel).toHaveBeenCalledWith(expect.stringMatching(/^public:conversations_realtime:\d+$/));
     expect(on).toHaveBeenCalledWith(
       "postgres_changes",
       { event: "*", schema: "public", table: "conversations" },
@@ -234,5 +234,18 @@ describe("messagingService", () => {
       { event: "*", schema: "public", table: "messages" },
       expect.any(Function)
     );
+  });
+
+  it("subscribeToConversationList gives each call a distinct channel name -- two real callers (the App-level unread badge and the Messages page) subscribe at once in production, and a shared fixed topic made supabase-js reuse an already-subscribed channel and throw", () => {
+    const on = jest.fn().mockReturnThis();
+    const subscribe = jest.fn().mockReturnThis();
+    supabase.channel.mockReturnValue({ on, subscribe });
+
+    subscribeToConversationList(jest.fn());
+    subscribeToConversationList(jest.fn());
+
+    const [firstName] = supabase.channel.mock.calls[0];
+    const [secondName] = supabase.channel.mock.calls[1];
+    expect(firstName).not.toBe(secondName);
   });
 });
