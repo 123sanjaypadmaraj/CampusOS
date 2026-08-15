@@ -47,6 +47,7 @@ by the source doc's section numbers so nothing is silently dropped.
 | §95 | CI: lint → typecheck → unit → build → E2E | `.github/workflows/ci.yml` |
 | §76-78 | Multi-app split — done as **one app, route-branched**, not separate Student/Vendor/Admin/Facilities frontends. Real URL per section (deep links, refresh, browser back/forward all work via the History API); `/admin`, `/vendor`, `/facilities` are reachable URLs but only render for the matching role (unauthorized visitors are bounced to Home and the URL is corrected) — same one Vite build, one Vercel deployment, for every role. | `src/App.jsx` (`ROUTABLE_KEYS`/`pathToKey`/`keyToPath`/`go()`), `vercel.json` (SPA rewrite so a hard refresh on a deep route doesn't 404) |
 | §107 | Production profile fields (name/photo/USN/course/department/year/skills/bio/clubs/projects/achievements/privacy/notification settings/security) | `src/App.jsx` `Profile`/`EditProfileModal`, `0001_extensions_and_core.sql` |
+| §45-46 | Marketplace messaging (conversations, read/unread, listing context, notifications — commit 46da1cc) + block user, report conversation/message moderation, conversation search, attachments, seller availability (this pass). Seller ratings UI (`seller_ratings`) already existed separately. | `supabase/migrations/20260814004200_messaging.sql`, `20260815001500_marketplace_messaging_gaps.sql`, `src/services/messagingService.js`, `Messages` in `src/App.jsx` |
 | §108 | Dashboard personalization — real recommendation engine (food/events/clubs/opportunities, scored from skills/course/department/year/club membership/order & registration/application history; "recommended people" reuses the existing People-you-may-know feature). Deliberately rule-based, not an LLM call — the doc's own "avoid creepy behavior and provide controls" ask is satisfied with a `profiles.personalization_enabled` toggle (falls back to campus-wide popular/recent, not an empty dashboard) and a per-card "not interested" dismiss, both self-service, no admin involved. | `supabase/migrations/20260815000600_profile_personalization_recommendations.sql`, `src/services/recommendationsService.js`, `RecommendedForYou` in `src/App.jsx` |
 
 ## Deferred — infrastructure/access blockers (need the project owner)
@@ -107,9 +108,6 @@ place; there's no UI yet:
   `tickets.update` RPCs exist; no staff UI.
 - **§39 Club CMS** beyond join/leave/post (roles, applications, documents,
   gallery, analytics).
-- **§45-46 Marketplace messaging, seller ratings UI** (tables exist:
-  `seller_ratings`; `marketplace_messages` doesn't exist — messaging as a
-  whole platform capability, doc §46, was never built).
 - **§54-58 Admin dashboard** (user management, vendor onboarding/approval,
   content moderation console). The RPCs (`admin_set_user_role`,
   `moderate_content`, etc.) exist; no admin UI.
