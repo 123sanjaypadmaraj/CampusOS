@@ -65,6 +65,10 @@ test.describe.serial('Vendor order-ops depth', () => {
     await page.waitForLoadState('networkidle');
     await page.getByTestId('nav-vendor-button').click();
     await page.waitForLoadState('networkidle');
+    // The vendor dashboard now lands on its Dashboard overview tab by
+    // default (added later, see tests/live/24-vendor-restricted-nav.spec.js)
+    // -- switch to Orders explicitly rather than assuming it's the landing tab.
+    await page.getByRole('button', { name: 'Orders', exact: true }).click();
 
     const orderCard = page.locator('.resource-row', { hasText: 'Live vendor-queue test order' }).first();
     await expect(orderCard).toBeVisible({ timeout: 15000 });
@@ -84,6 +88,10 @@ test.describe.serial('Vendor order-ops depth', () => {
     await page.waitForLoadState('networkidle');
     await page.getByTestId('nav-vendor-button').click();
     await page.waitForLoadState('networkidle');
+    // The vendor dashboard now lands on its Dashboard overview tab by
+    // default (added later, see tests/live/24-vendor-restricted-nav.spec.js)
+    // -- switch to Orders explicitly rather than assuming it's the landing tab.
+    await page.getByRole('button', { name: 'Orders', exact: true }).click();
 
     // Add a staff member via the roster modal so the assignment dropdown has
     // something real to pick.
@@ -118,6 +126,10 @@ test.describe.serial('Vendor order-ops depth', () => {
     await page.waitForLoadState('networkidle');
     await page.getByTestId('nav-vendor-button').click();
     await page.waitForLoadState('networkidle');
+    // The vendor dashboard now lands on its Dashboard overview tab by
+    // default (added later, see tests/live/24-vendor-restricted-nav.spec.js)
+    // -- switch to Orders explicitly rather than assuming it's the landing tab.
+    await page.getByRole('button', { name: 'Orders', exact: true }).click();
 
     const orderCard = page.locator('.resource-row', { hasText: 'Live vendor-queue test order' }).first();
     await expect(orderCard).toBeVisible({ timeout: 15000 });
@@ -147,6 +159,10 @@ test.describe.serial('Vendor order-ops depth', () => {
     await page.waitForLoadState('networkidle');
     await page.getByTestId('nav-vendor-button').click();
     await page.waitForLoadState('networkidle');
+    // The vendor dashboard now lands on its Dashboard overview tab by
+    // default (added later, see tests/live/24-vendor-restricted-nav.spec.js)
+    // -- switch to Orders explicitly rather than assuming it's the landing tab.
+    await page.getByRole('button', { name: 'Orders', exact: true }).click();
 
     const orderCard = page.locator('.resource-row', { hasText: 'Live vendor-queue test order' }).first();
     await expect(orderCard).toBeVisible({ timeout: 15000 });

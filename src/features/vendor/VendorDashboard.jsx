@@ -134,9 +134,13 @@ export default function VendorDashboard({ notify, authUser }) {
 
 const money = (n) => `₹${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
-function QuickLinkCard({ icon, label, sub, onClick }) {
+function QuickLinkCard({ icon, label, sub, onClick, ariaLabel }) {
   return (
-    <button className="vendor-quicklink-card" onClick={onClick}>
+    // Explicit aria-label -- the visible <b>{label}</b> text alone (e.g.
+    // "Menu") would otherwise give this button the same accessible name as
+    // the tab-switcher chip it navigates to, which is confusing for screen
+    // readers and ambiguous for anything that queries by accessible name.
+    <button className="vendor-quicklink-card" onClick={onClick} aria-label={ariaLabel}>
       <span className="vendor-quicklink-icon">{icon}</span>
       <span>
         <b>{label}</b>
@@ -146,7 +150,7 @@ function QuickLinkCard({ icon, label, sub, onClick }) {
   );
 }
 
-function CanteenOverview({ canteen, notify, onNavigate }) {
+function CanteenOverview({ canteen, onNavigate }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [stats, setStats] = useState(null);
@@ -182,15 +186,15 @@ function CanteenOverview({ canteen, notify, onNavigate }) {
       </div>
 
       <div className="vendor-quicklink-grid">
-        <QuickLinkCard icon={<HiClock />} label="Order queue" sub="Accept, prepare, complete pickups" onClick={() => onNavigate("orders")} />
-        <QuickLinkCard icon={<HiPencilSquare />} label="Menu" sub="Items, pricing, stock, availability" onClick={() => onNavigate("menu")} />
-        <QuickLinkCard icon={<HiChartBar />} label="Analytics" sub="Revenue, orders, SLA over time" onClick={() => onNavigate("analytics")} />
+        <QuickLinkCard icon={<HiClock />} label="Order queue" sub="Accept, prepare, complete pickups" ariaLabel="Jump to the order queue" onClick={() => onNavigate("orders")} />
+        <QuickLinkCard icon={<HiPencilSquare />} label="Menu" sub="Items, pricing, stock, availability" ariaLabel="Edit items and stock" onClick={() => onNavigate("menu")} />
+        <QuickLinkCard icon={<HiChartBar />} label="Analytics" sub="Revenue, orders, SLA over time" ariaLabel="View performance stats" onClick={() => onNavigate("analytics")} />
       </div>
     </div>
   );
 }
 
-function PrintShopOverview({ notify, onNavigate }) {
+function PrintShopOverview({ onNavigate }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [stats, setStats] = useState(null);
@@ -221,23 +225,10 @@ function PrintShopOverview({ notify, onNavigate }) {
       </div>
 
       <div className="vendor-quicklink-grid">
-        <QuickLinkCard icon={<HiPrinter />} label="Print queue" sub="Process and hand off jobs" onClick={() => onNavigate("jobs")} />
-        <QuickLinkCard icon={<HiCurrencyRupee />} label="Pricing" sub="Black & white / colour rates" onClick={() => onNavigate("pricing")} />
-        <QuickLinkCard icon={<HiChartBar />} label="Analytics" sub="Turnaround & SLA over time" onClick={() => onNavigate("analytics")} />
+        <QuickLinkCard icon={<HiPrinter />} label="Print queue" sub="Process and hand off jobs" ariaLabel="Process incoming jobs" onClick={() => onNavigate("jobs")} />
+        <QuickLinkCard icon={<HiCurrencyRupee />} label="Pricing" sub="Black & white / colour rates" ariaLabel="Edit page rates" onClick={() => onNavigate("pricing")} />
+        <QuickLinkCard icon={<HiChartBar />} label="Analytics" sub="Turnaround & SLA over time" ariaLabel="View performance stats" onClick={() => onNavigate("analytics")} />
       </div>
-    </div>
-  );
-}
-
-// Local alias -- Analytics.jsx's own StatTile lives in components/ui/Charts.jsx
-// and is styled for a 4-up analytics grid; reused as-is here too so the
-// dashboard's numbers look like one system with the Analytics tab's.
-function StatTile({ label, value, sub }) {
-  return (
-    <div className="stat-card">
-      <small>{label}</small>
-      <b>{value}</b>
-      {sub && <span className="stat-sub">{sub}</span>}
     </div>
   );
 }

@@ -47,6 +47,8 @@ import {
   setCanteenStaffActive,
   removeCanteenStaff,
   initiateRefund,
+  getCanteenDashboardStats,
+  getPrintShopDashboardStats,
 } from "./api";
 
 function chain(result) {
@@ -57,6 +59,8 @@ function chain(result) {
     order: jest.fn(() => builder),
     delete: jest.fn(() => builder),
     update: jest.fn(() => builder),
+    gte: jest.fn(() => builder),
+    not: jest.fn(() => builder),
     single: jest.fn(() => Promise.resolve(result)),
     maybeSingle: jest.fn(() => Promise.resolve(result)),
     then: (resolve) => Promise.resolve(result).then(resolve),
@@ -463,6 +467,67 @@ describe("canteen staff roster", () => {
 
     expect(builder.delete).toHaveBeenCalled();
     expect(builder.eq).toHaveBeenCalledWith("id", "staff-1");
+  });
+});
+
+describe("getCanteenDashboardStats", () => {
+  it("summarizes today's orders/revenue/pending/stock into one object", async () => {
+    const ordersBuilder = chain({
+      data: [
+        { id: "o1", total: 100, status: "RECEIVED" },   // pending, counts toward revenue
+        { id: "o2", total: 50, status: "COMPLETED" },    // not pending, counts toward revenue
+        { id: "o3", total: 30, status: "CANCELLED" },    // excluded from revenue
+      ],
+      error: null,
+    });
+    const itemsBuilder = chain({
+      data: [
+        { id: "i1", stock_quantity: 2, low_stock_threshold: 5 },  // low stock
+        { id: "i2", stock_quantity: 0, low_stock_threshold: 5 },  // out of stock
+        { id: "i3", stock_quantity: 20, low_stock_threshold: 5 }, // fine
+      ],
+      error: null,
+    });
+    mockFrom.mockImplementation((table) => (table === "orders" ? ordersBuilder : itemsBuilder));
+
+    const stats = await getCanteenDashboardStats("canteen-1");
+
+    expect(ordersBuilder.eq).toHaveBeenCalledWith("canteen_id", "canteen-1");
+    expect(itemsBuilder.eq).toHaveBeenCalledWith("canteen_id", "canteen-1");
+    expect(stats).toEqual({
+      ordersToday: 3,
+      revenueToday: 150,
+      pendingCount: 1,
+      lowStockCount: 1,
+      outOfStockCount: 1,
+    });
+  });
+
+  it("throws if either query errors", async () => {
+    const ordersBuilder = chain({ data: null, error: { message: "boom" } });
+    const itemsBuilder = chain({ data: [], error: null });
+    mockFrom.mockImplementation((table) => (table === "orders" ? ordersBuilder : itemsBuilder));
+
+    await expect(getCanteenDashboardStats("canteen-1")).rejects.toMatchObject({ message: "boom" });
+  });
+});
+
+describe("getPrintShopDashboardStats", () => {
+  it("summarizes today's print jobs by status", async () => {
+    const builder = chain({
+      data: [
+        { id: "j1", status: "PROCESSING" },
+        { id: "j2", status: "READY" },
+        { id: "j3", status: "COLLECTED" },
+      ],
+      error: null,
+    });
+    mockFrom.mockReturnValue(builder);
+
+    const stats = await getPrintShopDashboardStats();
+
+    expect(mockFrom).toHaveBeenCalledWith("print_jobs");
+    expect(stats).toEqual({ jobsToday: 3, activeCount: 1, readyCount: 1 });
   });
 });
 

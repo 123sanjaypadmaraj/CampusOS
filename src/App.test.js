@@ -430,4 +430,55 @@ describe("App button interactions", () => {
       });
     });
   });
+
+  describe("vendor account nav (a purpose-built ordering console, not the full student app)", () => {
+    afterEach(() => {
+      window.history.pushState(null, "", "/");
+    });
+
+    const signInAsVendor = () => {
+      const { getCurrentUser, getOrCreateProfile } = require("./services/mvpService");
+      getCurrentUser.mockResolvedValueOnce({
+        id: "vendor-1",
+        email: "udupi.canteen@nhce.edu.in",
+        user_metadata: {},
+      });
+      getOrCreateProfile.mockResolvedValueOnce({
+        id: "vendor-1",
+        name: "Udupi Canteen",
+        role: "vendor",
+        email: "udupi.canteen@nhce.edu.in",
+      });
+    };
+
+    test("bottom nav shows only Dashboard + Profile, not the student sections", async () => {
+      signInAsVendor();
+      render(<App />);
+
+      await screen.findByTestId("nav-vendor-button");
+
+      expect(screen.getByTestId("nav-profile-button")).toBeInTheDocument();
+      for (const key of ["home", "campus", "events", "services", "socialize", "messages"]) {
+        expect(screen.queryByTestId(`nav-${key}-button`)).not.toBeInTheDocument();
+      }
+    });
+
+    test("the global search icon is hidden for a vendor account", async () => {
+      signInAsVendor();
+      render(<App />);
+
+      await screen.findByTestId("nav-vendor-button");
+      expect(screen.queryByTestId("global-search-button")).not.toBeInTheDocument();
+    });
+
+    test("a vendor deep-linking into a student route (/events) is bounced to their own dashboard", async () => {
+      signInAsVendor();
+      window.history.pushState(null, "", "/events");
+      render(<App />);
+
+      await waitFor(() => {
+        expect(window.location.pathname).toBe("/vendor");
+      });
+    });
+  });
 });
