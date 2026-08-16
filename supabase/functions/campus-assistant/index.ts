@@ -38,36 +38,63 @@ const GROQ_MODEL = "llama-3.3-70b-versatile";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const MAX_TOOL_ROUNDS = 4;
 const MAX_HISTORY_MESSAGES = 12; // caller's own chat history, trimmed to keep requests small/fast
-const GROQ_MAX_RETRIES = 3;
+const GROQ_MAX_RETRIES = 1;
 
 // Groq's free/shared tier rate-limits per-minute, and a single chat turn can
 // already fire several requests in a row (one per tool-calling round) --
 // live testing against production found roughly half of otherwise-identical
-// requests coming back 429 with zero retry, surfacing to the student as a
-// blanket "temporarily unavailable" for no real reason. Retries a 429 or
-// 5xx with backoff (Groq's Retry-After header when present, exponential
-// with jitter otherwise) before actually giving up -- a real chat client
-// shouldn't be more fragile than that.
-async function fetchGroqWithRetry(body: unknown, groqKey: string): Promise<Response> {
-  let lastRes: Response | null = null;
+// requests failing with zero retry, surfacing to the student as a blanket
+// "temporarily unavailable" for no real reason. Two distinct upstream
+// failure modes, both retried here: 429/5xx (capacity), and Groq's own
+// `tool_use_failed` 400 -- Llama 3.3 70B occasionally emits a malformed
+// pseudo-XML tool call (`<function=name{...}</function>`) instead of a
+// proper structured one when the prompt carries this many tool schemas,
+// which Groq's strict parser then rejects outright. That's a sampling
+// fluke, not a deterministic client error, so it's genuinely worth
+// re-rolling rather than giving up on sight the way every other 4xx should.
+type GroqResult = { ok: boolean; status: number; text: string };
+
+function isRetryableGroqFailure(status: number, text: string): boolean {
+  if (status === 429 || status >= 500) return true;
+  if (status === 400) {
+    try {
+      return JSON.parse(text)?.error?.code === "tool_use_failed";
+    } catch { /* not JSON -- not the case we know how to retry */ }
+  }
+  return false;
+}
+
+async function fetchGroqWithRetry(body: unknown, groqKey: string): Promise<GroqResult> {
+  let last: GroqResult | null = null;
   for (let attempt = 0; attempt <= GROQ_MAX_RETRIES; attempt++) {
     const res = await fetch(GROQ_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${groqKey}` },
       body: JSON.stringify(body),
     });
-    if (res.ok || (res.status !== 429 && res.status < 500)) return res;
-    lastRes = res;
+    const text = await res.text();
+    const result: GroqResult = { ok: res.ok, status: res.status, text };
+    if (res.ok || !isRetryableGroqFailure(res.status, text)) return result;
+    last = result;
     if (attempt === GROQ_MAX_RETRIES) break;
 
+    // Capped hard at 1.5s regardless of what Retry-After says (it can ask
+    // for far longer than this function has any business blocking a chat
+    // reply for) -- a burst-load test that pushed several concurrent
+    // requests through this function at once surfaced a real "not enough
+    // compute resources" failure from the Edge Runtime itself when retries
+    // ran longer/more numerous than this, so this stays deliberately cheap:
+    // one retry, short delay, bail to the friendly rate-limited message
+    // otherwise rather than trying to ride out real upstream capacity
+    // pressure inside a single invocation.
     const retryAfterHeader = Number(res.headers.get("retry-after"));
     const delayMs = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
-      ? retryAfterHeader * 1000
-      : Math.round(300 * 2 ** attempt + Math.random() * 200);
+      ? Math.min(retryAfterHeader * 1000, 1500)
+      : 200;
     console.warn(`Groq API ${res.status}, retrying in ${delayMs}ms (attempt ${attempt + 1}/${GROQ_MAX_RETRIES})`);
     await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
-  return lastRes!;
+  return last!;
 }
 
 // Student-relevant navigation targets only -- mirrors a safe subset of
@@ -569,20 +596,26 @@ Deno.serve(async (req: Request) => {
         messages,
         tools: TOOLS,
         tool_choice: "auto",
-        temperature: 0.4,
+        // Low, not 0.4 -- tool-selection rounds are the ones that hit the
+        // tool_use_failed malformed-generation issue documented above; a
+        // near-deterministic temperature makes the model far more likely to
+        // stay inside the structured tool-call format it was trained on
+        // instead of drifting into free-text pseudo-XML. The final
+        // natural-language follow-up below (no tools attached) keeps 0.4 --
+        // that one benefits from a little more variation in phrasing.
+        temperature: 0.15,
         max_tokens: 600,
       }, groqKey);
 
       if (!groqRes.ok) {
-        const text = await groqRes.text();
-        console.error("Groq API error (after retries):", groqRes.status, text);
+        console.error("Groq API error (after retries):", groqRes.status, groqRes.text);
         const message = groqRes.status === 429
           ? "The assistant is getting a lot of requests right now -- try again in a few seconds."
           : "The assistant is temporarily unavailable.";
         return jsonResponse({ code: "ASSISTANT_UPSTREAM_ERROR", message }, 502);
       }
 
-      const groqData = await groqRes.json();
+      const groqData = JSON.parse(groqRes.text);
       const choice = groqData.choices?.[0]?.message;
       if (!choice) {
         return jsonResponse({ code: "ASSISTANT_UPSTREAM_ERROR", message: "The assistant returned an empty response." }, 502);
@@ -614,7 +647,7 @@ Deno.serve(async (req: Request) => {
       if (pendingAction || navigateTo) {
         const followUp = await fetchGroqWithRetry({ model: GROQ_MODEL, messages, temperature: 0.4, max_tokens: 300 }, groqKey);
         if (followUp.ok) {
-          const followUpData = await followUp.json();
+          const followUpData = JSON.parse(followUp.text);
           const followUpChoice = followUpData.choices?.[0]?.message;
           return jsonResponse({ reply: followUpChoice?.content || "Here's what I've drawn up -- take a look below.", pendingAction, navigateTo }, 200);
         }
