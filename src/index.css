@@ -5511,6 +5511,13 @@
 .global-search-result div { flex: 1; min-width: 0; }
 .global-search-result b { display: block; font-size: 13px; }
 .global-search-result small { display: block; color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.global-search-filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+.global-search-filters .chip { font-size: 10px; padding: 5px 10px; }
+.global-search-suggestions { margin-bottom: 6px; }
+.global-search-group-head { display: flex; align-items: center; justify-content: space-between; }
+.global-search-group-head button.ghost { font-size: 11px; padding: 2px 8px; }
+.global-search-chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.global-search-chip-row .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; }
 
 /* =========================================================
    PUSH TOGGLE

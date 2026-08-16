@@ -1,6 +1,7 @@
 import { supabase } from "../lib/supabase";
 import { calculatePrintJobPrice, hasValidBookingRange, isUuid } from "../utils/mvpHelpers";
 import { isValidUsn, usnToEmail } from "../features/auth/usn";
+import { cacheRead, cacheWrite, withOfflineCache } from "../utils/offlineCache";
 
 /*
 |--------------------------------------------------------------------------
@@ -441,6 +442,12 @@ export async function getOrCreateProfile(
     return null;
   }
 
+  // Doc §9 "Offline Mode": Profile is offline-capable, so a real
+  // previously-fetched profile row wins over the synthetic
+  // auth-metadata-only fallback below whenever the network call itself
+  // fails (offline, or any other error).
+  const cacheKey = `profile:${authUser.id}`;
+
   try {
     const existing =
       await getProfile(authUser.id);
@@ -457,8 +464,12 @@ export async function getOrCreateProfile(
           .eq("id", authUser.id)
           .select()
           .maybeSingle();
-        if (patched) return patched;
+        if (patched) {
+          cacheWrite(cacheKey, patched);
+          return patched;
+        }
       }
+      cacheWrite(cacheKey, existing);
       return existing;
     }
 
@@ -495,9 +506,14 @@ export async function getOrCreateProfile(
       .select()
       .maybeSingle();
 
-    if (data) return data;
+    if (data) {
+      cacheWrite(cacheKey, data);
+      return data;
+    }
   } catch (err) {
     console.warn("getOrCreateProfile catch, using fallback:", err);
+    const cached = await cacheRead(cacheKey);
+    if (cached) return cached.data;
   }
 
   return {
@@ -1615,50 +1631,59 @@ export async function getCampusEvents(
   campusId,
   { limit = 50, cursor = null } = {}
 ) {
-  // attendees is a derived count (events_with_counts view), not a
-  // hand-maintained integer column that can drift from real registrations.
-  let query = supabase
-    .from("events_with_counts")
-    .select(`
-      id,
-      campus_id,
-      club_id,
-      title,
-      category,
-      event_date,
-      place,
-      description,
-      capacity,
-      registration_status,
-      attendees,
-      clubs (
+  const fetchEvents = async () => {
+    // attendees is a derived count (events_with_counts view), not a
+    // hand-maintained integer column that can drift from real registrations.
+    let query = supabase
+      .from("events_with_counts")
+      .select(`
         id,
-        name,
-        logo_url
-      )
-    `)
-    .order("event_date")
-    .limit(limit);
+        campus_id,
+        club_id,
+        title,
+        category,
+        event_date,
+        place,
+        description,
+        capacity,
+        registration_status,
+        attendees,
+        clubs (
+          id,
+          name,
+          logo_url
+        )
+      `)
+      .order("event_date")
+      .limit(limit);
 
-  if (campusId) {
-    query = query.eq(
-      "campus_id",
-      campusId
-    );
-  }
+    if (campusId) {
+      query = query.eq(
+        "campus_id",
+        campusId
+      );
+    }
 
-  if (cursor) {
-    query = query.gt("event_date", cursor);
-  }
+    if (cursor) {
+      query = query.gt("event_date", cursor);
+    }
 
-  const {
-    data,
-    error,
-  } = await query;
+    const {
+      data,
+      error,
+    } = await query;
 
-  throwIfError(error);
+    throwIfError(error);
 
-  return (data || []).map(formatEvent);
+    return (data || []).map(formatEvent);
+  };
+
+  // Doc §9 "Offline Mode": "previously loaded events" -- only cache/serve
+  // the first page. A paginated "load more" while offline should just
+  // fail normally rather than silently re-showing page one as if it were
+  // the next page.
+  if (cursor) return fetchEvents();
+  return withOfflineCache(`events:${campusId || "default"}`, fetchEvents);
 }
 
 
@@ -1787,9 +1812,13 @@ export async function getMyRegisteredEventIds(userId) {
 
 export async function getSavedEvents(userId) {
   if (!userId) return [];
-  const { data, error } = await supabase.from("saved_events").select("event_id").eq("user_id", userId);
-  throwIfError(error);
-  return (data || []).map((row) => row.event_id);
+  // Doc §9 "Offline Mode": "saved content" -- this is the only real saved/
+  // bookmarked-content list in the app today.
+  return withOfflineCache(`saved_events:${userId}`, async () => {
+    const { data, error } = await supabase.from("saved_events").select("event_id").eq("user_id", userId);
+    throwIfError(error);
+    return (data || []).map((row) => row.event_id);
+  });
 }
 
 export async function toggleSavedEvent({ eventId, userId }) {
@@ -1813,114 +1842,117 @@ export async function toggleSavedEvent({ eventId, userId }) {
 ========================================================================= */
 
 export async function getCampusFood(campusId) {
-  const [
-    canteenResult,
-    foodResult,
-  ] = await Promise.all([
-    (() => {
-      let q = supabase
-        .from("canteens")
+  // Doc §9 "Offline Mode": "previously loaded menus".
+  return withOfflineCache(`food:${campusId || "default"}`, async () => {
+    const [
+      canteenResult,
+      foodResult,
+    ] = await Promise.all([
+      (() => {
+        let q = supabase
+          .from("canteens")
+          .select(`
+            id,
+            name,
+            subtitle,
+            status,
+            eta_min,
+            eta_max,
+            queue_level,
+            load,
+            color,
+            active
+          `)
+          .eq("active", true)
+          .order("name");
+        if (campusId) q = q.eq("campus_id", campusId);
+        return q;
+      })(),
+
+      supabase
+        .from("food_items")
         .select(`
           id,
+          canteen_id,
           name,
-          subtitle,
-          status,
-          eta_min,
-          eta_max,
-          queue_level,
-          load,
-          color,
-          active
+          description,
+          price,
+          image_url,
+          is_vegetarian,
+          available,
+          food_categories (
+            id,
+            name
+          )
         `)
-        .eq("active", true)
-        .order("name");
-      if (campusId) q = q.eq("campus_id", campusId);
-      return q;
-    })(),
+        .eq("available", true)
+        .order("name"),
+    ]);
 
-    supabase
-      .from("food_items")
-      .select(`
-        id,
-        canteen_id,
-        name,
-        description,
-        price,
-        image_url,
-        is_vegetarian,
-        available,
-        food_categories (
-          id,
-          name
-        )
-      `)
-      .eq("available", true)
-      .order("name"),
-  ]);
-
-  throwIfError(
-    canteenResult.error
-  );
-
-  throwIfError(
-    foodResult.error
-  );
-
-  const canteens =
-    canteenResult.data || [];
-
-  const canteenMap =
-    Object.fromEntries(
-      canteens.map((c) => [
-        c.id,
-        c,
-      ])
+    throwIfError(
+      canteenResult.error
     );
 
-  return {
-    canteens: canteens.map(
-      (canteen) => ({
-        id: canteen.id,
-        name: canteen.name,
-        subtitle:
-          canteen.subtitle || "",
-        status:
-          canteen.status || "Open",
-        eta:
-          `${canteen.eta_min}-${canteen.eta_max} min`,
-        load:
-          canteen.load || 0,
-        color:
-          canteen.color || "green",
-      })
-    ),
+    throwIfError(
+      foodResult.error
+    );
 
-    items: (
-      foodResult.data || []
-    ).map((item) => ({
-      id: item.id,
-      name: item.name,
-      description:
-        item.description || "",
-      price: Number(item.price),
-      image:
-        item.image_url || "",
-      category:
-        item.food_categories?.name ||
-        "Food",
-      vendor:
-        canteenMap[item.canteen_id]
-          ?.name || "",
-      canteenId:
-        item.canteen_id,
-      veg:
-        Boolean(item.is_vegetarian),
-      vegetarian:
-        Boolean(item.is_vegetarian),
-      available:
-        item.available,
-    })),
-  };
+    const canteens =
+      canteenResult.data || [];
+
+    const canteenMap =
+      Object.fromEntries(
+        canteens.map((c) => [
+          c.id,
+          c,
+        ])
+      );
+
+    return {
+      canteens: canteens.map(
+        (canteen) => ({
+          id: canteen.id,
+          name: canteen.name,
+          subtitle:
+            canteen.subtitle || "",
+          status:
+            canteen.status || "Open",
+          eta:
+            `${canteen.eta_min}-${canteen.eta_max} min`,
+          load:
+            canteen.load || 0,
+          color:
+            canteen.color || "green",
+        })
+      ),
+
+      items: (
+        foodResult.data || []
+      ).map((item) => ({
+        id: item.id,
+        name: item.name,
+        description:
+          item.description || "",
+        price: Number(item.price),
+        image:
+          item.image_url || "",
+        category:
+          item.food_categories?.name ||
+          "Food",
+        vendor:
+          canteenMap[item.canteen_id]
+            ?.name || "",
+        canteenId:
+          item.canteen_id,
+        veg:
+          Boolean(item.is_vegetarian),
+        vegetarian:
+          Boolean(item.is_vegetarian),
+        available:
+          item.available,
+      })),
+    };
+  });
 }
 
 
@@ -2583,6 +2615,10 @@ export async function getUserNotifications(
 ) {
   if (!userId) return [];
 
+  // Doc §9 "Offline Mode": only cache/serve the first page -- same
+  // reasoning as getCampusEvents' cursor guard above.
+  const cacheKey = cursor ? null : `notifications:${userId}`;
+
   try {
     let query = supabase
       .from("notifications")
@@ -2604,10 +2640,14 @@ export async function getUserNotifications(
 
     if (error) {
       console.warn("getUserNotifications warning:", error.message);
+      if (cacheKey) {
+        const cached = await cacheRead(cacheKey);
+        if (cached) return cached.data;
+      }
       return [];
     }
 
-    return (data || []).map(
+    const notifications = (data || []).map(
       (notification) => ({
         ...notification,
         time:
@@ -2618,8 +2658,15 @@ export async function getUserNotifications(
           !notification.read,
       })
     );
+
+    if (cacheKey) cacheWrite(cacheKey, notifications);
+    return notifications;
   } catch (err) {
     console.warn("getUserNotifications catch:", err);
+    if (cacheKey) {
+      const cached = await cacheRead(cacheKey);
+      if (cached) return cached.data;
+    }
     return [];
   }
 }

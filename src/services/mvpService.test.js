@@ -42,6 +42,10 @@ import {
   listPendingEmergencyContacts,
   verifyEmergencyContact,
   getEmergencyContactsForAlert,
+  getSavedEvents,
+  getCampusEvents,
+  getCampusFood,
+  getUserNotifications,
 } from "./mvpService";
 
 describe("createFoodOrder", () => {
@@ -597,5 +601,145 @@ describe("emergency contacts (doc §113, 20260815000600_emergency_contacts.sql)"
     supabase.rpc.mockResolvedValue({ data: null, error: null });
     const result = await getEmergencyContactsForAlert("alert-1");
     expect(result).toEqual([]);
+  });
+});
+
+// Doc §9 "Offline Mode": the "previously loaded" read functions cache their
+// last successful result (src/utils/offlineCache.js) and fall back to it
+// when the network call fails, instead of throwing/emptying the screen.
+// Each test below uses its own unique id so the cache keys never collide
+// with another test in this file (the cache is a real module-level store,
+// not reset between `it()`s).
+describe("offline cache fallback (doc §9 'Offline Mode')", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("getSavedEvents serves the last cached list when the network call fails", async () => {
+    const userId = "offline-user-saved-1";
+    const okBuilder = {
+      select: jest.fn(() => okBuilder),
+      eq: jest.fn(() => okBuilder),
+      then: (resolve) => Promise.resolve({ data: [{ event_id: "evt-1" }], error: null }).then(resolve),
+    };
+    mockFrom.mockReturnValueOnce(okBuilder);
+    await expect(getSavedEvents(userId)).resolves.toEqual(["evt-1"]);
+
+    const failBuilder = {
+      select: jest.fn(() => failBuilder),
+      eq: jest.fn(() => failBuilder),
+      then: (resolve, reject) => Promise.reject(new Error("network down")).then(resolve, reject),
+    };
+    mockFrom.mockReturnValueOnce(failBuilder);
+    await expect(getSavedEvents(userId)).resolves.toEqual(["evt-1"]);
+  });
+
+  it("getCampusEvents serves the last cached page when the network call fails", async () => {
+    const campusId = "offline-campus-events-1";
+    const okBuilder = {
+      select: jest.fn(() => okBuilder),
+      order: jest.fn(() => okBuilder),
+      limit: jest.fn(() => okBuilder),
+      eq: jest.fn(() => okBuilder),
+      then: (resolve) => Promise.resolve({ data: [{ id: "e1", title: "Hack Night" }], error: null }).then(resolve),
+    };
+    mockFrom.mockReturnValueOnce(okBuilder);
+    const first = await getCampusEvents(campusId);
+    expect(first).toHaveLength(1);
+
+    const failBuilder = {
+      select: jest.fn(() => failBuilder),
+      order: jest.fn(() => failBuilder),
+      limit: jest.fn(() => failBuilder),
+      eq: jest.fn(() => failBuilder),
+      then: (resolve, reject) => Promise.reject(new Error("offline")).then(resolve, reject),
+    };
+    mockFrom.mockReturnValueOnce(failBuilder);
+    await expect(getCampusEvents(campusId)).resolves.toEqual(first);
+  });
+
+  it("getCampusEvents does NOT fall back to the cache for a paginated (cursor) request", async () => {
+    const campusId = "offline-campus-events-2";
+    const okBuilder = {
+      select: jest.fn(() => okBuilder),
+      order: jest.fn(() => okBuilder),
+      limit: jest.fn(() => okBuilder),
+      eq: jest.fn(() => okBuilder),
+      then: (resolve) => Promise.resolve({ data: [{ id: "e1" }], error: null }).then(resolve),
+    };
+    mockFrom.mockReturnValueOnce(okBuilder);
+    await getCampusEvents(campusId); // populate the cache for the first page
+
+    const failBuilder = {
+      select: jest.fn(() => failBuilder),
+      order: jest.fn(() => failBuilder),
+      limit: jest.fn(() => failBuilder),
+      eq: jest.fn(() => failBuilder),
+      gt: jest.fn(() => failBuilder),
+      then: (resolve, reject) => Promise.reject(new Error("offline")).then(resolve, reject),
+    };
+    mockFrom.mockReturnValueOnce(failBuilder);
+    await expect(getCampusEvents(campusId, { cursor: "2026-01-01" })).rejects.toThrow("offline");
+  });
+
+  it("getUserNotifications serves the last cached list when the network call errors", async () => {
+    const userId = "offline-user-notif-1";
+    const okBuilder = {
+      select: jest.fn(() => okBuilder),
+      eq: jest.fn(() => okBuilder),
+      order: jest.fn(() => okBuilder),
+      limit: jest.fn(() => okBuilder),
+      then: (resolve) =>
+        Promise.resolve({
+          data: [{ id: "n1", created_at: "2026-08-16T00:00:00Z", read: false }],
+          error: null,
+        }).then(resolve),
+    };
+    mockFrom.mockReturnValueOnce(okBuilder);
+    const first = await getUserNotifications(userId);
+    expect(first).toHaveLength(1);
+
+    const failBuilder = {
+      select: jest.fn(() => failBuilder),
+      eq: jest.fn(() => failBuilder),
+      order: jest.fn(() => failBuilder),
+      limit: jest.fn(() => failBuilder),
+      then: (resolve) => Promise.resolve({ data: null, error: { message: "network error" } }).then(resolve),
+    };
+    mockFrom.mockReturnValueOnce(failBuilder);
+    await expect(getUserNotifications(userId)).resolves.toEqual(first);
+  });
+
+  it("getCampusFood serves the last cached menu when the network call fails", async () => {
+    const campusId = "offline-campus-food-1";
+    const canteenBuilder = {
+      select: jest.fn(() => canteenBuilder),
+      eq: jest.fn(() => canteenBuilder),
+      order: jest.fn(() => canteenBuilder),
+      then: (resolve) =>
+        Promise.resolve({ data: [{ id: "c1", name: "Udupi", eta_min: 5, eta_max: 10 }], error: null }).then(
+          resolve
+        ),
+    };
+    const foodBuilder = {
+      select: jest.fn(() => foodBuilder),
+      eq: jest.fn(() => foodBuilder),
+      order: jest.fn(() => foodBuilder),
+      then: (resolve) =>
+        Promise.resolve({ data: [{ id: "f1", canteen_id: "c1", name: "Dosa", price: 50 }], error: null }).then(
+          resolve
+        ),
+    };
+    mockFrom.mockReturnValueOnce(canteenBuilder).mockReturnValueOnce(foodBuilder);
+    const first = await getCampusFood(campusId);
+    expect(first.canteens).toHaveLength(1);
+    expect(first.items).toHaveLength(1);
+
+    const failBuilder = {
+      select: jest.fn(() => failBuilder),
+      eq: jest.fn(() => failBuilder),
+      order: jest.fn(() => failBuilder),
+      then: (resolve, reject) => Promise.reject(new Error("offline")).then(resolve, reject),
+    };
+    mockFrom.mockReturnValueOnce(failBuilder).mockReturnValueOnce(failBuilder);
+    await expect(getCampusFood(campusId)).resolves.toEqual(first);
   });
 });
