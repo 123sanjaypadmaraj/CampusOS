@@ -1057,6 +1057,23 @@ export async function markMarketplaceListingSold({ listingId, buyerId = null }) 
   return data;
 }
 
+// This user's own listings, active or not (getMarketplaceListings above is
+// the public feed -- it only ever shows status='active' and no other
+// seller's own listing history). Used by the "Your Activity" hub.
+export async function getMyMarketplaceListings(userId) {
+  if (!userId) return [];
+
+  const { data, error } = await supabase
+    .from("marketplace_listings")
+    .select("id, title, price, category, condition, status, created_at, updated_at")
+    .eq("seller_id", userId)
+    .order("created_at", { ascending: false });
+
+  throwIfError(error);
+
+  return data || [];
+}
+
 // Records "this user was active today" (supabase/migrations/
 // 20260814005000_analytics.sql) -- powers the admin DAU chart. Fire-and-
 // forget: a failure here should never interrupt the app, so callers just
@@ -2103,6 +2120,44 @@ export async function getMyOrders(
   }
 
   const { data, error } = await query;
+
+  throwIfError(error);
+
+  return data || [];
+}
+
+
+/* =========================================================================
+   PAYMENTS
+========================================================================= */
+
+// The payment ledger only ever links to a food order (`payments.order_id ->
+// orders`, see supabase/migrations/20260814000400_payments.sql) -- there's
+// no student-facing row for store/booking/print charges yet. RLS
+// (payments_read) already restricts this to payments on the caller's own
+// orders, so no explicit .eq("user_id", ...) is needed or even possible
+// here -- the filter has to go through the embedded orders join instead.
+export async function getMyPayments(userId) {
+  if (!userId) return [];
+
+  const { data, error } = await supabase
+    .from("payments")
+    .select(`
+      id,
+      gateway,
+      amount,
+      currency,
+      status,
+      created_at,
+      orders (
+        id,
+        total,
+        status,
+        canteens ( name )
+      )
+    `)
+    .order("created_at", { ascending: false })
+    .limit(50);
 
   throwIfError(error);
 

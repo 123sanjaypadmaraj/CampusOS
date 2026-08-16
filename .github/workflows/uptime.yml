@@ -39,9 +39,20 @@ jobs:
 
       - name: Supabase REST API responds
         run: |
+          # Deliberately NOT the bare /rest/v1/ root (PostgREST's OpenAPI
+          # introspection route) -- Supabase now rejects that specific
+          # route for a publishable/anon key ("Secret API key required"),
+          # even though the exact same key reads real tables fine. Found
+          # live: this was firing every 15 minutes even though production
+          # was actually healthy the whole time (frontend 200, real table
+          # reads succeeding). A cheap real-table HEAD-style request
+          # (Range: 0-0, no data needed) checks "is PostgREST answering"
+          # without needing a secret key or duplicating the next step's
+          # "real data comes back" check.
           code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
             -H "apikey: $PROD_ANON_KEY" \
-            "https://dzjzjlylsfpmymkcavrq.supabase.co/rest/v1/")
+            -H "Range: 0-0" \
+            "https://dzjzjlylsfpmymkcavrq.supabase.co/rest/v1/campuses?select=id")
           echo "supabase REST -> $code"
           if [ "$code" -lt 200 ] || [ "$code" -ge 400 ]; then
             echo "::error::Supabase REST API returned HTTP $code"

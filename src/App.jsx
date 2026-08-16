@@ -62,6 +62,9 @@ import {
   createLostFoundItem,
   claimLostFoundItem,
   getMarketplaceListings,
+  getMyMarketplaceListings,
+  getMyEventRegistrations,
+  getMyPayments,
   reportContent,
   getMyVerification,
   submitStudentVerification,
@@ -86,6 +89,7 @@ import ClubManage from "./features/clubs/ClubManage";
 import * as clubApi from "./features/clubs/api";
 import Marketplace from "./features/marketplace/Marketplace";
 import AcademicHub from "./features/academics/AcademicHub";
+import TeamsBoard from "./features/teams/TeamsBoard";
 import {
   startConversation,
   sendMessage,
@@ -127,6 +131,8 @@ import {
   getMentors,
   applyToOpportunity,
   getMyApplications,
+  getMyApplicationsDetailed,
+  getMyMentorRequests,
   requestMentor,
 } from "./services/opportunitiesService";
 import { askCampusAssistant } from "./services/aiAssistantService";
@@ -242,7 +248,7 @@ const navItems = [
 const ROUTABLE_KEYS = new Set([
   "home", "campus", "events", "services", "socialize", "messages", "profile",
   "map", "legal", "people", "clubs", "food", "store", "ai", "admin", "vendor",
-  "facilities", "autonomous", "calendar", "notifications",
+  "facilities", "autonomous", "calendar", "notifications", "activity",
   "print", "issues", "booking", "lost", "market", "pass", "hostel", "delivery", "academics",
 ]);
 
@@ -2125,6 +2131,30 @@ function App() {
       );
     }
 
+    if (active === "activity") {
+      if (!authUser) {
+        return (
+          <ErrorState
+            title="Sign in to view your activity"
+            text="Your food orders, bookings, applications, payments and more all live here once you're signed in."
+          />
+        );
+      }
+      return (
+        <YourActivity
+          profile={profile}
+          authUser={authUser}
+          notify={notify}
+          go={go}
+          orders={orders}
+          printJobs={printJobs}
+          serviceRequests={serviceRequests}
+          bookings={bookings}
+          notifications={notifications}
+        />
+      );
+    }
+
     if (active === "map") {
       return <CampusMap notify={notify} openModal={setModal} />;
     }
@@ -2135,7 +2165,7 @@ function App() {
 
     if (active === "people") {
       return (
-        <People notify={notify} people={people} openModal={setModal} authUser={authUser} openLogin={() => setLoginOpen(true)} onOpenConversation={goToConversation} />
+        <People notify={notify} people={people} campusId={campusId} authUser={authUser} openLogin={() => setLoginOpen(true)} onOpenConversation={goToConversation} />
       );
     }
 
@@ -2600,9 +2630,9 @@ function Home({
           <PulseCard
             icon={<HiBolt />}
             label="HACKATHON"
-            title="3 teams are looking for developers"
-            meta="Flutter · React · ML"
-            onClick={() => go("campus")}
+            title="Teams are looking for developers"
+            meta="Find or start a team"
+            onClick={() => go("people")}
           />
           <PulseCard
             icon={<HiCalendarDays />}
@@ -3281,7 +3311,8 @@ function Post({ post, notify, authUser, setLoginOpen }) {
    PEOPLE / CLUBS
 ========================================================= */
 
-function People({ notify, people, openModal, authUser, openLogin, onOpenConversation }) {
+function People({ notify, people, campusId, authUser, openLogin, onOpenConversation }) {
+  const [section, setSection] = useState("people"); // 'people' | 'teams'
   const [q, setQ] = useState("");
 
   const filtered = people.filter((person) =>
@@ -3295,42 +3326,45 @@ function People({ notify, people, openModal, authUser, openLogin, onOpenConversa
       <PageHeader
         kicker="NETWORK"
         title="Find Your People"
-        text="Discover students based on skills, interests and projects."
+        text="Discover students based on skills, interests and projects, or start a team and let Campus OS find teammates who match."
         action={
-          <button className="primary" onClick={() => openModal("post")}>
-            <HiUserPlus /> Need a teammate
-          </button>
+          section === "people" ? (
+            <button className="primary" onClick={() => setSection("teams")}>
+              <HiUserPlus /> Need a teammate
+            </button>
+          ) : null
         }
       />
 
-      <div className="searchbar compact wide-search">
-        <HiMagnifyingGlass />
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search people or skills..."
-        />
-      </div>
-
-      <div className="people-grid">
-        {filtered.map((person) => (
-          <PersonCard key={person.id} person={person} notify={notify} authUser={authUser} openLogin={openLogin} onOpenConversation={onOpenConversation} />
-        ))}
-      </div>
-
-      <div className="opportunity">
-        <div>
-          <span className="section-kicker">SKILL MATCHING</span>
-          <h2>Build your next team.</h2>
-          <p>
-            Tell Campus OS what you need and discover students with
-            complementary skills.
-          </p>
-        </div>
-        <button onClick={() => notify("Skill matching questionnaire opened")}>
-          Find my team <HiArrowRight />
+      <div className="chips" style={{ margin: "4px 0 22px", justifyContent: "flex-start" }}>
+        <button className={section === "people" ? "chip active" : "chip"} onClick={() => setSection("people")}>People</button>
+        <button className={section === "teams" ? "chip active" : "chip"} onClick={() => setSection("teams")}>
+          <HiSparkles /> Teams
         </button>
       </div>
+
+      {section === "people" && (
+        <>
+          <div className="searchbar compact wide-search">
+            <HiMagnifyingGlass />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search people or skills..."
+            />
+          </div>
+
+          <div className="people-grid">
+            {filtered.map((person) => (
+              <PersonCard key={person.id} person={person} notify={notify} authUser={authUser} openLogin={openLogin} onOpenConversation={onOpenConversation} />
+            ))}
+          </div>
+        </>
+      )}
+
+      {section === "teams" && (
+        <TeamsBoard campusId={campusId} authUser={authUser} notify={notify} openLogin={openLogin} />
+      )}
     </section>
   );
 }
@@ -5078,7 +5112,14 @@ function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfil
 
       <div className="profile-box profile-wide-box">
         <span className="section-kicker">MY ACTIVITY</span>
-        <h3>Spending, orders &amp; campus activity</h3>
+        <div className="activity-box-head">
+          <h3>Spending, orders &amp; campus activity</h3>
+          {go && (
+            <button className="ghost" onClick={() => go("activity")}>
+              View all activity <HiArrowRight />
+            </button>
+          )}
+        </div>
         {activitySummary && (
           <>
             <div className="analytics-grid">
@@ -5318,6 +5359,476 @@ const EMERGENCY_RELATIONSHIPS = [
   ["parent", "Parent"], ["guardian", "Guardian"], ["sibling", "Sibling"],
   ["spouse", "Spouse"], ["relative", "Relative"], ["friend", "Friend"], ["other", "Other"],
 ];
+
+/* =========================================================
+   YOUR ACTIVITY -- unified history hub (doc: "Your activity" tree --
+   Food orders / Event registrations / Club activity / Marketplace /
+   Service requests / Bookings / Print jobs / Applications /
+   Notifications / Payments). Food orders, applications, event
+   registrations, club activity and payments have no other read-only
+   history view anywhere else in the app -- this is the only place a
+   student can see them. The other five (services/bookings/print/
+   marketplace/notifications) already have a live, actionable page
+   elsewhere; rows here are read-only summaries that deep-link out to
+   that page via `go()` rather than duplicating its interactions.
+========================================================= */
+
+function activityStatusTone(status) {
+  const s = (status || "").toString().toLowerCase();
+  if (/(completed|delivered|paid|captured|confirmed|approved|accepted|sold|resolved|active)/.test(s)) return "good";
+  if (/(cancel|reject|fail|declin|remov|expired|refund)/.test(s)) return "bad";
+  if (/(pending|submitted|created|preparing|ready|reviewed|shortlisted|out_for_delivery|received|processing)/.test(s)) return "warn";
+  return "neutral";
+}
+
+function formatStatusLabel(status) {
+  if (!status) return "";
+  return status.toString().replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function activityMoney(value) {
+  return `₹${Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+}
+
+function ActivityRow({ icon, title, subtitle, meta, status, onClick }) {
+  return (
+    <div
+      className={`activity-row${onClick ? " clickable" : ""}`}
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === "Enter") onClick(); } : undefined}
+    >
+      <span className="activity-row-icon">{icon}</span>
+      <div className="activity-row-body">
+        <b>{title}</b>
+        {subtitle && <small>{subtitle}</small>}
+      </div>
+      <div className="activity-row-end">
+        {status && <span className={`activity-status tone-${activityStatusTone(status)}`}>{formatStatusLabel(status)}</span>}
+        {meta && <small className="activity-row-meta">{meta}</small>}
+      </div>
+    </div>
+  );
+}
+
+const ACTIVITY_CATEGORIES = [
+  { key: "food", label: "Food orders", icon: <HiShoppingCart /> },
+  { key: "events", label: "Event registrations", icon: <HiCalendarDays /> },
+  { key: "clubs", label: "Club activity", icon: <HiUserGroup /> },
+  { key: "marketplace", label: "Marketplace", icon: <HiShoppingBag /> },
+  { key: "services", label: "Service requests", icon: <HiWrenchScrewdriver /> },
+  { key: "bookings", label: "Bookings", icon: <HiBuildingOffice2 /> },
+  { key: "print", label: "Print jobs", icon: <HiPrinter /> },
+  { key: "applications", label: "Applications", icon: <HiBriefcase /> },
+  { key: "notifications", label: "Notifications", icon: <HiBell /> },
+  { key: "payments", label: "Payments", icon: <HiCreditCard /> },
+];
+
+function YourActivity({
+  profile,
+  authUser,
+  notify,
+  go,
+  orders = [],
+  printJobs = [],
+  serviceRequests = [],
+  bookings = [],
+  notifications = [],
+}) {
+  const userId = profile?.id || authUser?.id;
+  const [tab, setTab] = useState("food");
+  const [loading, setLoading] = useState(true);
+  const [eventRegs, setEventRegs] = useState([]);
+  const [clubActivity, setClubActivity] = useState([]);
+  const [myListings, setMyListings] = useState([]);
+  const [applications, setApplications] = useState([]);
+  const [mentorRequests, setMentorRequests] = useState([]);
+  const [payments, setPayments] = useState([]);
+
+  useEffect(() => {
+    if (!userId) { setLoading(false); return; }
+    let cancelled = false;
+    setLoading(true);
+    Promise.all([
+      getMyEventRegistrations(userId),
+      getMyClubs(userId),
+      getMyMarketplaceListings(userId),
+      getMyApplicationsDetailed(userId),
+      getMyMentorRequests(userId),
+      getMyPayments(userId),
+    ])
+      .then(([regs, clubMemberships, listings, apps, mentorReqs, pays]) => {
+        if (cancelled) return;
+        setEventRegs(regs);
+        setClubActivity(clubMemberships);
+        setMyListings(listings);
+        setApplications(apps);
+        setMentorRequests(mentorReqs);
+        setPayments(pays);
+      })
+      .catch((error) => {
+        console.error("Your Activity loading failed:", error);
+        notify?.(error.message || "Could not load your activity");
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!userId) {
+    return (
+      <ErrorState
+        title="Sign in to view your activity"
+        text="Your food orders, bookings, applications, payments and more all live here once you're signed in."
+      />
+    );
+  }
+
+  const counts = {
+    food: orders.length,
+    events: eventRegs.length,
+    clubs: clubActivity.length,
+    marketplace: myListings.length,
+    services: serviceRequests.length,
+    bookings: bookings.length,
+    print: printJobs.length,
+    applications: applications.length + mentorRequests.length,
+    notifications: notifications.length,
+    payments: payments.length,
+  };
+
+  return (
+    <section className="page-section activity-page">
+      <PageHeader
+        kicker="YOUR HISTORY"
+        title="Your activity"
+        text="Everything you've ordered, booked, joined and applied to on CampusOS, in one place."
+      />
+
+      <div className="activity-layout">
+        <nav className="activity-nav">
+          {ACTIVITY_CATEGORIES.map((c) => (
+            <button
+              key={c.key}
+              className={`activity-nav-item${tab === c.key ? " active" : ""}`}
+              onClick={() => setTab(c.key)}
+            >
+              <span className="activity-nav-icon">{c.icon}</span>
+              <span className="activity-nav-label">{c.label}</span>
+              <span className="activity-nav-count">{counts[c.key]}</span>
+            </button>
+          ))}
+        </nav>
+
+        <div className="activity-content">
+          {loading ? (
+            <LoadingState label="Loading your activity…" />
+          ) : (
+            <>
+              {tab === "food" && <ActivityFoodOrders orders={orders} go={go} />}
+              {tab === "events" && <ActivityEventRegistrations items={eventRegs} go={go} />}
+              {tab === "clubs" && <ActivityClubs items={clubActivity} go={go} />}
+              {tab === "marketplace" && <ActivityMarketplace items={myListings} go={go} />}
+              {tab === "services" && <ActivityServiceRequests items={serviceRequests} go={go} />}
+              {tab === "bookings" && <ActivityBookings items={bookings} go={go} />}
+              {tab === "print" && <ActivityPrintJobs items={printJobs} go={go} />}
+              {tab === "applications" && (
+                <ActivityApplications applications={applications} mentorRequests={mentorRequests} go={go} />
+              )}
+              {tab === "notifications" && <ActivityNotifications items={notifications} go={go} />}
+              {tab === "payments" && <ActivityPayments items={payments} />}
+            </>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ActivityFoodOrders({ orders, go }) {
+  if (!orders.length) {
+    return (
+      <EmptyState
+        icon={<HiShoppingCart />}
+        title="No food orders yet"
+        text="Order from a campus canteen and it'll show up here."
+        action={<button className="ghost" onClick={() => go("food")}>Browse food</button>}
+      />
+    );
+  }
+  return (
+    <div className="activity-list">
+      {orders.map((order) => (
+        <ActivityRow
+          key={order.id}
+          icon={<HiShoppingCart />}
+          title={order.canteens?.name || "Canteen order"}
+          subtitle={`${(order.order_items || []).length} item${(order.order_items || []).length === 1 ? "" : "s"} · ${order.created_at ? new Date(order.created_at).toLocaleString() : ""}${order.pickup_code ? ` · Pickup ${order.pickup_code}` : ""}`}
+          meta={activityMoney(order.total)}
+          status={order.status}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ActivityEventRegistrations({ items, go }) {
+  if (!items.length) {
+    return (
+      <EmptyState
+        icon={<HiCalendarDays />}
+        title="No event registrations yet"
+        text="Register for a campus event and it'll show up here."
+        action={<button className="ghost" onClick={() => go("events")}>Browse events</button>}
+      />
+    );
+  }
+  return (
+    <div className="activity-list">
+      {items.map((reg) => (
+        <ActivityRow
+          key={reg.event_id}
+          icon={<HiCalendarDays />}
+          title={reg.events?.title || "Campus event"}
+          subtitle={`${reg.events?.category || "Event"}${reg.events?.place ? ` · ${reg.events.place}` : ""}${reg.events?.event_date ? ` · ${new Date(reg.events.event_date).toLocaleString()}` : ""}`}
+          meta={reg.registered_at ? `Registered ${new Date(reg.registered_at).toLocaleDateString()}` : undefined}
+          onClick={() => go("events")}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ActivityClubs({ items, go }) {
+  if (!items.length) {
+    return (
+      <EmptyState
+        icon={<HiUserGroup />}
+        title="No club activity yet"
+        text="Join a club and your membership will show up here."
+        action={<button className="ghost" onClick={() => go("clubs")}>Browse clubs</button>}
+      />
+    );
+  }
+  return (
+    <div className="activity-list">
+      {items.map((membership) => (
+        <ActivityRow
+          key={membership.club_id}
+          icon={<HiUserGroup />}
+          title={membership.clubs?.name || "Campus club"}
+          subtitle={`${membership.clubs?.category || "Club"}${membership.joined_at ? ` · Joined ${new Date(membership.joined_at).toLocaleDateString()}` : ""}`}
+          meta={membership.role ? formatStatusLabel(membership.role) : undefined}
+          onClick={() => go("clubs")}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ActivityMarketplace({ items, go }) {
+  if (!items.length) {
+    return (
+      <EmptyState
+        icon={<HiShoppingBag />}
+        title="No marketplace listings yet"
+        text="List something to sell and it'll show up here."
+        action={<button className="ghost" onClick={() => go("market")}>Open Marketplace</button>}
+      />
+    );
+  }
+  return (
+    <div className="activity-list">
+      {items.map((listing) => (
+        <ActivityRow
+          key={listing.id}
+          icon={<HiShoppingBag />}
+          title={listing.title}
+          subtitle={`${listing.category || "Other"} · ${listing.condition || "Used"}${listing.created_at ? ` · Listed ${new Date(listing.created_at).toLocaleDateString()}` : ""}`}
+          meta={activityMoney(listing.price)}
+          status={listing.status}
+          onClick={() => go("market")}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ActivityServiceRequests({ items, go }) {
+  if (!items.length) {
+    return (
+      <EmptyState
+        icon={<HiWrenchScrewdriver />}
+        title="No service requests yet"
+        text="Report a maintenance issue and it'll show up here."
+        action={<button className="ghost" onClick={() => go("issues")}>Report an issue</button>}
+      />
+    );
+  }
+  return (
+    <div className="activity-list">
+      {items.map((request) => (
+        <ActivityRow
+          key={request.id}
+          icon={<HiWrenchScrewdriver />}
+          title={request.title || request.services?.name || "Service request"}
+          subtitle={`${request.services?.name || "Campus service"}${request.locations?.building ? ` · ${request.locations.building}` : ""}${request.created_at ? ` · ${new Date(request.created_at).toLocaleDateString()}` : ""}`}
+          status={request.status}
+          onClick={() => go("issues")}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ActivityBookings({ items, go }) {
+  if (!items.length) {
+    return (
+      <EmptyState
+        icon={<HiBuildingOffice2 />}
+        title="No bookings yet"
+        text="Book a hall, lab or piece of equipment and it'll show up here."
+        action={<button className="ghost" onClick={() => go("booking")}>Book a resource</button>}
+      />
+    );
+  }
+  return (
+    <div className="activity-list">
+      {items.map((booking) => (
+        <ActivityRow
+          key={booking.id}
+          icon={<HiBuildingOffice2 />}
+          title={booking.resources?.name || "Resource booking"}
+          subtitle={`${booking.resources?.resource_type || "Resource"} · ${booking.start_time ? new Date(booking.start_time).toLocaleString() : ""}${booking.end_time ? ` – ${new Date(booking.end_time).toLocaleTimeString()}` : ""}`}
+          status={booking.status}
+          onClick={() => go("booking")}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ActivityPrintJobs({ items, go }) {
+  if (!items.length) {
+    return (
+      <EmptyState
+        icon={<HiPrinter />}
+        title="No print jobs yet"
+        text="Upload a document to print and it'll show up here."
+        action={<button className="ghost" onClick={() => go("print")}>Print a document</button>}
+      />
+    );
+  }
+  return (
+    <div className="activity-list">
+      {items.map((job) => (
+        <ActivityRow
+          key={job.id}
+          icon={<HiPrinter />}
+          title={job.file_name || "Print job"}
+          subtitle={`${job.copies || 1} copy${(job.copies || 1) === 1 ? "" : "ies"} · ${job.pages || 1} page${(job.pages || 1) === 1 ? "" : "s"} · ${job.color_mode === "colour" ? "Color" : "Black & white"}${job.created_at ? ` · ${new Date(job.created_at).toLocaleDateString()}` : ""}`}
+          meta={job.price != null ? activityMoney(job.price) : undefined}
+          status={job.status}
+          onClick={() => go("print")}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ActivityApplications({ applications, mentorRequests, go }) {
+  if (!applications.length && !mentorRequests.length) {
+    return (
+      <EmptyState
+        icon={<HiBriefcase />}
+        title="No applications yet"
+        text="Apply to an opportunity or request a mentor and it'll show up here."
+        action={<button className="ghost" onClick={() => go("events")}>Browse opportunities</button>}
+      />
+    );
+  }
+  return (
+    <div className="activity-list">
+      {applications.map((app) => (
+        <ActivityRow
+          key={`app-${app.id}`}
+          icon={<HiBriefcase />}
+          title={app.opportunities ? `${app.opportunities.role} @ ${app.opportunities.company}` : "Opportunity application"}
+          subtitle={`${app.opportunities?.type || "Opportunity"}${app.created_at ? ` · Applied ${new Date(app.created_at).toLocaleDateString()}` : ""}`}
+          status={app.status}
+          onClick={() => go("events")}
+        />
+      ))}
+      {mentorRequests.map((req) => (
+        <ActivityRow
+          key={`mentor-${req.id}`}
+          icon={<HiAcademicCap />}
+          title={req.mentors ? `Mentorship · ${req.mentors.name}` : "Mentor request"}
+          subtitle={`${req.mentors?.role || "Mentor"}${req.created_at ? ` · Requested ${new Date(req.created_at).toLocaleDateString()}` : ""}`}
+          status={req.status}
+          onClick={() => go("events")}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ActivityNotifications({ items, go }) {
+  if (!items.length) {
+    return (
+      <EmptyState
+        icon={<HiBell />}
+        title="No notifications yet"
+        text="Campus updates, order alerts and service updates will show up here."
+      />
+    );
+  }
+  return (
+    <div className="activity-list">
+      {items.slice(0, 20).map((n) => (
+        <ActivityRow
+          key={n.id}
+          icon={<HiBell />}
+          title={n.title}
+          subtitle={n.time || (n.created_at ? new Date(n.created_at).toLocaleString() : "")}
+          meta={n.unread ? "Unread" : undefined}
+          onClick={() => go("notifications")}
+        />
+      ))}
+      {items.length > 20 && (
+        <button className="ghost wide" onClick={() => go("notifications")}>
+          View all {items.length} notifications
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ActivityPayments({ items }) {
+  if (!items.length) {
+    return (
+      <EmptyState
+        icon={<HiCreditCard />}
+        title="No payments yet"
+        text="Payments for food orders show up here once you've placed one."
+      />
+    );
+  }
+  return (
+    <div className="activity-list">
+      {items.map((payment) => (
+        <ActivityRow
+          key={payment.id}
+          icon={<HiCreditCard />}
+          title={payment.orders?.canteens?.name ? `Payment · ${payment.orders.canteens.name}` : "Payment"}
+          subtitle={`${payment.gateway ? formatStatusLabel(payment.gateway) : "Gateway"}${payment.created_at ? ` · ${new Date(payment.created_at).toLocaleString()}` : ""}`}
+          meta={activityMoney(payment.amount)}
+          status={payment.status}
+        />
+      ))}
+    </div>
+  );
+}
 
 // Student self-service on the next-of-kin directory (doc §113). Contacts
 // start unverified -- a facilities/admin reviewer confirms the number

@@ -585,6 +585,24 @@
   font-size: 10px;
 }
 
+.team-status {
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: capitalize;
+  background: var(--soft);
+  color: #6544d8;
+  align-self: flex-start;
+}
+.team-status-recruiting { background: #e4f7ef; color: var(--green); }
+.team-status-full { background: #fff4e0; color: #b5760a; }
+.team-status-closed,
+.team-status-completed { background: #f0edf4; color: var(--muted); }
+
+.team-row { cursor: pointer; }
+.team-row-clickable { cursor: pointer; }
+
 .person-actions {
   display: flex;
   gap: 7px;
@@ -5571,3 +5589,43 @@
 .reminder-check, .reminder-delete { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; color: var(--muted); background: var(--surface-2); }
 .reminder-check:hover { color: #13845b; background: #e4f7ef; }
 .reminder-delete:hover { color: #c23a3a; background: #fbe9e9; }
+
+/* =========================================================
+   YOUR ACTIVITY (unified history hub)
+========================================================= */
+.activity-box-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.activity-box-head h3 { margin: 0; }
+.activity-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 20px; align-items: start; margin-top: 6px; }
+.activity-nav { display: flex; flex-direction: column; gap: 3px; background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 10px; position: sticky; top: 100px; }
+.activity-nav-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 12px; border-radius: 12px; text-align: left; font-size: 12px; font-weight: 700; color: var(--muted); }
+.activity-nav-item:hover { background: var(--surface-2); }
+.activity-nav-item.active { background: var(--accent); color: #fff; }
+.activity-nav-icon { display: grid; place-items: center; width: 18px; font-size: 15px; flex: 0 0 auto; }
+.activity-nav-label { flex: 1; }
+.activity-nav-count { font-size: 10px; font-weight: 800; background: var(--surface-2); color: var(--muted); border-radius: 999px; padding: 2px 7px; min-width: 20px; text-align: center; }
+.activity-nav-item.active .activity-nav-count { background: rgba(255, 255, 255, .25); color: #fff; }
+.activity-content { min-height: 320px; }
+.activity-list { display: grid; gap: 10px; }
+.activity-row { display: flex; align-items: center; gap: 12px; border: 1px solid var(--border); background: var(--surface); border-radius: 14px; padding: 14px 16px; }
+.activity-row.clickable { cursor: pointer; transition: background .15s ease; }
+.activity-row.clickable:hover { background: var(--surface-2); }
+.activity-row-icon { width: 38px; height: 38px; border-radius: 11px; background: var(--soft); color: var(--purple); display: grid; place-items: center; flex: 0 0 auto; font-size: 16px; }
+.app-shell.dark-mode .activity-row-icon { background: var(--surface-2); }
+.activity-row-body { flex: 1; min-width: 0; }
+.activity-row-body b { display: block; font-size: 13px; }
+.activity-row-body small { display: block; color: var(--muted); font-size: 11px; margin-top: 3px; }
+.activity-row-end { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex: 0 0 auto; text-align: right; }
+.activity-row-meta { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.activity-status { font-size: 9px; font-weight: 800; letter-spacing: .04em; padding: 4px 9px; border-radius: 999px; white-space: nowrap; }
+.activity-status.tone-good { background: #e4f7ef; color: #13845b; }
+.activity-status.tone-bad { background: #fde8e8; color: #c23434; }
+.activity-status.tone-warn { background: #fff3e0; color: #a5620c; }
+.activity-status.tone-neutral { background: var(--surface-2); color: var(--muted); }
+@media (max-width: 800px) {
+  .activity-layout { grid-template-columns: 1fr; }
+  .activity-nav { position: static; flex-direction: row; overflow-x: auto; gap: 6px; }
+  .activity-nav-item { flex: 0 0 auto; width: auto; white-space: nowrap; }
+  .activity-nav-label { display: none; }
+  .activity-row { flex-wrap: wrap; }
+  .activity-row-end { align-items: flex-start; text-align: left; }
+}

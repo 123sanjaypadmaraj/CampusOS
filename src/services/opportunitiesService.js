@@ -52,6 +52,31 @@ export async function getMyApplications(userId) {
   return data || [];
 }
 
+// Same rows as getMyApplications() plus the opportunity itself, for views
+// (the "Your Activity" hub) that need to show what was actually applied to
+// rather than just tracking which ids are already applied.
+export async function getMyApplicationsDetailed(userId) {
+  if (!userId) return [];
+  const { data, error } = await supabase
+    .from("opportunity_applications")
+    .select("id, opportunity_id, status, created_at, opportunities ( company, role, type )")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+  throwIfError(error);
+  return data || [];
+}
+
+export async function getMyMentorRequests(userId) {
+  if (!userId) return [];
+  const { data, error } = await supabase
+    .from("mentor_requests")
+    .select("id, status, message, created_at, mentors ( name, role )")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+  throwIfError(error);
+  return data || [];
+}
+
 export async function requestMentor(mentorId, message) {
   const { data, error } = await supabase.rpc("request_mentor", {
     p_mentor_id: mentorId,
