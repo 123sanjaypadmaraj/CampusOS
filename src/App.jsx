@@ -121,6 +121,7 @@ import {
 } from "./services/opportunitiesService";
 import { askCampusAssistant } from "./services/aiAssistantService";
 import { getAllRecommendations, dismissRecommendation } from "./services/recommendationsService";
+import { createReminder, listMyReminders, setReminderDone, deleteReminder, subscribeToReminders } from "./services/remindersService";
 import { getStudentActivitySummary, getStudentSpendingSeries } from "./services/studentAnalyticsService";
 
 import {
@@ -1076,6 +1077,17 @@ function App() {
 
   const toastTimer = useRef(null);
 
+  // Doc §9 "Offline Mode": register the service worker unconditionally on
+  // mount so the app-shell caching in public/sw.js is active for every
+  // signed-in-or-not visitor, not just those who opt into push (previously
+  // the only registration path -- see subscribeToPush() in pushService.js,
+  // which still works unchanged since it just reuses/reawaits whatever
+  // registration is already in place by the time someone opts in).
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }, []);
+
   const notify = (message) => {
     setToast(message);
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -1872,6 +1884,54 @@ function App() {
       }).catch((error) => console.error("Personal workspace loading failed", error));
     }, [authUser?.id]);
 
+    // Doc §9 "Offline Mode" -- synchronization: reads served while offline
+    // come from mvpService.js's offline cache (withOfflineCache) and can be
+    // stale. There's no real write-conflict to resolve (every write-capable
+    // action is online-required, see the doc), so "sync" here just means
+    // refetching the offline-cached reads the moment connectivity comes
+    // back, so both the UI and the cache catch up with whatever changed on
+    // the server while this device was offline. Guarded by a ref (not just
+    // `online` itself) so this only fires on a real false->true transition,
+    // never on first mount.
+    const wasOnline = useRef(online);
+    useEffect(() => {
+      const justReconnected = !wasOnline.current && online;
+      wasOnline.current = online;
+      if (!justReconnected) return;
+
+      if (campusId) {
+        getCampusEvents(campusId).then(setEvents).catch(() => {});
+        getCampusFood(campusId)
+          .then(({ canteens, items }) => {
+            setDbCanteens(canteens);
+            setDbFoodItems(items);
+          })
+          .catch(() => {});
+      }
+
+      if (authUser?.id) {
+        getOrCreateProfile(authUser, campusId).then(setProfile).catch(() => {});
+        getSavedEvents(authUser.id).then(setSavedEventIds).catch(() => {});
+        getUserNotifications(authUser.id).then((items) => {
+          if (items?.length) {
+            setNotifications(
+              items.map((item) => ({
+                id: item.id,
+                type: item.type || "official",
+                title: item.title || "",
+                time: item.created_at
+                  ? new Date(item.created_at).toLocaleString()
+                  : "Recently",
+                unread: !item.read,
+                actionType: item.action_type || null,
+                actionId: item.action_id || null,
+              }))
+            );
+          }
+        }).catch(() => {});
+      }
+    }, [online, campusId, authUser]);
+
     // Once a GitHub identity is linked (via the profile page's "Connect
     // GitHub" button), derive a real github.com/<username> link from it and
     // save it to the profile -- runs on every auth/profile change so it's
@@ -2096,7 +2156,7 @@ function App() {
     }
 
     if (active === "ai") {
-      return <CampusAI notify={notify} go={go} authUser={authUser} openLogin={() => setLoginOpen(true)} />;
+      return <CampusAI notify={notify} go={go} authUser={authUser} profile={profile} campusId={campusId} addFood={addFood} openLogin={() => setLoginOpen(true)} />;
     }
 
     if (active === "admin") {
@@ -2609,6 +2669,8 @@ function Home({
         </div>
       </section>
 
+      {authUser && <RemindersWidget authUser={authUser} notify={notify} />}
+
       {authUser && <RecommendedForYou authUser={authUser} go={go} notify={notify} />}
 
       <section className="page-section feature-strip">
@@ -2838,6 +2900,76 @@ function Campus({
    existing "People you may know" feature instead of duplicating it here --
    see the Find Your People page.
 ========================================================================= */
+function RemindersWidget({ authUser, notify }) {
+  const [reminders, setReminders] = useState(null); // null = loading
+
+  const reload = () => {
+    listMyReminders().then(setReminders).catch(() => setReminders([]));
+  };
+
+  useEffect(() => {
+    if (!authUser?.id) return;
+    reload();
+    const unsub = subscribeToReminders(() => reload());
+    return () => unsub?.();
+  }, [authUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!reminders || reminders.length === 0) return null;
+
+  const complete = async (reminder) => {
+    setReminders((current) => current.filter((r) => r.id !== reminder.id));
+    try {
+      await setReminderDone(reminder.id, true);
+    } catch (error) {
+      notify(error.message || "Could not update that reminder");
+      reload();
+    }
+  };
+
+  const remove = async (reminder) => {
+    setReminders((current) => current.filter((r) => r.id !== reminder.id));
+    try {
+      await deleteReminder(reminder.id);
+    } catch (error) {
+      notify(error.message || "Could not delete that reminder");
+      reload();
+    }
+  };
+
+  return (
+    <section className="page-section reminders-section">
+      <div className="section-head">
+        <div>
+          <span className="section-kicker">REMINDERS</span>
+          <h2>Don&apos;t forget.</h2>
+          <p>Set manually or by asking Campus AI.</p>
+        </div>
+      </div>
+
+      <div className="reminders-list">
+        {reminders.slice(0, 5).map((r) => {
+          const overdue = new Date(r.remind_at) < new Date();
+          return (
+            <article className={`reminder-row ${overdue ? "overdue" : ""}`} key={r.id}>
+              <button className="reminder-check" aria-label="Mark done" onClick={() => complete(r)}>
+                <HiCheck />
+              </button>
+              <div>
+                <b>{r.title}</b>
+                <small>{new Date(r.remind_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}{r.source === "ai" ? " · via Campus AI" : ""}</small>
+                {r.notes && <small>{r.notes}</small>}
+              </div>
+              <button className="reminder-delete" aria-label="Delete reminder" onClick={() => remove(r)}>
+                <HiXMark />
+              </button>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function RecommendedForYou({ authUser, go, notify }) {
   const [recs, setRecs] = useState(null); // null = loading
   const [dismissed, setDismissed] = useState(new Set());
@@ -6595,7 +6727,115 @@ function CampusMap({ notify, openModal }) {
    CAMPUS AI
 ========================================================= */
 
-function CampusAI({ notify, go, authUser, openLogin }) {
+// doc §16 "AI Action System" -- one executor per propose_* action type. Each
+// of these is the *exact* function/RPC the manual UI already calls for that
+// action (registerEvent/createCampusServiceRequest/createResourceBooking/
+// createReminder/addFood) -- the AI layer never gets its own write path or
+// elevated privilege, it only ever gets to trigger one of these, and only
+// after the student clicks Confirm. Every one of these already re-validates
+// server-side (RLS + the RPC's own checks) regardless of what the model
+// proposed, so a hallucinated/stale action id just fails cleanly here.
+const AI_ACTION_EXECUTORS = {
+  add_to_food_cart: async (action, ctx) => {
+    const item = {
+      id: action.foodItemId,
+      name: action.name,
+      price: action.price,
+      canteenId: action.canteenId,
+      vendor: action.canteenName,
+      category: "Food",
+      image: "",
+      description: "",
+      veg: false,
+      vegetarian: false,
+      available: true,
+    };
+    const qty = Math.max(1, Number(action.quantity) || 1);
+    for (let i = 0; i < qty; i++) ctx.addFood(item);
+    return `Added ${qty}x ${action.name} to your food cart.`;
+  },
+  register_event: async (action, ctx) => {
+    if (!isValidPhone(ctx.phone)) throw new Error("Enter a valid phone number to register.");
+    const result = await registerEvent({
+      eventId: action.eventId,
+      userId: ctx.authUser.id,
+      contactPhone: ctx.phone,
+      contactName: ctx.profile?.name || ctx.authUser.email || "Student",
+      rollNumber: ctx.profile?.roll_number,
+      department: ctx.profile?.department,
+    });
+    return result?.status === "waitlisted"
+      ? `You're on the waitlist for "${action.eventTitle}".`
+      : `You're registered for "${action.eventTitle}"!`;
+  },
+  service_request: async (action, ctx) => {
+    await createCampusServiceRequest({
+      userId: ctx.authUser.id,
+      campusId: ctx.campusId,
+      serviceName: action.serviceName,
+      title: action.title,
+      details: action.description ? { description: action.description } : {},
+    });
+    return `Submitted your "${action.serviceName}" request.`;
+  },
+  booking: async (action, ctx) => {
+    await createResourceBooking({
+      userId: ctx.authUser.id,
+      resourceId: action.resourceId,
+      startTime: action.startTime,
+      endTime: action.endTime,
+      notes: action.notes || "",
+    });
+    return `Booked "${action.resourceName}".`;
+  },
+  reminder: async (action) => {
+    await createReminder({ title: action.title, remindAt: action.remindAt, notes: action.notes || "", source: "ai" });
+    return `Reminder set: "${action.title}".`;
+  },
+};
+
+function ActionCard({ action, onConfirm, onCancel, phone, onPhoneChange }) {
+  const needsPhone = action.type === "register_event" && !phone;
+  const busy = action.status === "confirming";
+  const done = action.status === "confirmed" || action.status === "cancelled" || action.status === "error";
+
+  return (
+    <div className={`ai-action-card ${action.status || "pending"}`}>
+      <div className="ai-action-card-head">
+        <HiSparkles />
+        <b>{action.label}</b>
+      </div>
+
+      {action.status === "confirmed" && <p className="ai-action-result success"><HiCheckCircle /> {action.resultText}</p>}
+      {action.status === "cancelled" && <p className="ai-action-result">Cancelled -- nothing was changed.</p>}
+      {action.status === "error" && <p className="ai-action-result error"><HiExclamationTriangle /> {action.resultText}</p>}
+
+      {!done && (
+        <>
+          {action.type === "register_event" && (
+            <label className="ai-action-phone">
+              Contact phone
+              <input
+                value={phone}
+                onChange={(e) => onPhoneChange(e.target.value)}
+                placeholder="Required to register"
+                disabled={busy}
+              />
+            </label>
+          )}
+          <div className="ai-action-buttons">
+            <button className="primary" disabled={busy || needsPhone} onClick={onConfirm}>
+              {busy ? "Working…" : "Confirm"}
+            </button>
+            <button className="ghost" disabled={busy} onClick={onCancel}>Cancel</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function CampusAI({ notify, go, authUser, profile, campusId, addFood, openLogin }) {
   const [message, setMessage] = useState("");
   const [asking, setAsking] = useState(false);
 
@@ -6603,15 +6843,16 @@ function CampusAI({ notify, go, authUser, openLogin }) {
     {
       role: "ai",
       text:
-        "Hi! I'm a real assistant with live access to CampusOS — ask me about the food menu, upcoming events, open opportunities, mentors, the store, or your own orders and registrations.",
+        "Hi! I'm a real assistant with live access to CampusOS — ask me about the food menu, upcoming events, open opportunities, mentors, the store, or your own orders and registrations. I can also draft real actions for you (add food to your cart, register for an event, submit a service request, book a resource, set a reminder) -- you'll always get a chance to confirm before anything actually happens.",
     },
   ]);
+  const [phoneDrafts, setPhoneDrafts] = useState({}); // messageIndex -> phone string, for register_event cards
 
   const suggestions = [
     "What's on the food menu right now?",
     "What events are coming up?",
+    "Remind me to pay hostel fees this Friday at 6pm",
     "Any internships or research openings?",
-    "Find me a robotics mentor",
     "What are my recent orders?",
   ];
 
@@ -6630,10 +6871,20 @@ function CampusAI({ notify, go, authUser, openLogin }) {
     setAsking(true);
 
     try {
-      const reply = await askCampusAssistant(
+      const { reply, pendingAction, navigateTo } = await askCampusAssistant(
         nextConversation.map((m) => ({ role: m.role, content: m.text }))
       );
-      setConversation((current) => [...current, { role: "ai", text: reply }]);
+      setConversation((current) => [
+        ...current,
+        { role: "ai", text: reply, action: pendingAction ? { ...pendingAction, status: "pending" } : undefined },
+      ]);
+      if (pendingAction?.type === "register_event" && profile?.phone) {
+        setPhoneDrafts((current) => ({ ...current, [nextConversation.length]: profile.phone }));
+      }
+      if (navigateTo) {
+        notify(`Taking you to ${navigateTo}…`);
+        go(navigateTo);
+      }
     } catch (error) {
       setConversation((current) => [
         ...current,
@@ -6644,6 +6895,28 @@ function CampusAI({ notify, go, authUser, openLogin }) {
     }
   };
 
+  const updateAction = (index, patch) => {
+    setConversation((current) => current.map((item, i) => (i === index ? { ...item, action: { ...item.action, ...patch } } : item)));
+  };
+
+  const confirmAction = async (index) => {
+    const action = conversation[index]?.action;
+    if (!action) return;
+    const executor = AI_ACTION_EXECUTORS[action.type];
+    if (!executor) return;
+
+    updateAction(index, { status: "confirming" });
+    try {
+      const resultText = await executor(action, { authUser, profile, campusId, addFood, phone: phoneDrafts[index] || "" });
+      updateAction(index, { status: "confirmed", resultText });
+      notify(resultText);
+    } catch (error) {
+      updateAction(index, { status: "error", resultText: error.message || "Could not complete that action" });
+    }
+  };
+
+  const cancelAction = (index) => updateAction(index, { status: "cancelled" });
+
   return (
     <section className="page-section ai-page">
       <div className="ai-header">
@@ -6653,7 +6926,7 @@ function CampusAI({ notify, go, authUser, openLogin }) {
         <div>
           <span className="section-kicker">CAMPUS INTELLIGENCE</span>
           <h1>Campus AI</h1>
-          <p>Natural language access to your campus.</p>
+          <p>Natural language access to your campus -- and real actions, with your confirmation.</p>
         </div>
       </div>
 
@@ -6667,7 +6940,18 @@ function CampusAI({ notify, go, authUser, openLogin }) {
               <span>
                 {item.role === "ai" ? <HiSparkles /> : <HiUserCircle />}
               </span>
-              <p>{item.text}</p>
+              <div>
+                <p>{item.text}</p>
+                {item.action && (
+                  <ActionCard
+                    action={item.action}
+                    phone={phoneDrafts[index] || ""}
+                    onPhoneChange={(value) => setPhoneDrafts((current) => ({ ...current, [index]: value }))}
+                    onConfirm={() => confirmAction(index)}
+                    onCancel={() => cancelAction(index)}
+                  />
+                )}
+              </div>
             </div>
           ))}
 
@@ -6711,11 +6995,13 @@ function CampusAI({ notify, go, authUser, openLogin }) {
 
       <div className="opportunity">
         <div>
-          <span className="section-kicker">FUTURE</span>
+          <span className="section-kicker">NOW LIVE</span>
           <h2>AI that can act, not just answer.</h2>
           <p>
-            The next layer can use campus APIs to create orders, book
-            resources and communicate with autonomous systems.
+            Ask it to add food to your cart, register you for an event, file
+            a service request, book a resource, or set a reminder -- it
+            drafts the action and always waits for your Confirm before
+            anything real happens.
           </p>
         </div>
 

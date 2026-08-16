@@ -1462,6 +1462,21 @@
   place-items: center;
 }
 
+/* =========================================================
+   AI ACTION CARDS (doc §16, AI Action System) -- a drafted-not-executed
+   action proposed by Campus AI, confirmed/cancelled by the student.
+========================================================= */
+.ai-action-card { margin-top: 8px; max-width: 320px; background: var(--surface); border: 1px solid var(--border); border-radius: 13px; padding: 12px 14px; }
+.ai-action-card-head { display: flex; align-items: center; gap: 8px; color: var(--purple); font-size: 12px; }
+.ai-action-card-head b { color: var(--text); font-weight: 700; }
+.ai-action-phone { display: block; margin-top: 10px; font-size: 11px; color: var(--muted); }
+.ai-action-phone input { width: 100%; margin-top: 4px; height: 34px; border: 1px solid var(--border); border-radius: 8px; padding: 0 10px; background: var(--surface-2); color: var(--text); font-size: 12px; }
+.ai-action-buttons { display: flex; gap: 8px; margin-top: 10px; }
+.ai-action-buttons button { flex: 1; height: 34px; font-size: 12px; border-radius: 8px; }
+.ai-action-result { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12px; }
+.ai-action-result.success { color: #13845b; }
+.ai-action-result.error { color: #c23a3a; }
+
 .ai-capabilities {
   max-width: 920px;
   margin: 18px auto 0;
