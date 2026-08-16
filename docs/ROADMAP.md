@@ -112,7 +112,22 @@ place; there's no UI yet:
   content moderation console). The RPCs (`admin_set_user_role`,
   `moderate_content`, etc.) exist; no admin UI.
 - **§67-69 Analytics** (student/vendor/admin dashboards).
-- **§70-72 AI assistant / recommendation engine / smart search.**
+- ~~§70-72 AI assistant / recommendation engine / smart search~~ — **done.**
+  Recommendation engine: §108 above. AI assistant (`campus-assistant` Edge
+  Function, real Groq Llama-3.3-70B tool-calling): search/menu/events/
+  opportunities/mentors/store/my-orders/my-registrations were already
+  read-only tools; the user's own "16. AI Action System" checklist (asked
+  separately from this doc's section numbering) added real personalized
+  recommendations, in-app navigation, and five propose-then-confirm actions
+  (add to food cart, register for an event, submit a service request, book
+  a resource, create a reminder — reminders is a brand new feature, see
+  `supabase/migrations/20260816000100_reminders.sql`). Every action tool
+  stays read-only server-side; the actual write only happens client-side
+  after the student clicks Confirm, through the same functions/RPCs the
+  manual UI already uses (`AI_ACTION_EXECUTORS` in `src/App.jsx`) — no new
+  elevated privilege for the AI layer. Smart search built separately by a
+  concurrent session the same day (typo tolerance, filters, personalized
+  ranking, recent/trending — not reviewed by this entry's author).
 - **§73-75 Autonomous delivery, IoT.**
 - **§79-80 Full PWA** (service worker, offline shell, install prompt, push
   notifications). `useOnlineStatus` + an offline banner exist; no service
