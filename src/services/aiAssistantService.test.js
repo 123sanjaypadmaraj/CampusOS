@@ -12,16 +12,35 @@ describe("askCampusAssistant", () => {
     supabase.functions.invoke.mockResolvedValue({ data: { reply: "Here's the menu." }, error: null });
 
     const messages = [{ role: "user", content: "What's on the menu?" }];
-    const reply = await askCampusAssistant(messages);
+    const result = await askCampusAssistant(messages);
 
     expect(supabase.functions.invoke).toHaveBeenCalledWith("campus-assistant", { body: { messages } });
-    expect(reply).toBe("Here's the menu.");
+    expect(result).toEqual({ reply: "Here's the menu.", pendingAction: null, navigateTo: null });
   });
 
   it("falls back to a generic message when the function returns no reply", async () => {
     supabase.functions.invoke.mockResolvedValue({ data: {}, error: null });
 
-    expect(await askCampusAssistant([{ role: "user", content: "hi" }])).toMatch(/rephrasing/i);
+    expect((await askCampusAssistant([{ role: "user", content: "hi" }])).reply).toMatch(/rephrasing/i);
+  });
+
+  it("passes through a pendingAction proposal from the function", async () => {
+    const pendingAction = { type: "reminder", label: "Remind you: \"Pay fees\" at 6pm" };
+    supabase.functions.invoke.mockResolvedValue({ data: { reply: "Here you go.", pendingAction }, error: null });
+
+    const result = await askCampusAssistant([{ role: "user", content: "remind me to pay fees at 6pm" }]);
+
+    expect(result.pendingAction).toEqual(pendingAction);
+    expect(result.navigateTo).toBeNull();
+  });
+
+  it("passes through a navigateTo target from the function", async () => {
+    supabase.functions.invoke.mockResolvedValue({ data: { reply: "Taking you there.", navigateTo: "market" }, error: null });
+
+    const result = await askCampusAssistant([{ role: "user", content: "take me to the marketplace" }]);
+
+    expect(result.navigateTo).toBe("market");
+    expect(result.pendingAction).toBeNull();
   });
 
   it("surfaces the Edge Function's own error message (e.g. rate limited) instead of a generic one", async () => {

@@ -9,6 +9,13 @@ import { supabase } from "../lib/supabase";
 | changes hourly and needs to be looked up live, not baked into weights).
 */
 
+// Returns { reply, pendingAction, navigateTo } -- doc §16 "AI Action
+// System": pendingAction (when present) is a drafted-not-executed action
+// card for CampusAI to render with a Confirm/Cancel button (see
+// ACTION_EXECUTORS in App.jsx, which is what actually performs the write,
+// through the same functions/RPCs the manual UI uses); navigateTo (when
+// present) is a page key CampusAI should go() to immediately -- navigation
+// never mutates anything, so it doesn't need a confirm step.
 export async function askCampusAssistant(messages) {
   const { data, error } = await supabase.functions.invoke("campus-assistant", {
     body: { messages },
@@ -28,5 +35,9 @@ export async function askCampusAssistant(messages) {
     throw new Error(detail?.message || error.message || "The assistant is unavailable right now");
   }
 
-  return data?.reply || "I couldn't come up with an answer -- try rephrasing?";
+  return {
+    reply: data?.reply || "I couldn't come up with an answer -- try rephrasing?",
+    pendingAction: data?.pendingAction || null,
+    navigateTo: data?.navigateTo || null,
+  };
 }
