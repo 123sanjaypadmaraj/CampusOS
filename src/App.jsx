@@ -85,6 +85,7 @@ import FacilitiesDashboard from "./features/facilities/FacilitiesDashboard";
 import ClubManage from "./features/clubs/ClubManage";
 import * as clubApi from "./features/clubs/api";
 import Marketplace from "./features/marketplace/Marketplace";
+import AcademicHub from "./features/academics/AcademicHub";
 import {
   startConversation,
   sendMessage,
@@ -242,7 +243,7 @@ const ROUTABLE_KEYS = new Set([
   "home", "campus", "events", "services", "socialize", "messages", "profile",
   "map", "legal", "people", "clubs", "food", "store", "ai", "admin", "vendor",
   "facilities", "autonomous", "calendar", "notifications",
-  "print", "issues", "booking", "lost", "market", "pass", "hostel", "delivery",
+  "print", "issues", "booking", "lost", "market", "pass", "hostel", "delivery", "academics",
 ]);
 
 // A vendor account (canteen or print shop) is a purpose-built ordering
@@ -886,6 +887,13 @@ const services = [
     text: "Move food, documents and packages around campus",
     action: "Open",
     id: "delivery",
+  },
+  {
+    icon: <HiAcademicCap />,
+    title: "Academics",
+    text: "Department/faculty announcements, assignments, timetable and academic calendar",
+    action: "Open",
+    id: "academics",
   },
 ];
 
@@ -2234,6 +2242,7 @@ function App() {
         "pass",
         "hostel",
         "delivery",
+        "academics",
       ].includes(active)
     ) {
       return (
@@ -2245,6 +2254,7 @@ function App() {
           openLogin={() => setLoginOpen(true)}
           authUser={authUser}
           user={user}
+          profile={profile}
           campusId={campusId}
           resources={resources}
           bookings={bookings}
@@ -6029,9 +6039,15 @@ const serviceDetailData = {
     text: "Move food, documents and packages across campus.",
     icon: <HiTruck />,
   },
+  academics: {
+    kicker: "ACADEMICS",
+    title: "Academic Announcements",
+    text: "Department/faculty announcements, assignments, timetable and academic calendar.",
+    icon: <HiAcademicCap />,
+  },
 };
 
-function ServiceDetail({ serviceId, notify, go, openModal, openLogin, authUser, user, campusId, resources, bookings, serviceRequests, printJobs, lostItems, lostItemsLoaded, marketListings, onBookingsChange, onRequestsChange, onLostItemsChange, onMarketListingsChange, onOpenConversation }) {
+function ServiceDetail({ serviceId, notify, go, openModal, openLogin, authUser, user, profile, campusId, resources, bookings, serviceRequests, printJobs, lostItems, lostItemsLoaded, marketListings, onBookingsChange, onRequestsChange, onLostItemsChange, onMarketListingsChange, onOpenConversation }) {
   const data = serviceDetailData[serviceId];
 
   return (
@@ -6108,6 +6124,10 @@ function ServiceDetail({ serviceId, notify, go, openModal, openLogin, authUser, 
 
       {serviceId === "delivery" && (
         <DeliveryService notify={notify} />
+      )}
+
+      {serviceId === "academics" && (
+        <AcademicHub profile={profile} notify={notify} />
       )}
     </section>
   );

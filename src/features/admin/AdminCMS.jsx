@@ -297,7 +297,7 @@ function ModerationTab({ notify, authUser }) {
    USERS (doc §54-58)
 ========================================================= */
 
-const ROLE_OPTIONS = ["student", "club_admin", "vendor", "facilities_staff", "college_admin", "super_admin"];
+const ROLE_OPTIONS = ["student", "club_admin", "vendor", "facilities_staff", "faculty", "college_admin", "super_admin"];
 
 function UsersTab({ notify, campusId, authUser }) {
   const [q, setQ] = useState("");
@@ -604,7 +604,7 @@ export function EmergencyContactsTab({ notify }) {
    ANNOUNCEMENTS
 ========================================================= */
 
-const ANNOUNCEMENT_CATEGORIES = ["Academic", "Exam", "Holiday", "Emergency", "Campus", "Maintenance", "Transport", "General"];
+const ANNOUNCEMENT_CATEGORIES = ["Academic", "Exam", "Assignment", "Holiday", "Emergency", "Campus", "Maintenance", "Transport", "General"];
 
 function AnnouncementsTab({ notify, campusId }) {
   const [loading, setLoading] = useState(true);
