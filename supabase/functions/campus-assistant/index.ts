@@ -38,6 +38,37 @@ const GROQ_MODEL = "llama-3.3-70b-versatile";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const MAX_TOOL_ROUNDS = 4;
 const MAX_HISTORY_MESSAGES = 12; // caller's own chat history, trimmed to keep requests small/fast
+const GROQ_MAX_RETRIES = 3;
+
+// Groq's free/shared tier rate-limits per-minute, and a single chat turn can
+// already fire several requests in a row (one per tool-calling round) --
+// live testing against production found roughly half of otherwise-identical
+// requests coming back 429 with zero retry, surfacing to the student as a
+// blanket "temporarily unavailable" for no real reason. Retries a 429 or
+// 5xx with backoff (Groq's Retry-After header when present, exponential
+// with jitter otherwise) before actually giving up -- a real chat client
+// shouldn't be more fragile than that.
+async function fetchGroqWithRetry(body: unknown, groqKey: string): Promise<Response> {
+  let lastRes: Response | null = null;
+  for (let attempt = 0; attempt <= GROQ_MAX_RETRIES; attempt++) {
+    const res = await fetch(GROQ_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${groqKey}` },
+      body: JSON.stringify(body),
+    });
+    if (res.ok || (res.status !== 429 && res.status < 500)) return res;
+    lastRes = res;
+    if (attempt === GROQ_MAX_RETRIES) break;
+
+    const retryAfterHeader = Number(res.headers.get("retry-after"));
+    const delayMs = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
+      ? retryAfterHeader * 1000
+      : Math.round(300 * 2 ** attempt + Math.random() * 200);
+    console.warn(`Groq API ${res.status}, retrying in ${delayMs}ms (attempt ${attempt + 1}/${GROQ_MAX_RETRIES})`);
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  return lastRes!;
+}
 
 // Student-relevant navigation targets only -- mirrors a safe subset of
 // ROUTABLE_KEYS in src/App.jsx (no admin/vendor/facilities/autonomous).
@@ -533,23 +564,22 @@ Deno.serve(async (req: Request) => {
 
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const groqRes = await fetch(GROQ_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${groqKey}` },
-        body: JSON.stringify({
-          model: GROQ_MODEL,
-          messages,
-          tools: TOOLS,
-          tool_choice: "auto",
-          temperature: 0.4,
-          max_tokens: 600,
-        }),
-      });
+      const groqRes = await fetchGroqWithRetry({
+        model: GROQ_MODEL,
+        messages,
+        tools: TOOLS,
+        tool_choice: "auto",
+        temperature: 0.4,
+        max_tokens: 600,
+      }, groqKey);
 
       if (!groqRes.ok) {
         const text = await groqRes.text();
-        console.error("Groq API error:", groqRes.status, text);
-        return jsonResponse({ code: "ASSISTANT_UPSTREAM_ERROR", message: "The assistant is temporarily unavailable." }, 502);
+        console.error("Groq API error (after retries):", groqRes.status, text);
+        const message = groqRes.status === 429
+          ? "The assistant is getting a lot of requests right now -- try again in a few seconds."
+          : "The assistant is temporarily unavailable.";
+        return jsonResponse({ code: "ASSISTANT_UPSTREAM_ERROR", message }, 502);
       }
 
       const groqData = await groqRes.json();
@@ -582,11 +612,7 @@ Deno.serve(async (req: Request) => {
       // right after the model's next natural-language reply about it
       // instead of burning further tool rounds on the same turn.
       if (pendingAction || navigateTo) {
-        const followUp = await fetch(GROQ_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${groqKey}` },
-          body: JSON.stringify({ model: GROQ_MODEL, messages, temperature: 0.4, max_tokens: 300 }),
-        });
+        const followUp = await fetchGroqWithRetry({ model: GROQ_MODEL, messages, temperature: 0.4, max_tokens: 300 }, groqKey);
         if (followUp.ok) {
           const followUpData = await followUp.json();
           const followUpChoice = followUpData.choices?.[0]?.message;
