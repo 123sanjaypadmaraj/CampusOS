@@ -97,7 +97,7 @@ export default function VendorDashboard({ notify, authUser }) {
 
   useEffect(() => { reload(); }, [authUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (loading) return <LoadingState label="Loading your dashboard…" />;
+  if (loading) return <DashboardSkeleton />;
   if (error) return <ErrorState text={error} onRetry={reload} />;
 
   if (canteen) {
@@ -170,6 +170,29 @@ function DashboardStatCard({ icon, label, value, sub, tone = "default" }) {
   );
 }
 
+function DashboardSkeleton() {
+  return (
+    <div className="vendor-dashboard-skeleton" aria-busy="true" aria-label="Loading dashboard">
+      <div className="skeleton-bar skeleton-line-medium" style={{ marginBottom: 20 }} />
+      <div className="analytics-grid">
+        {[0, 1, 2, 3].map((i) => (
+          <div className="vendor-stat-card skeleton-stat-card" key={i}>
+            <span className="skeleton-circle" />
+            <div style={{ flex: 1 }}>
+              <div className="skeleton-bar skeleton-line-short" />
+              <div className="skeleton-bar skeleton-line-medium" style={{ marginTop: 8 }} />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="skeleton-bar skeleton-line-short" style={{ margin: "24px 0 10px" }} />
+      <div className="vendor-quicklink-grid">
+        {[0, 1, 2].map((i) => <div className="vendor-quicklink-card skeleton-quicklink-card" key={i} />)}
+      </div>
+    </div>
+  );
+}
+
 function CanteenOverview({ canteen, onNavigate }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -189,7 +212,7 @@ function CanteenOverview({ canteen, onNavigate }) {
 
   useEffect(() => { reload(); }, [canteen.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (loading) return <LoadingState label="Loading your dashboard…" />;
+  if (loading) return <DashboardSkeleton />;
   if (error) return <ErrorState text={error} onRetry={reload} />;
 
   const stockAlertCount = stats.lowStockCount + stats.outOfStockCount;
@@ -249,7 +272,7 @@ function PrintShopOverview({ onNavigate }) {
 
   useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (loading) return <LoadingState label="Loading your dashboard…" />;
+  if (loading) return <DashboardSkeleton />;
   if (error) return <ErrorState text={error} onRetry={reload} />;
 
   return (
@@ -662,6 +685,27 @@ function playAlertSound() {
   } catch { /* best-effort */ }
 }
 
+// A shimmering placeholder shaped like a real order card, shown only while
+// the first load is in flight -- reads as "the queue is loading," not "the
+// app froze," which a bare spinner (the shared LoadingState) doesn't convey
+// as clearly on the screen staff stare at all shift. Local to this file, not
+// the shared States.jsx component -- scoping the richer treatment to where
+// it earns its keep instead of changing every loading spinner app-wide.
+function OrderQueueSkeleton() {
+  return (
+    <div className="order-queue-skeleton" aria-busy="true" aria-label="Loading order queue">
+      <div className="skeleton-bar skeleton-toolbar" />
+      {[0, 1, 2].map((i) => (
+        <div className="skeleton-card" key={i}>
+          <div className="skeleton-bar skeleton-line-short" />
+          <div className="skeleton-bar skeleton-line-long" />
+          <div className="skeleton-bar skeleton-line-medium" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function OrderQueue({ canteen, notify }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -673,6 +717,12 @@ function OrderQueue({ canteen, notify }) {
   const [staffModal, setStaffModal] = useState(false);
   const [soundOn, setSoundOn] = useState(() => localStorage.getItem(`vendor-sound-${canteen.id}`) !== "off");
   const knownReceivedIds = React.useRef(null); // null until first load, so mount never "alerts" for pre-existing orders
+  const [, forceTick] = useState(0); // re-render every 30s so order-card elapsed/urgency badges climb without needing new data
+
+  useEffect(() => {
+    const id = setInterval(() => forceTick((t) => t + 1), 30000);
+    return () => clearInterval(id);
+  }, []);
 
   const reload = async () => {
     try {
@@ -759,7 +809,7 @@ function OrderQueue({ canteen, notify }) {
     }
   };
 
-  if (loading) return <LoadingState label="Loading order queue…" />;
+  if (loading) return <OrderQueueSkeleton />;
   if (error) return <ErrorState text={error} onRetry={reload} />;
 
   const visibleOrders = sortByPriority(
@@ -772,14 +822,23 @@ function OrderQueue({ canteen, notify }) {
 
   return (
     <>
-      <div className="socialize-filter-row" style={{ marginBottom: 12 }}>
-        <button className={view === "all" ? "chip active" : "chip"} onClick={() => setView("all")}>All ({orders.length})</button>
-        <button className={view === "kitchen" ? "chip active" : "chip"} onClick={() => setView("kitchen")}><HiFire /> Kitchen ({kitchenCount})</button>
-        <button className={view === "pickup" ? "chip active" : "chip"} onClick={() => setView("pickup")}><HiTruck /> Pickup ({pickupCount})</button>
-        <button className="chip" onClick={toggleSound} title={soundOn ? "Turn off new-order alerts" : "Turn on new-order alerts"}>
-          {soundOn ? <HiSpeakerWave /> : <HiSpeakerXMark />} Alerts {soundOn ? "on" : "off"}
-        </button>
-        <button className="chip" onClick={() => setStaffModal(true)}><HiUserGroup /> Staff ({staff.filter((s) => s.active).length})</button>
+      <div className="order-queue-header">
+        <span className="live-indicator"><span className="pulse-dot" aria-hidden="true" /> Live</span>
+        <span className="order-queue-count">{orders.length} active order{orders.length === 1 ? "" : "s"}</span>
+      </div>
+
+      <div className="order-queue-toolbar">
+        <div className="segmented-control">
+          <button className={view === "all" ? "active" : ""} onClick={() => setView("all")}>All ({orders.length})</button>
+          <button className={view === "kitchen" ? "active" : ""} onClick={() => setView("kitchen")}><HiFire /> Kitchen ({kitchenCount})</button>
+          <button className={view === "pickup" ? "active" : ""} onClick={() => setView("pickup")}><HiTruck /> Pickup ({pickupCount})</button>
+        </div>
+        <div className="order-queue-toolbar-actions">
+          <button className="chip" onClick={toggleSound} title={soundOn ? "Turn off new-order alerts" : "Turn on new-order alerts"}>
+            {soundOn ? <HiSpeakerWave /> : <HiSpeakerXMark />} Alerts {soundOn ? "on" : "off"}
+          </button>
+          <button className="chip" onClick={() => setStaffModal(true)}><HiUserGroup /> Staff ({staff.filter((s) => s.active).length})</button>
+        </div>
       </div>
 
       <div className="resource-list">
@@ -905,37 +964,79 @@ function StaffRosterModal({ canteenId, staff, onClose, onChanged, notify }) {
 
 const PRIORITY_LABEL = { normal: "Normal", high: "High", urgent: "Urgent" };
 
+const ORDER_STATUS_TONE = {
+  RECEIVED: "new",
+  ACCEPTED: "info",
+  PREPARING: "warning",
+  READY: "good",
+  OUT_FOR_DELIVERY: "info",
+  DELIVERED: "good",
+  CANCEL_REQUESTED: "critical",
+};
+
+function StaffAvatar({ name }) {
+  const initials = name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+  return <span className="staff-avatar" aria-hidden="true">{initials}</span>;
+}
+
+// Orders sitting unactioned start to matter -- a plain "12m ago" timestamp
+// doesn't communicate urgency the way a color does. Scoped to RECEIVED only
+// (nothing to escalate about once someone's already working the order).
+// OrderQueue re-renders this every 30s (a ticking clock, not new data) so
+// the badge actually keeps climbing instead of freezing at first paint.
+function elapsedUrgency(order) {
+  if (order.status !== "RECEIVED") return "none";
+  const mins = (Date.now() - new Date(order.created_at).getTime()) / 60000;
+  if (mins >= 10) return "critical";
+  if (mins >= 5) return "warning";
+  return "none";
+}
+
 function OrderCard({ order, busy, staff, onAct, onChanged, onSaveOps, notify }) {
   const [pickupModal, setPickupModal] = useState(false);
   const [noteDraft, setNoteDraft] = useState(order.internal_note || "");
   const [noteOpen, setNoteOpen] = useState(false);
   const next = NEXT_STEP[order.status];
+  const tone = ORDER_STATUS_TONE[order.status] || "default";
+  const urgency = elapsedUrgency(order);
 
   return (
-    <article className="resource-row" style={{ alignItems: "flex-start", flexWrap: "wrap" }}>
-      <div>
-        <b>
-          #{order.id.slice(0, 8)} · {order.status}{" "}
-          <span className="social-type" style={{ marginLeft: 6 }}>{order.fulfillment_type}</span>
+    <article className={`resource-row order-card priority-accent-${order.priority}`}>
+      <div className="order-card-body">
+        <div className="order-card-top">
+          <span className="order-card-id">#{order.id.slice(0, 8)}</span>
+          <span className={`order-status-pill tone-${tone}`}>{order.status}</span>
+          <span className="social-type">{order.fulfillment_type}</span>
           {order.priority !== "normal" && (
-            <span className={`status-pill priority-${order.priority}`} style={{ marginLeft: 6 }}>
+            <span className={`status-pill priority-${order.priority}`}>
               <HiFlag /> {PRIORITY_LABEL[order.priority]}
             </span>
           )}
-        </b>
-        <small>
-          {order.order_items.map((i) => (
-            <span key={i.id}>
-              {i.quantity}× {i.item_name}
-              {i.special_instructions ? ` (${i.special_instructions})` : ""}
-              {"; "}
+          {urgency !== "none" && (
+            <span className={`order-elapsed order-elapsed-${urgency}`}>
+              <span className="pulse-dot" aria-hidden="true" /> waiting {timeAgo(order.created_at)}
             </span>
+          )}
+        </div>
+
+        <div className="order-card-items">
+          {order.order_items.map((i) => (
+            <div className="order-item-row" key={i.id}>
+              <span className="order-item-qty">{i.quantity}×</span>
+              <span>{i.item_name}</span>
+              {i.special_instructions && <span className="order-item-note">({i.special_instructions})</span>}
+            </div>
           ))}
-        </small>
-        {order.notes && <small>Student note: {order.notes}</small>}
-        {order.assigned_staff_name && <small>Assigned to: {order.assigned_staff_name}</small>}
-        {order.internal_note && <small>Staff note: {order.internal_note}</small>}
-        <small>{timeAgo(order.created_at)} · Order code {order.pickup_code}</small>
+        </div>
+
+        <div className="order-card-footnotes">
+          {order.notes && <small>Student note: {order.notes}</small>}
+          {order.internal_note && <small>Staff note: {order.internal_note}</small>}
+          {order.assigned_staff_name && (
+            <small><StaffAvatar name={order.assigned_staff_name} /> Assigned to: {order.assigned_staff_name}</small>
+          )}
+          <small>{urgency === "none" && `${timeAgo(order.created_at)} · `}Order code {order.pickup_code}</small>
+        </div>
 
         <div className="order-ops-row">
           <select
@@ -986,7 +1087,7 @@ function OrderCard({ order, busy, staff, onAct, onChanged, onSaveOps, notify }) 
         )}
       </div>
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <div className="order-card-actions">
         {order.status === "RECEIVED" && (
           <button disabled={busy} onClick={() => {
             const reason = window.prompt("Reason for rejecting this order? (shown to the student)");
