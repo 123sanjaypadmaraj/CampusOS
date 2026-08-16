@@ -100,11 +100,20 @@ async function mockSignedInSession(page, { supabaseUrl = readSupabaseUrlFromEnv(
   });
 
   // --- broad catch-alls (registered first => tried last) -----------------
-  await page.route("**/rest/v1/rpc/**", (route) => route.fulfill({ json: null }));
+  // "**/rest/v1/rpc/**" is a SUBSET of "**/rest/v1/**", not a sibling of it,
+  // so it has to be registered AFTER the general rest/v1 route to win
+  // (Playwright tries the last-registered matching route first). Getting
+  // this backwards is exactly what happened before: the general route's
+  // POST fallback (`{}`) shadowed the RPC route's `null` for every RPC
+  // call, so callers doing `data || []` on an RPC response got `{}` (an
+  // object is truthy, `|| []` never kicks in) instead of `[]` -- invisible
+  // until RecommendedForYou's `(items || []).filter(...)` on that `{}`
+  // threw and took the whole app down behind the error boundary.
   await page.route("**/rest/v1/**", (route) => {
     if (route.request().method() === "GET") return route.fulfill({ json: [] });
     return route.fulfill({ json: {} });
   });
+  await page.route("**/rest/v1/rpc/**", (route) => route.fulfill({ json: null }));
   await page.route("**/auth/v1/**", (route) => route.fulfill({ json: { user: FAKE_USER } }));
 
   // --- specific overrides (registered last => tried first) ---------------

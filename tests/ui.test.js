@@ -60,8 +60,9 @@ test('3 - Report Lost Item', async ({ page }) => {
   await lostCard.click();
   await page.waitForLoadState('networkidle');
 
-  // Click "Report lost item"
-  await page.getByRole('button', { name: /Report lost item/i }).click();
+  // Click "Report an item" (renamed from "Report lost item" in f7af2ae, see
+  // the Lost & Found empty-state / composer button in src/App.jsx)
+  await page.getByRole('button', { name: /Report an item/i }).click();
 
   // Fill the modal fields
   await page.getByLabel(/Item title/i).fill('Test Pen');
