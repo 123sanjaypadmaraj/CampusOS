@@ -34,7 +34,12 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 
-const GROQ_MODEL = "llama-3.3-70b-versatile";
+// llama-3.3-70b-versatile was retired by Groq on 2026-08-17 (confirmed via
+// the Groq console: every call started 404ing with `model_not_found` from
+// ~18:54 that day onward, last successful call 00:15 the same day) --
+// llama-3.1-70b-versatile is Groq's other current flagship tool-calling
+// model and the standard replacement.
+const GROQ_MODEL = "llama-3.1-70b-versatile";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const MAX_TOOL_ROUNDS = 4;
 const MAX_HISTORY_MESSAGES = 12; // caller's own chat history, trimmed to keep requests small/fast
