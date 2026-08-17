@@ -85,6 +85,28 @@ export async function deleteProjectTeam(teamId) {
   throwIfError(error);
 }
 
+/* ===================== ADMIN ===================== */
+
+// Every team for the campus, any status -- not list_project_teams()'s
+// browse/find-teammates board (that ranks by the *caller's own* skill
+// overlap and requires a status filter). Same shape as
+// opportunitiesService.listOpportunitiesAdmin(): a plain table select
+// (project_teams_read's RLS is `using (true)` for authenticated, so this
+// works for any signed-in admin) with the roster/applicant counts embedded
+// for a moderation list. Deletion re-uses deleteProjectTeam() above --
+// delete_project_team() itself is the real authorization boundary
+// (owner or moderation.act/admin), this call is just a browse surface.
+export async function listProjectTeamsAdmin(campusId) {
+  let query = supabase
+    .from("project_teams")
+    .select("*, profiles(name), project_team_members(id), project_team_applications(id)")
+    .order("created_at", { ascending: false });
+  if (campusId) query = query.eq("campus_id", campusId);
+  const { data, error } = await query;
+  throwIfError(error);
+  return data || [];
+}
+
 export async function applyToTeam(teamId, message) {
   const { data, error } = await supabase.rpc("apply_to_team", { p_team_id: teamId, p_message: message || null });
   throwIfError(error);

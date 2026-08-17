@@ -107,12 +107,13 @@ const NAVIGABLE_PAGES = [
   "print", "issues", "booking", "lost", "market", "pass",
 ];
 
-const SYSTEM_PROMPT = `You are the CampusOS assistant for a college campus app (food ordering, events, clubs, marketplace, services, opportunities, mentors, resource bookings, reminders).
+const SYSTEM_PROMPT = `You are the CampusOS assistant for a college campus app (food ordering, events, clubs, marketplace, services, opportunities, mentors, project/hackathon teams, resource bookings, reminders).
 
 Rules:
 - Only state facts you got from a tool call this turn. Never guess a menu item, price, event date, or availability -- call the matching tool instead.
 - If a tool returns nothing relevant, say so plainly and suggest what the student could try instead (e.g. a different search term). Don't invent a plausible-sounding answer.
-- You can propose real actions (add food to cart, register for an event, submit a service request, book a resource, create a reminder) using the propose_* tools -- but you NEVER complete them yourself. Each propose_* tool just prepares a confirmation card the student has to explicitly approve in the app. After calling one, tell the student what you've drawn up and that they need to confirm it -- never say "done"/"booked"/"registered" for a propose_* call, since nothing has actually happened yet.
+- When a student describes a skill or role they want teammates for (e.g. "I need a React dev" or "find me a hackathon team"), use get_teams_looking_for_teammates -- it's already ranked by overlap with the student's own profile skills, so lead with the closest matches and explain briefly why each fits (shared/needed skills), don't just dump the raw list.
+- You can propose real actions (add food to cart, register for an event, submit a service request, book a resource, create a reminder, apply to join a team) using the propose_* tools -- but you NEVER complete them yourself. Each propose_* tool just prepares a confirmation card the student has to explicitly approve in the app. After calling one, tell the student what you've drawn up and that they need to confirm it -- never say "done"/"booked"/"registered"/"applied" for a propose_* call, since nothing has actually happened yet.
 - A propose_* tool needs its required fields BEFORE you call it (e.g. an exact resource and start/end time for a booking, an exact event for a registration). If the student hasn't given you enough to fill them in, ask a short clarifying question instead of guessing or calling the tool with made-up values.
 - Use navigate_to when the student clearly wants to go somewhere in the app (e.g. "take me to the marketplace") rather than asking a question about it.
 - Keep answers short and concrete (a few sentences, or a short list). This is a chat bubble, not an essay.
@@ -160,6 +161,14 @@ const TOOLS = [
     function: {
       name: "get_mentors",
       description: "The curated mentor directory -- name, role/specialty, skills.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_teams_looking_for_teammates",
+      description: "Project/hackathon teams currently recruiting, ranked by overlap between each team's needed skills and the signed-in student's own profile skills -- id, title, category, skills needed/have, member count, deadline, match_score (higher = closer fit). Use this for 'find me a team' / 'who needs a <skill> person' / 'is anyone building a hackathon team' questions, and to find the team id needed before proposing to apply.",
       parameters: { type: "object", properties: {} },
     },
   },
@@ -277,6 +286,21 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "propose_apply_to_team",
+      description: "Draft applying to join a project/hackathon team. Requires the exact team id from get_teams_looking_for_teammates -- does not actually apply, only prepares a confirmation card.",
+      parameters: {
+        type: "object",
+        properties: {
+          team_id: { type: "string", description: "The exact id of the team" },
+          message: { type: "string", description: "A short note on why the student would be a good fit -- ask what skills/experience they'd want to mention if they haven't said, but don't block on it" },
+        },
+        required: ["team_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "propose_service_request",
       description: "Draft a campus service request (maintenance, IT, housekeeping, etc). Requires the exact service name from get_campus_services -- does not actually submit it, only prepares a confirmation card.",
       parameters: {
@@ -377,6 +401,21 @@ async function runTool(
       if (error) return { result: { error: error.message } };
       return { result: { mentors: data } };
     }
+    case "get_teams_looking_for_teammates": {
+      if (!campusId) return { result: { error: "No campus is set on this account, so team results aren't available." } };
+      const { data, error } = await userClient.rpc("list_project_teams", {
+        p_campus_id: campusId, p_status: "recruiting", p_category: null, p_search: null, p_limit: 15, p_cursor: null,
+      });
+      if (error) return { result: { error: error.message } };
+      return {
+        result: {
+          teams: (data ?? []).map((t: any) => ({
+            id: t.id, title: t.title, category: t.category, skills_needed: t.skills_needed, skills_have: t.skills_have,
+            member_count: t.member_count, max_members: t.max_members, deadline: t.deadline, match_score: t.match_score,
+          })),
+        },
+      };
+    }
     case "get_store_items": {
       let q = userClient.from("store_items").select("name, price, category, description, stores(name)").eq("active", true).eq("available", true).limit(40);
       const { data, error } = await q;
@@ -473,6 +512,22 @@ async function runTool(
       return {
         result: { proposed: true, summary: `Registration for "${event.title}" on ${new Date(event.event_date as string).toLocaleString()}` },
         pendingAction: { type: "register_event", label: `Register for "${event.title}"`, eventId: event.id, eventTitle: event.title, eventDate: event.event_date, eventPlace: event.place },
+      };
+    }
+    case "propose_apply_to_team": {
+      const id = String(args.team_id ?? "");
+      const message = String(args.message ?? "").slice(0, 500);
+      const { data: team, error } = await userClient
+        .from("project_teams")
+        .select("id, title, status")
+        .eq("id", id)
+        .maybeSingle();
+      if (error) return { result: { error: error.message } };
+      if (!team) return { result: { error: "That team doesn't exist -- call get_teams_looking_for_teammates again to find the right id." } };
+      if (team.status !== "recruiting") return { result: { error: `"${team.title}" isn't recruiting right now.` } };
+      return {
+        result: { proposed: true, summary: `Application to join "${team.title}"${message ? `: ${message}` : ""}` },
+        pendingAction: { type: "apply_to_team", label: `Apply to join "${team.title}"`, teamId: team.id, teamTitle: team.title, message },
       };
     }
     case "propose_service_request": {

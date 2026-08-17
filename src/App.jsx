@@ -90,6 +90,7 @@ import * as clubApi from "./features/clubs/api";
 import Marketplace from "./features/marketplace/Marketplace";
 import AcademicHub from "./features/academics/AcademicHub";
 import TeamsBoard from "./features/teams/TeamsBoard";
+import { applyToTeam } from "./features/teams/api";
 import {
   startConversation,
   sendMessage,
@@ -7332,6 +7333,10 @@ const AI_ACTION_EXECUTORS = {
     await createReminder({ title: action.title, remindAt: action.remindAt, notes: action.notes || "", source: "ai" });
     return `Reminder set: "${action.title}".`;
   },
+  apply_to_team: async (action) => {
+    await applyToTeam(action.teamId, action.message || null);
+    return `Applied to join "${action.teamTitle}".`;
+  },
 };
 
 function ActionCard({ action, onConfirm, onCancel, phone, onPhoneChange }) {
@@ -7383,7 +7388,7 @@ function CampusAI({ notify, go, authUser, profile, campusId, addFood, openLogin 
     {
       role: "ai",
       text:
-        "Hi! I'm a real assistant with live access to CampusOS — ask me about the food menu, upcoming events, open opportunities, mentors, the store, or your own orders and registrations. I can also draft real actions for you (add food to your cart, register for an event, submit a service request, book a resource, set a reminder) -- you'll always get a chance to confirm before anything actually happens.",
+        "Hi! I'm a real assistant with live access to CampusOS — ask me about the food menu, upcoming events, open opportunities, mentors, teams looking for teammates, the store, or your own orders and registrations. I can also draft real actions for you (add food to your cart, register for an event, submit a service request, book a resource, set a reminder, apply to join a team) -- you'll always get a chance to confirm before anything actually happens.",
     },
   ]);
   const [phoneDrafts, setPhoneDrafts] = useState({}); // messageIndex -> phone string, for register_event cards
@@ -7393,6 +7398,7 @@ function CampusAI({ notify, go, authUser, profile, campusId, addFood, openLogin 
     "What events are coming up?",
     "Remind me to pay hostel fees this Friday at 6pm",
     "Any internships or research openings?",
+    "Find me a hackathon team that needs a React developer",
     "What are my recent orders?",
   ];
 

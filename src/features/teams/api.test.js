@@ -33,6 +33,7 @@ import {
   respondToTeamInvitation,
   removeTeamMember,
   leaveTeam,
+  listProjectTeamsAdmin,
 } from "./api";
 
 function chain(result) {
@@ -40,7 +41,9 @@ function chain(result) {
     update: jest.fn(() => builder),
     eq: jest.fn(() => builder),
     select: jest.fn(() => builder),
+    order: jest.fn(() => builder),
     single: jest.fn(() => Promise.resolve(result)),
+    then: (resolve) => Promise.resolve(result).then(resolve),
   };
   return builder;
 }
@@ -173,6 +176,35 @@ describe("deleteProjectTeam", () => {
     mockRpc.mockResolvedValue({ data: null, error: null });
     await deleteProjectTeam("team-1");
     expect(mockRpc).toHaveBeenCalledWith("delete_project_team", { p_team_id: "team-1" });
+  });
+});
+
+describe("listProjectTeamsAdmin", () => {
+  it("queries project_teams directly with roster/applicant counts embedded, scoped to the campus", async () => {
+    const builder = chain({ data: [{ id: "team-1", title: "Hack squad", profiles: { name: "Alice" } }], error: null });
+    mockFrom.mockReturnValue(builder);
+
+    const result = await listProjectTeamsAdmin("campus-1");
+
+    expect(mockFrom).toHaveBeenCalledWith("project_teams");
+    expect(builder.select).toHaveBeenCalledWith("*, profiles(name), project_team_members(id), project_team_applications(id)");
+    expect(builder.eq).toHaveBeenCalledWith("campus_id", "campus-1");
+    expect(result).toEqual([{ id: "team-1", title: "Hack squad", profiles: { name: "Alice" } }]);
+  });
+
+  it("skips the campus filter when no campusId is given", async () => {
+    const builder = chain({ data: [], error: null });
+    mockFrom.mockReturnValue(builder);
+
+    await listProjectTeamsAdmin(null);
+
+    expect(builder.eq).not.toHaveBeenCalled();
+  });
+
+  it("returns an empty array when data is null", async () => {
+    mockFrom.mockReturnValue(chain({ data: null, error: null }));
+    const result = await listProjectTeamsAdmin("campus-1");
+    expect(result).toEqual([]);
   });
 });
 

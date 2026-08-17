@@ -17,6 +17,7 @@ import {
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import * as adminApi from "./api";
 import * as opportunitiesApi from "../../services/opportunitiesService";
+import * as teamsApi from "../teams/api";
 import AdminAnalytics from "./Analytics";
 import SosAlertsPanel from "../facilities/SosAlerts";
 
@@ -52,6 +53,7 @@ const TABS = [
   ["requests", "Requests"],
   ["lostfound", "Lost & Found"],
   ["opportunities", "Opportunities & Mentors"],
+  ["teams", "Teams"],
   ["errors", "Errors"],
 ];
 
@@ -91,6 +93,7 @@ export default function AdminCMS({ notify, campusId, authUser }) {
       {tab === "requests" && <RequestsTab notify={notify} campusId={campusId} />}
       {tab === "lostfound" && <LostFoundTab notify={notify} campusId={campusId} authUser={authUser} />}
       {tab === "opportunities" && <OpportunitiesMentorsTab notify={notify} campusId={campusId} />}
+      {tab === "teams" && <TeamsAdminTab notify={notify} campusId={campusId} />}
       {tab === "errors" && <ErrorLogsTab notify={notify} />}
     </section>
   );
@@ -1127,7 +1130,7 @@ function LostFoundItemForm({ campusId, authUser, onClose, onSaved, notify }) {
    OPPORTUNITIES & MENTORS (doc §109)
 ========================================================= */
 
-const OPPORTUNITY_TYPES = ["Internship", "Research", "Job", "Volunteer", "Competition"];
+const OPPORTUNITY_TYPES = ["Internship", "Research", "Job", "Volunteer", "Competition", "Hackathon"];
 
 function OpportunitiesMentorsTab({ notify, campusId }) {
   const [section, setSection] = useState("opportunities");
@@ -1480,6 +1483,75 @@ function MentorRequestsAdminSection({ notify }) {
               <small>{r.profiles?.course} · {new Date(r.created_at).toLocaleString()} · {r.status}</small>
               {r.message && <small>&ldquo;{r.message}&rdquo;</small>}
             </div>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   TEAMS -- moderation (doc §22 follow-up)
+   Team creation/roster/edit stay owner's-own-business (per the
+   permission-audit pass); this is the one thing that WAS backend-only --
+   delete_project_team() already lets an admin or moderation.act holder
+   remove an abusive team, this just gives that a UI. Browse-all, not
+   report-driven: unlike posts/comments/conversations there's no
+   content_reports flow for teams yet, so this mirrors
+   OpportunitiesAdminSection's plain "list everything, act on it" shape
+   instead.
+========================================================= */
+
+function TeamsAdminTab({ notify, campusId }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      setItems(await teamsApi.listProjectTeamsAdmin(campusId));
+    } catch (err) {
+      setError(err.message || "Could not load teams");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, [campusId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading) return <LoadingState label="Loading teams…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  return (
+    <div>
+      <div className="section-head">
+        <h2>Project / Hackathon Teams</h2>
+      </div>
+
+      <div className="resource-list">
+        {items.length === 0 && (
+          <EmptyState title="No teams yet" text="Students haven't started any project or hackathon teams yet." />
+        )}
+        {items.map((item) => (
+          <article className="resource-row" key={item.id}>
+            <div className="resource-icon"><HiUserGroup /></div>
+            <div>
+              <b>{item.title}</b>
+              <small>
+                {item.category} · {item.status} · owned by {item.profiles?.name || "Unknown"} ·{" "}
+                {item.project_team_members?.length || 0}/{item.max_members} members ·{" "}
+                {item.project_team_applications?.length || 0} applicant(s)
+              </small>
+            </div>
+            <button onClick={async () => {
+              if (!window.confirm(`Remove the team "${item.title}"? This deletes its roster, applications and invitations.`)) return;
+              try { await teamsApi.deleteProjectTeam(item.id); notify("Team removed"); reload(); }
+              catch (err) { notify(err.message || "Could not remove this team"); }
+            }}>
+              <HiTrash />
+            </button>
           </article>
         ))}
       </div>
