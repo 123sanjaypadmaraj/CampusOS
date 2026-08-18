@@ -136,12 +136,21 @@ export async function getUnreadMessageCount() {
 export async function getConversationMessages(conversationId) {
   const { data, error } = await supabase
     .from("messages")
-    .select("id, conversation_id, sender_id, body, attachment_path, created_at")
+    .select("id, conversation_id, sender_id, body, attachment_path, deleted_at, deleted_by, created_at")
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: true });
 
   throwIfError(error);
   return data || [];
+}
+
+// Soft delete (see 20260817001000_message_delete_moderation.sql): the
+// sender can delete their own message any time; a moderator can remove
+// anyone's from the report-review flow (see adminDeleteMessage below, same
+// RPC). Content is actually cleared server-side, not just hidden client-side.
+export async function deleteMessage(messageId) {
+  const { error } = await supabase.rpc("delete_message", { p_message_id: messageId });
+  throwIfError(error);
 }
 
 export function subscribeToConversationMessages(conversationId, callback) {

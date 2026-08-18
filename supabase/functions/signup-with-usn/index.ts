@@ -15,7 +15,8 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 
-const USN_RE = /^[A-Za-z0-9]{10}$/;
+// Must stay in exact sync with src/features/auth/usn.ts's USN_PATTERN.
+const USN_RE = /^\dNH\d{2}[A-Za-z]{2}\d{3}$/i;
 
 function usnToEmail(usn: string): string {
   return `${usn.trim().toLowerCase()}@usn.campusos.internal`;
@@ -36,7 +37,7 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ code: "NAME_REQUIRED", message: "Enter your full name." }, 400);
     }
     if (!usn || !USN_RE.test(usn.trim())) {
-      return jsonResponse({ code: "USN_INVALID", message: "USN must be exactly 10 letters/numbers." }, 400);
+      return jsonResponse({ code: "USN_INVALID", message: "Enter a valid NHCE USN, e.g. 1NH22CS201." }, 400);
     }
     if (!password || password.length < 8) {
       return jsonResponse({ code: "PASSWORD_TOO_SHORT", message: "Password must be at least 8 characters." }, 400);

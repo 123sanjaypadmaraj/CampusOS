@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { mergeCartItem } from "./utils/mvpHelpers";
+import { mergeCartItem, addonSelectionKey, isFoodItemAvailableNow, isCanteenOpenNow, calculatePrintJobPrice } from "./utils/mvpHelpers";
 import {
   getDefaultCampus,
   getCurrentUser,
@@ -10,9 +10,15 @@ import {
   getCampusFood,
   getUserNotifications,
   getMyOrders,
+  getOrCreateOrderInvoice,
   createFoodOrder,
   startFoodOrderPayment,
   publishPost,
+  uploadPostImage,
+  getSavedPosts,
+  toggleSavedPost,
+  submitSuspensionAppeal,
+  getMySuspensionAppeal,
   markAllNotificationsRead,
   registerEvent,
   isValidPhone,
@@ -27,6 +33,13 @@ import {
   markLinkedinVerified,
   hasLinkedinIdentity,
   uploadPrintJob,
+  validatePrintFile,
+  startPrintJobPayment,
+  cancelPrintJob,
+  startPrintJobRefund,
+  getPrintRateCard,
+  getPrintBindingRates,
+  getPrintShopStatus,
   subscribeToAuthChanges,
   subscribeToUserNotifications,
   subscribeToOrders,
@@ -68,6 +81,9 @@ import {
   reportContent,
   getMyVerification,
   submitStudentVerification,
+  getMyAccountDeletionRequest,
+  requestAccountDeletion,
+  cancelAccountDeletionRequest,
   submitOrgRequest,
   touchActivity,
   triggerSosAlert,
@@ -105,6 +121,7 @@ import {
   blockUser,
   unblockUser,
   listBlockedUsers,
+  deleteMessage,
 } from "./services/messagingService";
 import {
   globalSearch,
@@ -152,7 +169,7 @@ import {
   getMyMentorRequests,
   requestMentor,
 } from "./services/opportunitiesService";
-import { askCampusAssistant } from "./services/aiAssistantService";
+import { askCampusAssistant, submitAiFeedback, logAiAction } from "./services/aiAssistantService";
 import { getAllRecommendations, dismissRecommendation } from "./services/recommendationsService";
 import { createReminder, listMyReminders, setReminderDone, deleteReminder, subscribeToReminders } from "./services/remindersService";
 import { getStudentActivitySummary, getStudentSpendingSeries } from "./services/studentAnalyticsService";
@@ -225,6 +242,11 @@ import {
   HiTrash,
   HiPhoto,
   HiNoSymbol,
+  HiHandThumbUp,
+  HiHandThumbDown,
+  HiFlag,
+  HiBookmark,
+  HiOutlineBookmark,
 } from "react-icons/hi2";
 import { FaLinkedin, FaGithub, FaGoogle } from "react-icons/fa6";
 
@@ -1104,6 +1126,7 @@ function App() {
   const [people, setPeople] = useState([]);
   const [registeredEventIds, setRegisteredEventIds] = useState([]);
   const [savedEventIds, setSavedEventIds] = useState([]);
+  const [savedPostIds, setSavedPostIds] = useState([]);
   const [printJobs, setPrintJobs] = useState([]);
   const [serviceRequests, setServiceRequests] = useState([]);
   const [resources, setResources] = useState([]);
@@ -1214,13 +1237,14 @@ function App() {
 
     return posts.filter(
       (p) =>
-        (postFilter === "All" || p.type === postFilter) &&
+        (postFilter === "All" ||
+          (postFilter === "Saved" ? savedPostIds.includes(p.id) : p.type === postFilter)) &&
         (!q ||
           `${p.title} ${p.author} ${p.tags.join(" ")}`
             .toLowerCase()
             .includes(q))
     );
-  }, [search, postFilter, posts]);
+  }, [search, postFilter, posts, savedPostIds]);
 
   const addFood = (item) => {
     setFoodCart((cart) => {
@@ -1420,6 +1444,9 @@ function App() {
 
           tags:
             post.tags || [],
+
+          imageUrls:
+            post.images || [],
         });
 
       setPosts(
@@ -1439,6 +1466,9 @@ function App() {
             likes: 0,
 
             comments: 0,
+
+            images:
+              post.images || [],
 
             verified: true,
           },
@@ -1464,6 +1494,22 @@ function App() {
         error.message ||
         "Unable to publish post"
       );
+    }
+  };
+
+  const handleToggleSavePost = async (postId) => {
+    if (!authUser?.id) {
+      setLoginOpen(true);
+      notify("Sign in to save posts");
+      return;
+    }
+    try {
+      const isSavedNow = await toggleSavedPost({ postId, userId: authUser.id });
+      setSavedPostIds((current) =>
+        isSavedNow ? [...current, postId] : current.filter((id) => id !== postId)
+      );
+    } catch (error) {
+      notify(error.message || "Could not save this post");
     }
   };
 
@@ -1918,10 +1964,10 @@ function App() {
       if (!authUser?.id) return;
       Promise.all([
         getMyRegisteredEventIds(authUser.id), getSavedEvents(authUser.id), getMyPrintJobs(authUser.id),
-        getMyServiceRequests(authUser.id), getMyBookings(authUser.id), getMyOrders(authUser.id),
-      ]).then(([registered, saved, jobs, requests, myBookings, myOrders]) => {
+        getMyServiceRequests(authUser.id), getMyBookings(authUser.id), getMyOrders(authUser.id), getSavedPosts(authUser.id),
+      ]).then(([registered, saved, jobs, requests, myBookings, myOrders, savedPosts]) => {
         setRegisteredEventIds(registered); setSavedEventIds(saved); setPrintJobs(jobs);
-        setServiceRequests(requests); setBookings(myBookings); setOrders(myOrders);
+        setServiceRequests(requests); setBookings(myBookings); setOrders(myOrders); setSavedPostIds(savedPosts);
       }).catch((error) => console.error("Personal workspace loading failed", error));
     }, [authUser?.id]);
 
@@ -2066,6 +2112,8 @@ function App() {
           authUser={authUser}
           setLoginOpen={() => setLoginOpen(true)}
           postsLoading={postsLoading}
+          savedPostIds={savedPostIds}
+          onToggleSave={handleToggleSavePost}
         />
       );
     }
@@ -2324,6 +2372,7 @@ function App() {
           onRequestsChange={setServiceRequests}
           onLostItemsChange={setLostItems}
           onMarketListingsChange={setMarketListings}
+          onPrintJobsChange={setPrintJobs}
           onOpenConversation={goToConversation}
         />
       );
@@ -2420,7 +2469,7 @@ function App() {
         </div>
       )}
 
-      <main>{renderPage()}</main>
+      <main>{profile?.status === "suspended" ? <SuspendedAccountScreen profile={profile} notify={notify} /> : renderPage()}</main>
 
       <nav className="bottom-nav">
         {/* A vendor account is a purpose-built ordering console, not the
@@ -2490,6 +2539,8 @@ function App() {
           onClose={() => setModal(null)}
           onCreate={createPost}
           user={user}
+          authUser={authUser}
+          notify={notify}
         />
       )}
 
@@ -2510,6 +2561,10 @@ function App() {
         onClose={() => setModal(null)}
         notify={notify}
         onCheckout={checkoutFood}
+        onUpdateQuantity={(index, quantity) =>
+          setFoodCart((cart) => (quantity <= 0 ? cart.filter((_, i) => i !== index) : cart.map((entry, i) => (i === index ? { ...entry, quantity } : entry))))
+        }
+        onRemove={(index) => setFoodCart((cart) => cart.filter((_, i) => i !== index))}
       />
       )}
 
@@ -2521,6 +2576,10 @@ function App() {
           onClose={() => setModal(null)}
           notify={notify}
           onCheckout={checkoutStore}
+          onUpdateQuantity={(index, quantity) =>
+            setStoreCart((cart) => (quantity <= 0 ? cart.filter((_, i) => i !== index) : cart.map((entry, i) => (i === index ? { ...entry, quantity } : entry))))
+          }
+          onRemove={(index) => setStoreCart((cart) => cart.filter((_, i) => i !== index))}
         />
       )}
 
@@ -2529,6 +2588,9 @@ function App() {
           onClose={() => setModal(null)}
           setPrintFile={setPrintFile}
           notify={notify}
+          authUser={authUser}
+          user={user}
+          campusId={campusId}
         />
       )}
 
@@ -2842,6 +2904,8 @@ function Campus({
   go,
   authUser,
   setLoginOpen,
+  savedPostIds = [],
+  onToggleSave,
 }) {
   const filters = [
     "All",
@@ -2849,6 +2913,7 @@ function Campus({
     "Event",
     "Help Needed",
     "Achievement",
+    "Saved",
   ];
 
   return (
@@ -2927,6 +2992,8 @@ function Campus({
               notify={notify}
               authUser={authUser}
               setLoginOpen={setLoginOpen}
+              saved={savedPostIds.includes(post.id)}
+              onToggleSave={onToggleSave}
             />
           ))}
         </div>
@@ -3185,12 +3252,30 @@ function RecommendCard({ title, meta, reason, onClick, onDismiss }) {
   );
 }
 
-function Post({ post, notify, authUser, setLoginOpen }) {
+function Post({ post, notify, authUser, setLoginOpen, saved = false, onToggleSave }) {
   const [likes, setLikes] = useState(post.likes || 0);
   const [liked, setLiked] = useState(post.liked || false);
   const [showComments, setShowComments] = useState(false);
   const [comments, setComments] = useState([]);
   const [commentText, setCommentText] = useState("");
+
+  const handleShare = async () => {
+    const url = `${window.location.origin}/campus?post=${post.id}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: post.title, url });
+        return;
+      } catch {
+        return; // user cancelled the native share sheet -- not an error
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      notify("Link copied to clipboard");
+    } catch {
+      notify(url); // last-resort fallback so the link is still visible
+    }
+  };
 
   const handleLike = async () => {
     if (!authUser) {
@@ -3290,6 +3375,14 @@ function Post({ post, notify, authUser, setLoginOpen }) {
 
       <h3>{post.title}</h3>
 
+      {post.images?.length > 0 && (
+        <div className="post-images" style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "8px 0" }}>
+          {post.images.map((url) => (
+            <img key={url} src={url} alt="" style={{ maxWidth: "100%", maxHeight: 320, borderRadius: 10, objectFit: "cover" }} />
+          ))}
+        </div>
+      )}
+
       <div className="tags">
         {post.tags.map((tag) => (
           <span key={tag}>#{tag}</span>
@@ -3303,8 +3396,16 @@ function Post({ post, notify, authUser, setLoginOpen }) {
         <button onClick={toggleComments}>
           <HiChatBubbleOvalLeft /> {post.comments + comments.length}
         </button>
-        <button onClick={() => notify("Post shared")}>
+        <button onClick={handleShare}>
           <HiArrowUpTray /> Share
+        </button>
+        <button
+          onClick={() => {
+            if (!authUser) { setLoginOpen?.(); notify("Sign in to save posts"); return; }
+            onToggleSave?.(post.id);
+          }}
+        >
+          {saved ? <HiBookmark style={{ color: "#f59e0b" }} /> : <HiOutlineBookmark />} {saved ? "Saved" : "Save"}
         </button>
       </div>
 
@@ -4331,6 +4432,21 @@ function MiniService({ icon, title, text, onClick }) {
 function Food({ canteens: vendorList, items, cart, addFood, openModal, loading, error }) {
   const [selectedCanteen, setSelectedCanteen] = useState("All");
   const [q, setQ] = useState("");
+  const [dietFilters, setDietFilters] = useState(() => new Set());
+
+  const dietaryOptions = useMemo(() => {
+    const tags = new Set(["Vegetarian"]);
+    items.forEach((item) => (item.dietaryTags || []).forEach((t) => tags.add(t)));
+    return [...tags];
+  }, [items]);
+
+  const toggleDietFilter = (tag) => {
+    setDietFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag); else next.add(tag);
+      return next;
+    });
+  };
 
   if (loading) {
     return (
@@ -4359,7 +4475,11 @@ function Food({ canteens: vendorList, items, cart, addFood, openModal, loading, 
         .toLowerCase()
         .includes(q.toLowerCase());
 
-    return matchesCanteen && matchesSearch;
+    const matchesDiet = [...dietFilters].every((tag) =>
+      tag === "Vegetarian" ? item.vegetarian : (item.dietaryTags || []).includes(tag)
+    );
+
+    return matchesCanteen && matchesSearch && matchesDiet;
   });
 
   const total = cart.reduce(
@@ -4494,6 +4614,10 @@ function Food({ canteens: vendorList, items, cart, addFood, openModal, loading, 
               }
             </span>
 
+            {!isCanteenOpenNow(vendorList.find((canteen) => canteen.name === selectedCanteen)) && (
+              <span className="listing-tag" style={{ fontWeight: 800 }}>Closed now</span>
+            )}
+
             <b>
               {
                 vendorList.find(
@@ -4532,6 +4656,23 @@ function Food({ canteens: vendorList, items, cart, addFood, openModal, loading, 
           </button>
         )}
 
+      </div>
+
+
+      {/* =====================================================
+          DIETARY FILTERS
+      ===================================================== */}
+
+      <div className="socialize-filter-row" style={{ marginTop: 12 }}>
+        {dietaryOptions.map((tag) => (
+          <button
+            key={tag}
+            className={dietFilters.has(tag) ? "chip active" : "chip"}
+            onClick={() => toggleDietFilter(tag)}
+          >
+            {tag}
+          </button>
+        ))}
       </div>
 
 
@@ -4740,7 +4881,79 @@ function TraditionalFoodItem({ item, add }) {
    FOOD CARD
 ========================================================= */
 
+// Variants (a single price-affecting choice, e.g. Half/Full) use the same
+// inline <select> pattern StoreProductCard already established. Add-ons
+// (grouped, multi-select modifiers, e.g. "Toppings"/"Spice level") get an
+// expandable inline panel instead -- there can be several groups with their
+// own min/max, which doesn't fit a single dropdown. Each card owns its own
+// selection state so configuring one card never affects another.
 function FoodCard({ item, add }) {
+  const variants = item.variants || [];
+  const hasVariants = variants.length > 0;
+  const [variantId, setVariantId] = useState(hasVariants ? variants[0].id : null);
+  const selectedVariant = hasVariants ? variants.find((v) => v.id === variantId) || variants[0] : null;
+
+  const addonGroups = item.addonGroups || [];
+  const hasAddons = addonGroups.length > 0;
+  const [customizeOpen, setCustomizeOpen] = useState(false);
+  const [selectedAddons, setSelectedAddons] = useState(() => new Set());
+
+  const toggleAddon = (group, optionId) => {
+    setSelectedAddons((prev) => {
+      const next = new Set(prev);
+      const groupOptionIds = group.options.map((o) => o.id);
+      if (group.maxSelect === 1) {
+        // Radio-style: clear any other selection from this same group first.
+        groupOptionIds.forEach((id) => next.delete(id));
+        next.add(optionId);
+        return next;
+      }
+      if (next.has(optionId)) {
+        next.delete(optionId);
+        return next;
+      }
+      const currentInGroup = groupOptionIds.filter((id) => next.has(id)).length;
+      if (currentInGroup >= group.maxSelect) return prev; // at the cap, ignore
+      next.add(optionId);
+      return next;
+    });
+  };
+
+  const addonIds = [...selectedAddons];
+  const addonPriceTotal = addonGroups
+    .flatMap((g) => g.options)
+    .filter((o) => selectedAddons.has(o.id))
+    .reduce((sum, o) => sum + o.priceDelta, 0);
+  const unmetRequiredGroup = addonGroups.find(
+    (g) => g.minSelect > 0 && g.options.filter((o) => selectedAddons.has(o.id)).length < g.minSelect
+  );
+
+  const availableNow = isFoodItemAvailableNow(item);
+  const basePrice = selectedVariant ? selectedVariant.price : item.price;
+  const totalPrice = basePrice + addonPriceTotal;
+  const canAdd = availableNow && (!hasVariants || (selectedVariant && selectedVariant.available)) && !unmetRequiredGroup;
+
+  const handleAdd = () => {
+    const variantSuffix = hasVariants ? ` (${selectedVariant.name})` : "";
+    const addonNames = addonGroups
+      .flatMap((g) => g.options)
+      .filter((o) => selectedAddons.has(o.id))
+      .map((o) => o.name);
+    add({
+      id: item.id,
+      name: `${item.name}${variantSuffix}`,
+      price: totalPrice,
+      category: item.category,
+      canteenId: item.canteenId,
+      vendor: item.vendor,
+      variantId: hasVariants ? selectedVariant.id : undefined,
+      addonOptionIds: addonIds.length ? addonIds : undefined,
+      addonKey: addonSelectionKey(addonIds),
+      addonSummary: addonNames.length ? addonNames.join(", ") : undefined,
+    });
+    setCustomizeOpen(false);
+  };
+
   return (
     <article className="product-card food-card">
 
@@ -4756,6 +4969,7 @@ function FoodCard({ item, add }) {
 
         <div className="food-card-category">
           {item.category}
+          {!availableNow && <span className="listing-tag" style={{ marginLeft: 8 }}>Not served now</span>}
         </div>
 
         <h3>{item.name}</h3>
@@ -4764,15 +4978,74 @@ function FoodCard({ item, add }) {
           {item.description || "Freshly prepared on campus."}
         </p>
 
+        {(item.dietaryTags?.length > 0 || item.spiceLevel || item.calories != null) && (
+          <div className="food-card-dietary" style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+            {item.dietaryTags.map((tag) => (
+              <span key={tag} className="listing-tag">{tag}</span>
+            ))}
+            {item.spiceLevel && <span className="listing-tag">{item.spiceLevel} spice</span>}
+            {item.calories != null && <span className="listing-tag">{item.calories} cal</span>}
+          </div>
+        )}
+        {item.allergens?.length > 0 && (
+          <small style={{ display: "block", marginBottom: 8, opacity: 0.75 }}>
+            Contains: {item.allergens.join(", ")}
+          </small>
+        )}
+
+        {hasVariants && (
+          <select value={selectedVariant.id} onChange={(e) => setVariantId(e.target.value)} style={{ marginBottom: 8, width: "100%" }}>
+            {variants.map((v) => (
+              <option key={v.id} value={v.id} disabled={!v.available}>
+                {v.name} · ₹{v.price}{!v.available ? " · unavailable" : ""}
+              </option>
+            ))}
+          </select>
+        )}
+
+        {hasAddons && (
+          <div style={{ marginBottom: 8 }}>
+            <button className="ghost" style={{ width: "100%" }} onClick={() => setCustomizeOpen((v) => !v)}>
+              {customizeOpen ? "Hide customization" : "Customize"} {addonIds.length > 0 ? `(${addonIds.length} selected)` : ""}
+            </button>
+            {customizeOpen && (
+              <div className="food-addon-panel" style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 10 }}>
+                {addonGroups.map((group) => (
+                  <div key={group.id}>
+                    <small>
+                      <b>{group.name}</b>
+                      {" "}
+                      {group.minSelect > 0 ? `(choose ${group.minSelect === group.maxSelect ? group.minSelect : `${group.minSelect}-${group.maxSelect}`})` : `(choose up to ${group.maxSelect})`}
+                    </small>
+                    {group.options.map((o) => (
+                      <label key={o.id} style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                        <input
+                          type={group.maxSelect === 1 ? "radio" : "checkbox"}
+                          name={`addon-group-${group.id}`}
+                          disabled={!o.available}
+                          checked={selectedAddons.has(o.id)}
+                          onChange={() => toggleAddon(group, o.id)}
+                        />
+                        {o.name}{o.priceDelta > 0 ? ` (+₹${o.priceDelta})` : ""}{!o.available ? " · unavailable" : ""}
+                      </label>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="product-bottom">
 
-          <b>₹{item.price}</b>
+          <b>₹{totalPrice}</b>
 
           <button
-            onClick={() => add(item)}
+            disabled={!canAdd}
+            onClick={handleAdd}
           >
             <HiPlus />
-            Add
+            {!availableNow ? "Not served now" : unmetRequiredGroup ? `Pick ${unmetRequiredGroup.name}` : "Add"}
           </button>
 
         </div>
@@ -5074,6 +5347,42 @@ function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfil
     return () => { cancelled = true; };
   }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Account deletion request (doc "Student" checklist item) -- a real
+  // request/review flow, not an immediate delete (see the migration's own
+  // comment for why: almost every table in this schema references
+  // profiles.id, several with on delete cascade, so an admin reviews before
+  // anything actually happens).
+  const [deletionRequest, setDeletionRequest] = useState(null);
+  const reloadDeletionRequest = () => {
+    if (!profile?.id) { setDeletionRequest(null); return; }
+    getMyAccountDeletionRequest(profile.id).then(setDeletionRequest).catch((error) => console.error("Deletion request status loading failed", error));
+  };
+  useEffect(() => { reloadDeletionRequest(); }, [profile?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleRequestDeletion = async () => {
+    const reason = window.prompt("Why do you want to delete your account? (optional)");
+    if (reason === null) return;
+    if (!window.confirm("This submits a request for a campus admin to review. Your account stays active until they act on it. Continue?")) return;
+    try {
+      await requestAccountDeletion(reason);
+      notify("Deletion request submitted — an admin will review it");
+      reloadDeletionRequest();
+    } catch (error) {
+      notify(error.message || "Could not submit deletion request");
+    }
+  };
+
+  const handleCancelDeletion = async () => {
+    if (!deletionRequest?.id) return;
+    try {
+      await cancelAccountDeletionRequest(deletionRequest.id);
+      notify("Deletion request cancelled");
+      reloadDeletionRequest();
+    } catch (error) {
+      notify(error.message || "Could not cancel deletion request");
+    }
+  };
+
   if (!user) {
     return (
       <section className="page-section profile-page">
@@ -5209,6 +5518,16 @@ function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfil
         {go && (
           <button className="link-btn" style={{ marginTop: 10 }} onClick={() => go("legal")}>
             Privacy Policy &amp; Terms of Service
+          </button>
+        )}
+        {deletionRequest ? (
+          <div style={{ marginTop: 10, textAlign: "center" }}>
+            <small>Account deletion requested — pending admin review.</small>
+            <button className="link-btn" onClick={handleCancelDeletion}>Cancel deletion request</button>
+          </div>
+        ) : (
+          <button className="link-btn" style={{ marginTop: 10 }} onClick={handleRequestDeletion}>
+            Delete my account
           </button>
         )}
       </div>
@@ -5516,7 +5835,7 @@ function activityMoney(value) {
   return `₹${Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
-function ActivityRow({ icon, title, subtitle, meta, status, onClick }) {
+function ActivityRow({ icon, title, subtitle, meta, status, onClick, action }) {
   return (
     <div
       className={`activity-row${onClick ? " clickable" : ""}`}
@@ -5533,6 +5852,7 @@ function ActivityRow({ icon, title, subtitle, meta, status, onClick }) {
       <div className="activity-row-end">
         {status && <span className={`activity-status tone-${activityStatusTone(status)}`}>{formatStatusLabel(status)}</span>}
         {meta && <small className="activity-row-meta">{meta}</small>}
+        {action}
       </div>
     </div>
   );
@@ -5672,6 +5992,8 @@ function YourActivity({
 }
 
 function ActivityFoodOrders({ orders, go }) {
+  const [receiptOrder, setReceiptOrder] = useState(null);
+
   if (!orders.length) {
     return (
       <EmptyState
@@ -5692,9 +6014,70 @@ function ActivityFoodOrders({ orders, go }) {
           subtitle={`${(order.order_items || []).length} item${(order.order_items || []).length === 1 ? "" : "s"} · ${order.created_at ? new Date(order.created_at).toLocaleString() : ""}${order.pickup_code ? ` · Pickup ${order.pickup_code}` : ""}`}
           meta={activityMoney(order.total)}
           status={order.status}
+          action={
+            ["paid", "refund_pending", "refunded"].includes(order.payment_status) ? (
+              <button className="ghost" onClick={(e) => { e.stopPropagation(); setReceiptOrder(order); }}>
+                Receipt
+              </button>
+            ) : undefined
+          }
         />
       ))}
+
+      {receiptOrder && <FoodReceiptModal order={receiptOrder} onClose={() => setReceiptOrder(null)} />}
     </div>
+  );
+}
+
+// GST invoice / receipt (doc Phase 3 "Invoice generation"). Generated
+// on-demand via generate_order_invoice() -- idempotent server-side, so
+// opening this more than once for the same order never creates duplicates.
+function FoodReceiptModal({ order, onClose }) {
+  const [invoice, setInvoice] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+    getOrCreateOrderInvoice(order.id)
+      .then((data) => { if (mounted) setInvoice(data); })
+      .catch((err) => { if (mounted) setError(err.message || "Could not load the receipt"); })
+      .finally(() => { if (mounted) setLoading(false); });
+    return () => { mounted = false; };
+  }, [order.id]);
+
+  return (
+    <ModalShell kicker="RECEIPT" title={order.canteens?.name || "Order receipt"} onClose={onClose}>
+      {loading && <LoadingState label="Loading receipt…" />}
+      {error && <ErrorState title="Couldn't load the receipt" text={error} />}
+      {invoice && (
+        <div className="receipt-body">
+          <div className="resource-row">
+            <div>
+              <b>{invoice.invoice_number}</b>
+              <small>{new Date(invoice.issued_at).toLocaleString()}</small>
+            </div>
+          </div>
+
+          <div className="price-preview"><span>Subtotal</span><b>₹{invoice.subtotal}</b></div>
+          {Number(invoice.cgst_amount) > 0 || Number(invoice.sgst_amount) > 0 ? (
+            <>
+              <div className="price-preview"><span>CGST</span><b>₹{invoice.cgst_amount}</b></div>
+              <div className="price-preview"><span>SGST</span><b>₹{invoice.sgst_amount}</b></div>
+              {invoice.gst_number && <small>GSTIN: {invoice.gst_number}</small>}
+            </>
+          ) : (
+            <div className="price-preview"><span>Tax</span><b>₹{invoice.tax_amount}</b></div>
+          )}
+          {Number(invoice.platform_fee) > 0 && <div className="price-preview"><span>Platform fee</span><b>₹{invoice.platform_fee}</b></div>}
+          {Number(invoice.delivery_fee) > 0 && <div className="price-preview"><span>Delivery fee</span><b>₹{invoice.delivery_fee}</b></div>}
+          {Number(invoice.discount_amount) > 0 && <div className="price-preview"><span>Discount</span><b>−₹{invoice.discount_amount}</b></div>}
+          <div className="price-preview"><span>Total</span><b>₹{invoice.total}</b></div>
+
+          <button className="ghost wide" style={{ marginTop: 16 }} onClick={() => window.print()}>Print / save as PDF</button>
+        </div>
+      )}
+    </ModalShell>
   );
 }
 
@@ -6684,7 +7067,87 @@ const serviceDetailData = {
   },
 };
 
-function ServiceDetail({ serviceId, notify, go, openModal, openLogin, authUser, user, profile, campusId, resources, bookings, serviceRequests, printJobs, lostItems, lostItemsLoaded, marketListings, onBookingsChange, onRequestsChange, onLostItemsChange, onMarketListingsChange, onOpenConversation }) {
+const PRINT_CANCELLABLE_STATUSES = new Set(["AWAITING_PAYMENT", "UPLOADED", "PROCESSING", "QUEUED", "FAILED"]);
+// Once a job has a real pickup code worth showing as a QR, it's been paid for.
+const PRINT_QR_STATUSES = new Set(["UPLOADED", "PROCESSING", "QUEUED", "PRINTING", "READY"]);
+
+function PrintJobRow({ job, notify, onChange }) {
+  const [qrUrl, setQrUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!PRINT_QR_STATUSES.has(job.status) || !job.pickup_code) { setQrUrl(""); return; }
+    let cancelled = false;
+    QRCode.toDataURL(job.pickup_code, { width: 140, margin: 1, color: { dark: "#17151f", light: "#ffffff" } })
+      .then((url) => { if (!cancelled) setQrUrl(url); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [job.status, job.pickup_code]);
+
+  const cancel = async () => {
+    if (busy) return;
+    try {
+      setBusy(true);
+      const result = await cancelPrintJob(job.id, "Cancelled by student");
+      if (result?.refund_id) {
+        try {
+          await startPrintJobRefund(result.refund_id);
+          notify("Print job cancelled — refund processed.");
+        } catch (refundError) {
+          console.error("Print refund:", refundError);
+          notify("Print job cancelled — refund is processing, check My Activity shortly.");
+        }
+      } else {
+        notify("Print job cancelled.");
+      }
+      onChange?.();
+    } catch (error) {
+      notify(error.message || "Could not cancel this job");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <article className="resource-row">
+      <div className="resource-icon"><HiPrinter /></div>
+      <div>
+        <b>{job.file_name}</b>
+        <small>
+          {job.pages} pages · {job.copies} {job.copies === 1 ? "copy" : "copies"} · {job.color_mode === "colour" ? "Colour" : "B&W"} ·{" "}
+          {job.paper_size}{job.duplex ? " · Duplex" : ""}{job.binding && job.binding !== "none" ? ` · ${job.binding}` : ""}
+          {job.price != null ? ` · ₹${job.price}` : ""}
+        </small>
+        {job.status === "CANCELLED" && job.cancel_reason && <small>Reason: {job.cancel_reason}</small>}
+      </div>
+      <strong>{job.status.replace(/_/g, " ")}</strong>
+      {qrUrl && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+          <img src={qrUrl} alt={`Pickup QR for code ${job.pickup_code}`} width={64} height={64} />
+          <small>{job.pickup_code}</small>
+        </div>
+      )}
+      {PRINT_CANCELLABLE_STATUSES.has(job.status) && (
+        <button className="ghost" disabled={busy} onClick={cancel}>
+          {busy ? "Cancelling…" : "Cancel"}
+        </button>
+      )}
+    </article>
+  );
+}
+
+function PrintJobsPanel({ jobs, notify, onChange }) {
+  if (!jobs?.length) {
+    return <EmptyState icon={<HiPrinter />} title="No print jobs yet" text="Upload a document above to get started." />;
+  }
+  return (
+    <div className="resource-list">
+      {jobs.map((job) => <PrintJobRow key={job.id} job={job} notify={notify} onChange={onChange} />)}
+    </div>
+  );
+}
+
+function ServiceDetail({ serviceId, notify, go, openModal, openLogin, authUser, user, profile, campusId, resources, bookings, serviceRequests, printJobs, lostItems, lostItemsLoaded, marketListings, onBookingsChange, onRequestsChange, onLostItemsChange, onMarketListingsChange, onPrintJobsChange, onOpenConversation }) {
   const data = serviceDetailData[serviceId];
 
   return (
@@ -6710,29 +7173,38 @@ function ServiceDetail({ serviceId, notify, go, openModal, openLogin, authUser, 
       </div>
 
       {serviceId === "print" && (
-        <><div className="service-detail-grid">
-          <WorkflowCard
-            icon={<HiDocumentArrowUp />}
-            title="1. Upload document"
-            text="PDF, DOCX and project reports."
-            button="Upload"
-            onClick={() => openModal("print")}
-          />
-          <WorkflowCard
-            icon={<HiCreditCard />}
-            title="2. Configure & pay"
-            text="Colour, copies, binding and paper."
-            button="Configure"
-            onClick={() => openModal("print")}
-          />
-          <WorkflowCard
-            icon={<HiQrCode />}
-            title="3. QR pickup"
-            text="Collect when the shop marks it ready."
-            button="View queue"
-            onClick={() => notify("Print queue: 3 orders ahead")}
-          />
-        </div>{printJobs?.length > 0 && <div className="resource-list">{printJobs.map((job) => <article className="resource-row" key={job.id}><div className="resource-icon"><HiPrinter /></div><div><b>{job.file_name}</b><small>{job.pages} pages · {job.copies} copies · Pickup {job.pickup_code}</small></div><strong>{job.status}</strong></article>)}</div>}</>
+        <>
+          <div className="service-detail-grid">
+            <WorkflowCard
+              icon={<HiDocumentArrowUp />}
+              title="1. Upload document"
+              text="PDF only, up to 25MB."
+              button="Upload"
+              onClick={() => openModal("print")}
+            />
+            <WorkflowCard
+              icon={<HiCreditCard />}
+              title="2. Configure & pay"
+              text="Colour, copies, binding, duplex and paper size."
+              button="Configure"
+              onClick={() => openModal("print")}
+            />
+            <WorkflowCard
+              icon={<HiQrCode />}
+              title="3. QR pickup"
+              text="Collect when the shop marks it ready."
+              button="View my jobs"
+              onClick={() => document.getElementById("print-jobs-panel")?.scrollIntoView({ behavior: "smooth" })}
+            />
+          </div>
+          <div id="print-jobs-panel">
+            <PrintJobsPanel
+              jobs={printJobs}
+              notify={notify}
+              onChange={() => authUser && getMyPrintJobs(authUser.id).then(onPrintJobsChange).catch(() => {})}
+            />
+          </div>
+        </>
       )}
 
       {serviceId === "issues" && (
@@ -7647,12 +8119,12 @@ function CampusAI({ notify, go, authUser, profile, campusId, addFood, openLogin 
     setAsking(true);
 
     try {
-      const { reply, pendingAction, navigateTo } = await askCampusAssistant(
+      const { reply, pendingAction, navigateTo, sources } = await askCampusAssistant(
         nextConversation.map((m) => ({ role: m.role, content: m.text }))
       );
       setConversation((current) => [
         ...current,
-        { role: "ai", text: reply, action: pendingAction ? { ...pendingAction, status: "pending" } : undefined },
+        { role: "ai", text: reply, sources, action: pendingAction ? { ...pendingAction, status: "pending" } : undefined },
       ]);
       if (pendingAction?.type === "register_event" && profile?.phone) {
         setPhoneDrafts((current) => ({ ...current, [nextConversation.length]: profile.phone }));
@@ -7686,12 +8158,41 @@ function CampusAI({ notify, go, authUser, profile, campusId, addFood, openLogin 
       const resultText = await executor(action, { authUser, profile, campusId, addFood, phone: phoneDrafts[index] || "" });
       updateAction(index, { status: "confirmed", resultText });
       notify(resultText);
+      logAiAction(action.type, action, "confirmed", resultText);
     } catch (error) {
-      updateAction(index, { status: "error", resultText: error.message || "Could not complete that action" });
+      const resultText = error.message || "Could not complete that action";
+      updateAction(index, { status: "error", resultText });
+      logAiAction(action.type, action, "error", resultText);
     }
   };
 
-  const cancelAction = (index) => updateAction(index, { status: "cancelled" });
+  const cancelAction = (index) => {
+    const action = conversation[index]?.action;
+    updateAction(index, { status: "cancelled" });
+    if (action) logAiAction(action.type, action, "cancelled");
+  };
+
+  // Feedback loop (doc "AI" checklist): thumbs up/down, "report wrong
+  // answer" prompts for a short reason on down-votes only (same
+  // window.prompt-for-a-reason convention this file already uses for
+  // suspend/reject actions elsewhere) -- up-votes need no extra detail.
+  const sendFeedback = async (index, rating) => {
+    const item = conversation[index];
+    if (!item || item.feedback?.rating) return;
+    let reportReason = null;
+    if (rating === "down") {
+      reportReason = window.prompt("What was wrong with this answer? (optional)") || null;
+    }
+    setConversation((current) => current.map((it, i) => (i === index ? { ...it, feedback: { rating, sending: true } } : it)));
+    try {
+      await submitAiFeedback(item.text, rating, reportReason);
+      setConversation((current) => current.map((it, i) => (i === index ? { ...it, feedback: { rating, reported: !!reportReason, sending: false } } : it)));
+      notify(rating === "up" ? "Thanks for the feedback!" : "Thanks -- flagged for review.");
+    } catch (error) {
+      setConversation((current) => current.map((it, i) => (i === index ? { ...it, feedback: null } : it)));
+      notify(error.message || "Could not send feedback");
+    }
+  };
 
   return (
     <section className="page-section ai-page">
@@ -7718,6 +8219,9 @@ function CampusAI({ notify, go, authUser, profile, campusId, addFood, openLogin 
               </span>
               <div>
                 <p>{item.text}</p>
+                {item.role === "ai" && item.sources?.length > 0 && (
+                  <p className="ai-sources">Sourced from: {item.sources.join(", ")}</p>
+                )}
                 {item.action && (
                   <ActionCard
                     action={item.action}
@@ -7726,6 +8230,29 @@ function CampusAI({ notify, go, authUser, profile, campusId, addFood, openLogin 
                     onConfirm={() => confirmAction(index)}
                     onCancel={() => cancelAction(index)}
                   />
+                )}
+                {item.role === "ai" && index > 0 && (
+                  <div className="ai-feedback-row">
+                    <button
+                      className={item.feedback?.rating === "up" ? "ai-feedback-btn active" : "ai-feedback-btn"}
+                      disabled={!!item.feedback?.rating}
+                      onClick={() => sendFeedback(index, "up")}
+                      title="Good answer"
+                    >
+                      <HiHandThumbUp />
+                    </button>
+                    <button
+                      className={item.feedback?.rating === "down" ? "ai-feedback-btn active" : "ai-feedback-btn"}
+                      disabled={!!item.feedback?.rating}
+                      onClick={() => sendFeedback(index, "down")}
+                      title="Report wrong answer"
+                    >
+                      <HiHandThumbDown />
+                    </button>
+                    {item.feedback?.rating === "down" && item.feedback?.reported && (
+                      <span className="ai-feedback-reported"><HiFlag /> Reported</span>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
@@ -8460,16 +8987,32 @@ function Messages({ notify, authUser, openConversationId, onConversationOpened, 
   const send = async () => {
     const body = draft.trim();
     if (!body || !activeId) return;
+    setSending(true);
+    setDraft("");
     try {
-      setSending(true);
-      setDraft("");
       await sendMessage(activeId, body);
       const rows = await getConversationMessages(activeId);
       setMsgs(rows);
     } catch (error) {
+      // Restore the draft on failure (offline, rate-limited, blocked mid-
+      // typing, ...) -- clearing it optimistically above and never putting
+      // it back on error used to silently discard whatever the user typed,
+      // leaving only a toast and nothing to retry with.
+      setDraft(body);
       notify(error.message || "Could not send message");
     } finally {
       setSending(false);
+    }
+  };
+
+  const removeMessage = async (messageId) => {
+    if (!window.confirm("Delete this message? This can't be undone.")) return;
+    try {
+      await deleteMessage(messageId);
+      const rows = await getConversationMessages(activeId);
+      setMsgs(rows);
+    } catch (error) {
+      notify(error.message || "Could not delete this message");
     }
   };
 
@@ -8593,13 +9136,31 @@ function Messages({ notify, authUser, openConversationId, onConversationOpened, 
                 </div>
 
                 <div className="messages-thread-body">
-                  {msgs.map((m) => (
-                    <div key={m.id} className={`message-bubble ${m.sender_id === authUser?.id ? "mine" : "theirs"}`}>
-                      {m.attachment_path && <MessageAttachmentImage path={m.attachment_path} />}
-                      {m.body && <p>{m.body}</p>}
-                      <small>{new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</small>
-                    </div>
-                  ))}
+                  {msgs.map((m) => {
+                    const mine = m.sender_id === authUser?.id;
+                    return (
+                      <div key={m.id} className={`message-bubble ${mine ? "mine" : "theirs"}`}>
+                        {m.deleted_at ? (
+                          <p className="message-deleted">
+                            {m.deleted_by === m.sender_id ? "You deleted this message" : "This message was removed by a moderator"}
+                          </p>
+                        ) : (
+                          <>
+                            {m.attachment_path && <MessageAttachmentImage path={m.attachment_path} />}
+                            {m.body && <p>{m.body}</p>}
+                          </>
+                        )}
+                        <small>
+                          {new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          {mine && !m.deleted_at && (
+                            <button className="message-delete-btn" onClick={() => removeMessage(m.id)} aria-label="Delete message">
+                              <HiTrash />
+                            </button>
+                          )}
+                        </small>
+                      </div>
+                    );
+                  })}
                   <div ref={threadEndRef} />
                 </div>
 
@@ -8858,10 +9419,135 @@ function ModalShell({ title, kicker, onClose, children }) {
   );
 }
 
-function PostComposer({ onClose, onCreate, user }) {
+// reject_if_suspended() (supabase/migrations/20260814003000) already blocks
+// a suspended account from posting/ordering/booking/etc -- this is the one
+// path back: submit_suspension_appeal()/get_my_suspension_appeal()
+// (20260818000600_community_hardening.sql). Shown in place of the normal
+// page content while profile.status === 'suspended' so a suspended student
+// isn't just staring at a broken app with no explanation.
+function SuspendedAccountScreen({ profile, notify }) {
+  const [appeal, setAppeal] = useState(undefined); // undefined = loading, null = none yet
+  const [reason, setReason] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    getMySuspensionAppeal()
+      .then(setAppeal)
+      .catch(() => setAppeal(null));
+  }, []);
+
+  const submit = async () => {
+    if (!reason.trim()) return;
+    try {
+      setSubmitting(true);
+      const created = await submitSuspensionAppeal(reason.trim());
+      setAppeal(created);
+      notify("Appeal submitted — a campus admin will review it");
+    } catch (err) {
+      notify(err.message || "Could not submit your appeal");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <section className="page-section">
+      <div className="section-head large">
+        <div>
+          <span className="section-kicker">ACCOUNT SUSPENDED</span>
+          <h1>Your account has been suspended</h1>
+          <p>
+            {profile?.suspended_reason
+              ? `Reason given: "${profile.suspended_reason}"`
+              : "Contact a campus admin for details."}
+          </p>
+        </div>
+      </div>
+
+      {appeal === undefined && <LoadingState label="Checking appeal status…" />}
+
+      {appeal === null && (
+        <div className="side-card" style={{ maxWidth: 480 }}>
+          <span className="section-kicker">SUBMIT AN APPEAL</span>
+          <p>Explain why you believe this suspension should be reviewed.</p>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Your explanation..."
+            rows={5}
+            style={{ width: "100%", marginBottom: 12 }}
+          />
+          <button className="primary wide" disabled={!reason.trim() || submitting} onClick={submit}>
+            {submitting ? "Submitting…" : "Submit appeal"}
+          </button>
+        </div>
+      )}
+
+      {appeal && appeal.status === "pending" && (
+        <div className="side-card" style={{ maxWidth: 480 }}>
+          <span className="section-kicker">APPEAL UNDER REVIEW</span>
+          <p>&ldquo;{appeal.reason}&rdquo;</p>
+          <small>Submitted {new Date(appeal.created_at).toLocaleString()} — a campus admin will review it.</small>
+        </div>
+      )}
+
+      {appeal && appeal.status === "denied" && (
+        <div className="side-card" style={{ maxWidth: 480 }}>
+          <span className="section-kicker">APPEAL DENIED</span>
+          {appeal.admin_note && <p>{appeal.admin_note}</p>}
+          <p>You can submit another appeal below if you have new information.</p>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Your explanation..."
+            rows={5}
+            style={{ width: "100%", marginBottom: 12 }}
+          />
+          <button className="primary wide" disabled={!reason.trim() || submitting} onClick={submit}>
+            {submitting ? "Submitting…" : "Submit another appeal"}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function PostComposer({ onClose, onCreate, user, authUser, notify }) {
   const [title, setTitle] = useState("");
   const [type, setType] = useState("General");
   const [tag, setTag] = useState("");
+  const [tags, setTags] = useState([]);
+  const [images, setImages] = useState([]);
+  const [uploading, setUploading] = useState(false);
+
+  const addTag = () => {
+    const clean = tag.trim().toLowerCase();
+    if (clean && !tags.includes(clean)) setTags((prev) => [...prev, clean]);
+    setTag("");
+  };
+
+  const handleImagePick = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (images.length >= 4) {
+      notify?.("You can attach up to 4 images per post");
+      return;
+    }
+    if (!authUser?.id) {
+      notify?.("Sign in to attach images");
+      return;
+    }
+    try {
+      setUploading(true);
+      const url = await uploadPostImage(file, authUser.id);
+      setImages((prev) => [...prev, url]);
+    } catch (err) {
+      notify?.(err.message || "Could not upload that image");
+    } finally {
+      setUploading(false);
+    }
+  };
 
   return (
     <ModalShell
@@ -8890,28 +9576,64 @@ function PostComposer({ onClose, onCreate, user }) {
       </label>
 
       <label>
-        Tag
-        <input
-          value={tag}
-          onChange={(e) => setTag(e.target.value)}
-          placeholder="e.g. robotics"
-        />
+        Tags
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            value={tag}
+            onChange={(e) => setTag(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTag(); } }}
+            placeholder="e.g. robotics — press Enter to add"
+          />
+          <button type="button" onClick={addTag} disabled={!tag.trim()}>Add</button>
+        </div>
       </label>
+      {tags.length > 0 && (
+        <div className="chips">
+          {tags.map((t) => (
+            <button key={t} className="chip" onClick={() => setTags((prev) => prev.filter((x) => x !== t))} title="Remove tag">
+              #{t} ×
+            </button>
+          ))}
+        </div>
+      )}
+
+      <label>
+        Photos ({images.length}/4)
+        <input type="file" accept="image/*" onChange={handleImagePick} disabled={uploading || images.length >= 4} />
+      </label>
+      {images.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          {images.map((url) => (
+            <div key={url} style={{ position: "relative" }}>
+              <img src={url} alt="" style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8 }} />
+              <button
+                type="button"
+                onClick={() => setImages((prev) => prev.filter((x) => x !== url))}
+                style={{ position: "absolute", top: -6, right: -6, borderRadius: "50%", width: 20, height: 20, lineHeight: "20px", padding: 0 }}
+                title="Remove image"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <button
         className="primary wide"
-        disabled={!title.trim()}
+        disabled={!title.trim() || uploading}
         onClick={() =>
           onCreate({
             type,
             title,
             author: user?.name || "Campus Student",
             accent: "violet",
-            tags: tag ? [tag] : [],
+            tags,
+            images,
           })
         }
       >
-        Publish <HiArrowUpTray />
+        {uploading ? "Uploading…" : <>Publish <HiArrowUpTray /></>}
       </button>
     </ModalShell>
   );
@@ -9136,8 +9858,17 @@ function UsnPasswordLogin({ onClose, notify }) {
       notify("Enter your full name");
       return;
     }
-    if (!/^[A-Za-z0-9]{10}$/.test(cleanUsn)) {
-      notify("USN must be exactly 10 letters/numbers");
+    // Real NHCE USN structure (matches src/features/auth/usn.ts's
+    // USN_PATTERN, and signup-with-usn's own server-side check) -- only
+    // enforced when creating a NEW account. Login stays a loose non-empty
+    // check so a pre-existing account whose USN predates this stricter
+    // format never gets locked out (signInWithUsn() itself mirrors this).
+    if (signingUp && !/^\dNH\d{2}[A-Za-z]{2}\d{3}$/i.test(cleanUsn)) {
+      notify("Enter a valid NHCE USN, e.g. 1NH22CS201");
+      return;
+    }
+    if (!signingUp && !cleanUsn) {
+      notify("Enter your USN");
       return;
     }
     if (!password) {
@@ -9404,29 +10135,82 @@ function EditProfileModal({ profile, onClose, onSaved, notify }) {
   </ModalShell>;
 }
 
-function PrintModal({ onClose, setPrintFile, notify }) {
+const PRINT_PAPER_SIZES = ["A4", "A3", "Letter"];
+const PRINT_BINDING_OPTIONS = [
+  { value: "none", label: "No binding" },
+  { value: "staple", label: "Staple" },
+  { value: "spiral", label: "Spiral" },
+];
+
+function PrintModal({ onClose, setPrintFile, notify, authUser, user, campusId }) {
   const [file, setFile] = useState(null);
+  const [fileError, setFileError] = useState("");
   const [pages, setPages] = useState(12);
-  const [color, setColor] = useState("B&W");
+  const [copies, setCopies] = useState(1);
+  const [color, setColor] = useState("black_white");
+  const [paperSize, setPaperSize] = useState("A4");
+  const [duplex, setDuplex] = useState(false);
+  const [binding, setBinding] = useState("none");
+  const [rateCard, setRateCard] = useState([]);
+  const [bindingRates, setBindingRates] = useState(null);
+  const [shopStatus, setShopStatus] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!campusId) return;
+    Promise.all([getPrintRateCard(campusId), getPrintBindingRates(campusId), getPrintShopStatus(campusId)])
+      .then(([rates, binding_, status]) => {
+        setRateCard(rates);
+        setBindingRates(binding_);
+        setShopStatus(status);
+      })
+      .catch(() => {});
+  }, [campusId]);
+
+  const pricePerPage = rateCard.find((r) => r.color_mode === color)?.price_per_page;
+  const bindingFee = binding === "staple" ? bindingRates?.staple_fee : binding === "spiral" ? bindingRates?.spiral_fee : 0;
+  let estimate = null;
+  try {
+    estimate = calculatePrintJobPrice({
+      pages, copies, colorMode: color, binding: binding !== "none",
+      pricePerPage, bindingFee,
+    });
+  } catch { /* invalid pages/copies while typing -- just hide the estimate */ }
 
   return (
     <ModalShell kicker="PRINT HUB" title="Upload & print" onClose={onClose}>
+      {shopStatus && shopStatus.status !== "online" && (
+        <div className="offline-banner" role="status" style={{ background: "#f4b73a22", color: "#a97313" }}>
+          <HiExclamationTriangle /> The print shop is currently {shopStatus.status}
+          {shopStatus.message ? ` — ${shopStatus.message}` : ""}. You can still place an order; it will be queued once the shop is back.
+        </div>
+      )}
+
       <label>
-        Document
+        Document (PDF only, max 25MB)
         <input
           type="file"
+          accept="application/pdf"
           onChange={(event) => {
-            const selected = event.target.files?.[0];
-            setFile(
-              selected || null
-            );
-
-            setPrintFile(
-              selected || null
-            );
+            const selected = event.target.files?.[0] || null;
+            setFileError("");
+            if (selected) {
+              try {
+                validatePrintFile(selected);
+              } catch (err) {
+                setFileError(err.message);
+                setFile(null);
+                setPrintFile(null);
+                return;
+              }
+            }
+            setFile(selected);
+            setPrintFile(selected);
           }}
         />
       </label>
+
+      {fileError && <p style={{ color: "#c23a3a", fontSize: 12 }}>{fileError}</p>}
 
       {file && (
         <div className="file-chip">
@@ -9439,99 +10223,111 @@ function PrintModal({ onClose, setPrintFile, notify }) {
       <div className="form-grid">
         <label>
           Pages
-          <input
-            type="number"
-            min="1"
-            value={pages}
-            onChange={(event) => setPages(event.target.value)}
-          />
+          <input type="number" min="1" max="500" value={pages} onChange={(event) => setPages(event.target.value)} />
+        </label>
+
+        <label>
+          Copies
+          <input type="number" min="1" max="100" value={copies} onChange={(event) => setCopies(event.target.value)} />
         </label>
 
         <label>
           Print mode
-          <select
-            value={color}
-            onChange={(event) => setColor(event.target.value)}
-          >
-            <option>B&W</option>
-            <option>Colour</option>
+          <select value={color} onChange={(event) => setColor(event.target.value)}>
+            <option value="black_white">B&W</option>
+            <option value="colour">Colour</option>
           </select>
+        </label>
+
+        <label>
+          Paper size
+          <select value={paperSize} onChange={(event) => setPaperSize(event.target.value)}>
+            {PRINT_PAPER_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}
+          </select>
+        </label>
+
+        <label>
+          Binding
+          <select value={binding} onChange={(event) => setBinding(event.target.value)}>
+            {PRINT_BINDING_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+          </select>
+        </label>
+
+        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input type="checkbox" checked={duplex} onChange={(event) => setDuplex(event.target.checked)} />
+          Double-sided (duplex)
         </label>
       </div>
 
       <div className="price-preview">
         <span>Estimated total</span>
-        <b>₹{Number(pages) * (color === "Colour" ? 5 : 2)}</b>
+        <b>{estimate != null ? `₹${estimate}` : "—"}</b>
       </div>
+      <p style={{ fontSize: 12, opacity: 0.7 }}>Final price is confirmed by the print shop&apos;s current rate card at checkout.</p>
 
       <button
         className="primary wide"
+        disabled={submitting}
         onClick={async () => {
+          try {
+            if (!file) {
+              notify("Choose a document first");
+              return;
+            }
 
-        try {
+            const currentUser = authUser || await getCurrentUser();
+            if (!currentUser) {
+              notify("Sign in before printing");
+              return;
+            }
 
-          if (!file) {
-            notify(
-              "Choose a document first"
-            );
+            setSubmitting(true);
 
-            return;
-          }
-
-          const currentUser =
-            await getCurrentUser();
-
-          if (!currentUser) {
-            notify(
-              "Sign in before printing"
-            );
-
-            return;
-          }
-
-          const job =
-            await uploadPrintJob({
-              userId:
-                currentUser.id,
-
+            const job = await uploadPrintJob({
+              userId: currentUser.id,
               file,
-
-              pages:
-                Number(pages),
-
-              copies: 1,
-
-              colorMode:
-                color === "Colour"
-                  ? "colour"
-                  : "black_white",
-
-              paperSize:
-                "A4",
-
+              pages: Number(pages),
+              copies: Number(copies),
+              colorMode: color,
+              paperSize,
+              binding,
+              duplex,
             });
 
-          notify(
-            `Print job created · ${job.pickup_code}`
-          );
+            notify(`Print job created · ₹${job.price} — opening payment…`);
 
-          onClose();
+            try {
+              const payment = await startPrintJobPayment(job.id);
+              await openRazorpayCheckout({
+                keyId: payment.key_id,
+                gatewayOrderId: payment.gateway_order_id,
+                amount: payment.amount,
+                currency: payment.currency,
+                description: `Print job · ${job.pickup_code}`,
+                prefillEmail: currentUser.email,
+                prefillName: user?.name,
+                onDismiss: () => notify("Payment cancelled — you can pay again from My Activity"),
+              });
+              notify(`Once payment clears, pickup code ${job.pickup_code} will be shown in My Activity.`);
+            } catch (paymentError) {
+              console.error("Print payment start failed:", paymentError);
+              notify(
+                paymentError.message?.includes("GATEWAY_NOT_CONFIGURED") || paymentError.message?.includes("not configured")
+                  ? "Job created, but payments aren't configured on this deployment yet."
+                  : (paymentError.message || "Payment could not be started. Try again from My Activity.")
+              );
+            }
 
-        } catch (error) {
-
-          console.error(
-            "Print job:",
-            error
-          );
-
-          notify(
-            error.message ||
-            "Unable to create print job"
-          );
-        }
-      }}
+            onClose();
+          } catch (error) {
+            console.error("Print job:", error);
+            notify(error.message || "Unable to create print job");
+          } finally {
+            setSubmitting(false);
+          }
+        }}
       >
-        Place print order <HiCreditCard />
+        {submitting ? "Working…" : "Continue to payment"} <HiCreditCard />
       </button>
     </ModalShell>
   );
@@ -9571,7 +10367,7 @@ function NavigationModal({ onClose, notify }) {
   );
 }
 
-function CartModal({ title,cart,onClose,notify,type,onCheckout}) {
+function CartModal({ title,cart,onClose,notify,type,onCheckout,onUpdateQuantity,onRemove}) {
   const total = cart.reduce((sum, item) => sum + Number(item.price) * Number(item.quantity || 1), 0);
 
   return (
@@ -9591,9 +10387,31 @@ function CartModal({ title,cart,onClose,notify,type,onCheckout}) {
           <div className="cart-list">
             {cart.map((item, index) => (
               <div key={`${item.id}-${index}`}>
-                <span>{item.name}</span>
-                <small>{item.vendor || item.category}</small>
-                <b>₹{item.price}</b>
+                <span style={{ gridColumn: 1, gridRow: 1 }}>{item.name}</span>
+                <small style={{ gridColumn: 1, gridRow: 2, color: "var(--muted)" }}>
+                  {item.vendor || item.category}
+                  {item.addonSummary && ` · + ${item.addonSummary}`}
+                </small>
+                {onUpdateQuantity ? (
+                  <span style={{ gridColumn: 2, gridRow: "1 / 3", display: "flex", alignItems: "center", gap: 6 }}>
+                    <button className="ghost" onClick={() => onUpdateQuantity(index, Number(item.quantity || 1) - 1)}>−</button>
+                    <b>{item.quantity || 1}</b>
+                    <button className="ghost" onClick={() => onUpdateQuantity(index, Number(item.quantity || 1) + 1)}>+</button>
+                  </span>
+                ) : (
+                  <small style={{ gridColumn: 2, gridRow: "1 / 3" }}>× {item.quantity || 1}</small>
+                )}
+                <b style={{ gridColumn: 3, gridRow: "1 / 3" }}>₹{Number(item.price) * Number(item.quantity || 1)}</b>
+                {onRemove && (
+                  <button
+                    className="ghost"
+                    style={{ gridColumn: 4, gridRow: "1 / 3" }}
+                    aria-label={`Remove ${item.name}`}
+                    onClick={() => onRemove(index)}
+                  >
+                    <HiXMark />
+                  </button>
+                )}
               </div>
             ))}
           </div>

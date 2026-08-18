@@ -14,17 +14,36 @@
 // Usage: node scripts/live-check-food-stock.mjs
 //        node scripts/live-check-food-stock.mjs --env=production --yes-production
 
+import fs from "node:fs";
+import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { resolveTarget } from "./env-target.mjs";
 
-const { SUPABASE_URL, ANON_KEY, SERVICE_ROLE_KEY, target } = resolveTarget();
+const { SUPABASE_URL, ANON_KEY, SERVICE_ROLE_KEY, root, target } = resolveTarget();
 
-const VENDOR_PASSWORD = target === "staging" ? "StagingTest@2026!" : undefined;
-if (!VENDOR_PASSWORD) {
-  throw new Error("This script's Udupi vendor password is only known for staging -- pass it in for production runs.");
+// See live-check-food-hardening.mjs's identical comment -- Udupi's password
+// isn't a fixed constant, .vendor-credentials.<env>.local.json is the one
+// place that stays in sync when another script (e.g. live-check-store-
+// variants-stock.mjs) rotates it via the admin API.
+const vendorCredsFile = target === "production" ? ".vendor-credentials.local.json" : ".vendor-credentials.staging.local.json";
+const vendorCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts", vendorCredsFile), "utf8"));
+const VENDOR_PASSWORD = vendorCreds.find((v) => v.vendor === "Udupi Canteen")?.password;
+if (!VENDOR_PASSWORD || VENDOR_PASSWORD.startsWith("(")) {
+  throw new Error(`This script's Udupi vendor password isn't known in ${vendorCredsFile} for ${target} runs.`);
 }
 
-const ALICE = { email: "e2e.alice@nhce.edu.in", password: "TestPass!2026Alice" };
+// Same reasoning as the vendor password above -- e2e.alice no longer has a
+// fixed literal password (2026-08-18 credential-rotation incident, see
+// SECURITY.md); scripts/setup-test-users.mjs is the one place that mints/
+// persists it now, into this gitignored file.
+const e2eCredsFile = target === "production" ? ".e2e-credentials.local.json" : ".e2e-credentials.staging.local.json";
+const e2eCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts", e2eCredsFile), "utf8"));
+const alicePassword = e2eCreds.find((r) => r.email === "e2e.alice@nhce.edu.in")?.password;
+if (!alicePassword) {
+  throw new Error(`No password known for e2e.alice@nhce.edu.in in ${e2eCredsFile} -- run scripts/setup-test-users.mjs first.`);
+}
+
+const ALICE = { email: "e2e.alice@nhce.edu.in", password: alicePassword };
 const UDUPI_VENDOR = { email: "udupi.canteen@nhce.edu.in", password: VENDOR_PASSWORD };
 
 let passCount = 0;

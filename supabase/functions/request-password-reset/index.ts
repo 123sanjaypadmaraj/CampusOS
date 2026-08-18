@@ -21,6 +21,12 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 
+// Deliberately loose (10 alphanumeric characters), NOT the strict NHCE
+// USN_PATTERN signup-with-usn now validates against -- this is a lookup
+// against an ALREADY-EXISTING account, not a new signup, so tightening it
+// here risks locking a real pre-existing account (created before the
+// stricter format was enforced) out of password reset entirely. Only
+// signup-with-usn gates on the strict pattern.
 const USN_RE = /^[A-Za-z0-9]{10}$/;
 const SYNTHETIC_EMAIL_SUFFIX = "@usn.campusos.internal";
 

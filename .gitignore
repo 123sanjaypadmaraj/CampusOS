@@ -31,4 +31,19 @@ scripts/.facilities-credentials.staging.local.json
 scripts/.vendor-credentials.staging.local.json
 scripts/.store-credentials.local.json
 scripts/.store-credentials.staging.local.json
+scripts/.e2e-credentials.local.json
+scripts/.e2e-credentials.staging.local.json
 supabase/.temp/
+
+# Safety net for the credential-file family above: every local secret this
+# repo generates follows the `.<name>[.staging].local[.json]` or
+# `.service_role_key*` shape. Explicit entries stay above for clarity/
+# grep-ability, but a new one added without a matching .gitignore line
+# (how the 2026-08-18 incident's local files stayed out of git even though
+# they were never individually added -- see SECURITY.md) is still caught
+# by these globs.
+.service_role_key*.local
+scripts/.*credentials*.local.json
+scripts/.sessions*.json
+scripts/.vapid-keys*.local.json
+*.local.json

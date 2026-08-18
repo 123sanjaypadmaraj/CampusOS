@@ -10,9 +10,16 @@ import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { resolveTarget } from "./env-target.mjs";
 
-const { SUPABASE_URL, ANON_KEY, root } = resolveTarget();
-const storeCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts/.store-credentials.local.json"), "utf8"));
-const vendorCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts/.vendor-credentials.local.json"), "utf8"));
+const { SUPABASE_URL, ANON_KEY, root, target } = resolveTarget();
+// Bug fix: this used to hardcode the PRODUCTION credential filenames
+// regardless of target, so a default (staging) run signed in with prod
+// passwords against the staging project and failed with "Invalid login
+// credentials" -- match the target-aware pattern every other live-check
+// script here already uses.
+const storeCredsFile = target === "production" ? ".store-credentials.local.json" : ".store-credentials.staging.local.json";
+const vendorCredsFile = target === "production" ? ".vendor-credentials.local.json" : ".vendor-credentials.staging.local.json";
+const storeCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts", storeCredsFile), "utf8"));
+const vendorCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts", vendorCredsFile), "utf8"));
 const udupi = vendorCreds.find((v) => v.vendor === "Udupi Canteen");
 
 let passCount = 0;

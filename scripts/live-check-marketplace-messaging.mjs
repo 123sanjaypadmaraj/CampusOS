@@ -65,7 +65,11 @@ async function main() {
   // folder; a non-participant (carol) is rejected by is_conversation_participant().
   const carol = await signIn("e2e.carol@nhce.edu.in", "TestPass!2026Carol");
   const tinyPng = new Uint8Array([0x89, 0x50, 0x4e, 0x47]); // not a real PNG, just needs bytes to upload
-  const { error: bobUploadErr } = await bob.sb.storage.from("message-attachments").upload(`${convId}/bob-upload.png`, tinyPng, { contentType: "image/png" });
+  // upsert: true -- convId is a stable, reused DM thread between alice/bob
+  // across runs, so a fixed filename here collided with a leftover object
+  // from a previous run ("The resource already exists"), which is a
+  // cleanup/idempotency gap in this script, not a real RLS rejection.
+  const { error: bobUploadErr } = await bob.sb.storage.from("message-attachments").upload(`${convId}/bob-upload.png`, tinyPng, { contentType: "image/png", upsert: true });
   check("storage RLS: a real conversation participant (bob) CAN upload into the conversation's folder", !bobUploadErr, bobUploadErr?.message);
 
   const { error: carolUploadErr } = await carol.sb.storage.from("message-attachments").upload(`${convId}/carol-upload.png`, tinyPng, { contentType: "image/png" });

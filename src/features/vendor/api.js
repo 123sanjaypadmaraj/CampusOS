@@ -340,6 +340,44 @@ export async function updatePrintRate(id, pricePerPage) {
   return data;
 }
 
+// Binding was priced client-side only until now (a UI fiction -- see
+// 20260817001200_printing_v2.sql) -- the print shop vendor manages the real
+// staple/spiral fee the same way they manage per-page price. Campus-scoped
+// like print_shop_status, not owner_id-scoped like print_rate_card -- there's
+// no per-vendor "claiming" step for this row, it's provisioned per campus.
+export async function getMyPrintBindingRates(campusId) {
+  const { data, error } = await supabase.from("print_binding_rates").select("*").eq("campus_id", campusId).maybeSingle();
+  throwIfError(error);
+  return data || null;
+}
+
+export async function updatePrintBindingRates(campusId, { stapleFee, spiralFee }) {
+  const { data, error } = await supabase
+    .from("print_binding_rates")
+    .update({ staple_fee: stapleFee, spiral_fee: spiralFee })
+    .eq("campus_id", campusId)
+    .select()
+    .single();
+  throwIfError(error);
+  return data;
+}
+
+// "Printer status" (doc §29-30). set_print_shop_status() resolves the
+// vendor's own campus server-side and upserts, so the row exists the first
+// time a vendor ever touches this -- unlike print_rate_card/print_binding_rates
+// there's no pre-provisioned owner_id to filter by.
+export async function getMyPrintShopStatus(campusId) {
+  const { data, error } = await supabase.from("print_shop_status").select("*").eq("campus_id", campusId).maybeSingle();
+  throwIfError(error);
+  return data || null;
+}
+
+export async function setPrintShopStatus(status, message) {
+  const { data, error } = await supabase.rpc("set_print_shop_status", { p_status: status, p_message: message || null });
+  throwIfError(error);
+  return data;
+}
+
 /* =========================================================================
    ORDER QUEUE (doc §13, §16) -- RECEIVED -> ACCEPTED -> PREPARING -> READY.
    Every write goes through transition_order_status(), which re-checks
@@ -395,25 +433,18 @@ export function subscribeToCanteenOrders(canteenId, callback) {
 }
 
 /* =========================================================================
-   PRINT JOB QUEUE -- print_jobs has no state-machine RPC like orders/
-   tickets (just a CHECK constraint + print_jobs_update_manage RLS, see
-   0011), so a plain update is the correct, intended write path here, not a
-   gap to fix.
+   PRINT JOB QUEUE -- every status change now goes through
+   transition_print_job() (20260817001200_printing_v2.sql), which re-checks
+   the legal edge and, for COLLECTED, the pickup code server-side. The old
+   plain `update print_jobs set status=...` path is now admin-only at the
+   RLS layer -- this vendor client has no other way to move a job.
 ========================================================================= */
 
 const ACTIVE_PRINT_STATUSES = ["UPLOADED", "PROCESSING", "QUEUED", "PRINTING", "READY"];
+const PRINT_HISTORY_STATUSES = ["COLLECTED", "CANCELLED", "FAILED"];
 
-export async function listActivePrintJobs() {
-  const { data, error } = await supabase
-    .from("print_jobs")
-    .select("*")
-    .in("status", ACTIVE_PRINT_STATUSES)
-    .order("created_at", { ascending: true });
-  throwIfError(error);
-
-  const jobs = data || [];
+async function attachUploaderProfiles(jobs) {
   if (jobs.length === 0) return jobs;
-
   // A direct `profiles!...(name)` embed resolves to null here -- print.manage
   // doesn't extend to profiles RLS (same reason as the facilities dashboard's
   // ticket/booking queues). get_profile_snippets() is the safe, RLS-bypassing
@@ -425,15 +456,48 @@ export async function listActivePrintJobs() {
   return jobs.map((j) => ({ ...j, profiles: profileMap[j.user_id] || null }));
 }
 
-export async function setPrintJobStatus(jobId, status) {
+export async function listActivePrintJobs() {
   const { data, error } = await supabase
     .from("print_jobs")
-    .update({ status })
-    .eq("id", jobId)
-    .select()
-    .single();
+    .select("*")
+    .in("status", ACTIVE_PRINT_STATUSES)
+    .order("created_at", { ascending: true });
+  throwIfError(error);
+  return attachUploaderProfiles(data || []);
+}
+
+// Job history (doc §29-30 "Job history") -- collected/cancelled/failed jobs,
+// newest first, capped rather than a full audit dump.
+export async function listPrintJobHistory({ limit = 50 } = {}) {
+  const { data, error } = await supabase
+    .from("print_jobs")
+    .select("*")
+    .in("status", PRINT_HISTORY_STATUSES)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  throwIfError(error);
+  return attachUploaderProfiles(data || []);
+}
+
+export async function transitionPrintJob(jobId, newStatus, pickupCode) {
+  const { data, error } = await supabase.rpc("transition_print_job", {
+    p_job_id: jobId,
+    p_new_status: newStatus,
+    p_pickup_code: pickupCode || null,
+  });
   throwIfError(error);
   return data;
+}
+
+// Preview/secure download (doc §29-30) -- storage RLS already restricts
+// print-files to the job's own owner or a print.manage/admin holder, so
+// this is just the same 300s signed-URL convention every other private
+// bucket in this app uses (documents/club-files/message attachments).
+export async function getPrintFileSignedUrl(path) {
+  if (!path) return null;
+  const { data, error } = await supabase.storage.from("print-files").createSignedUrl(path, 300);
+  throwIfError(error);
+  return data?.signedUrl || null;
 }
 
 export function subscribeToPrintJobs(callback) {
@@ -558,7 +622,7 @@ const ACTIVE_PRINT_STATUSES_FOR_STATS = new Set(["UPLOADED", "PROCESSING", "QUEU
 export async function getPrintShopDashboardStats() {
   const { data, error } = await supabase
     .from("print_jobs")
-    .select("id, status")
+    .select("id, status, price")
     .gte("created_at", startOfToday());
   throwIfError(error);
 
@@ -567,6 +631,11 @@ export async function getPrintShopDashboardStats() {
     jobsToday: jobs.length,
     activeCount: jobs.filter((j) => ACTIVE_PRINT_STATUSES_FOR_STATS.has(j.status)).length,
     readyCount: jobs.filter((j) => j.status === "READY").length,
+    // "Daily sales" (doc §29-30) -- only counts jobs that actually got paid
+    // for and weren't refunded; AWAITING_PAYMENT/CANCELLED never charged.
+    revenueToday: jobs
+      .filter((j) => j.status !== "AWAITING_PAYMENT" && j.status !== "CANCELLED")
+      .reduce((sum, j) => sum + Number(j.price || 0), 0),
   };
 }
 
@@ -583,4 +652,261 @@ export async function initiateRefund(orderId, amount, reason) {
   });
   if (fnError) throw fnError;
   return result;
+}
+
+/* =========================================================================
+   MENU VARIANTS + ADD-ONS (supabase/migrations/20260817000500_food_menu_depth.sql)
+   Plain table CRUD -- food_item_variants_write/food_item_addon_*_write RLS
+   already scope every write to the item's owning canteen's owner, so no RPC
+   layer is needed here (same pattern store_item_variants uses).
+========================================================================= */
+
+export async function listVariants(foodItemId) {
+  const { data, error } = await supabase.from("food_item_variants").select("*").eq("food_item_id", foodItemId).order("name");
+  throwIfError(error);
+  return data || [];
+}
+
+export async function upsertVariant(variant) {
+  const payload = {
+    food_item_id: variant.food_item_id,
+    name: variant.name,
+    price: Number(variant.price) || 0,
+    available: variant.available !== false,
+    track_stock: Boolean(variant.track_stock),
+    stock_quantity: variant.track_stock && variant.stock_quantity !== "" && variant.stock_quantity != null
+      ? Math.max(0, Math.floor(Number(variant.stock_quantity))) : null,
+    low_stock_threshold: Number.isFinite(Number(variant.low_stock_threshold)) ? Math.max(0, Math.floor(Number(variant.low_stock_threshold))) : 5,
+  };
+  const query = variant.id
+    ? supabase.from("food_item_variants").update(payload).eq("id", variant.id)
+    : supabase.from("food_item_variants").insert(payload);
+  const { data, error } = await query.select().single();
+  throwIfError(error);
+  return data;
+}
+
+export async function deleteVariant(id) {
+  const { error } = await supabase.from("food_item_variants").delete().eq("id", id);
+  if (!error) return { hardDeleted: true };
+  if (error.code === "23503") {
+    // Referenced by order history -- archive instead (mirrors deleteFoodItem).
+    const { error: archiveError } = await supabase.from("food_item_variants").update({ active: false, available: false }).eq("id", id);
+    throwIfError(archiveError);
+    return { hardDeleted: false };
+  }
+  throw error;
+}
+
+export async function listAddonGroups(foodItemId) {
+  const { data, error } = await supabase
+    .from("food_item_addon_groups")
+    .select("*, food_item_addon_options(*)")
+    .eq("food_item_id", foodItemId)
+    .order("sort_order");
+  throwIfError(error);
+  return data || [];
+}
+
+export async function upsertAddonGroup(group) {
+  const payload = {
+    food_item_id: group.food_item_id,
+    name: group.name,
+    min_select: Math.max(0, Math.floor(Number(group.min_select) || 0)),
+    max_select: Math.max(1, Math.floor(Number(group.max_select) || 1)),
+    active: group.active !== false,
+  };
+  const query = group.id
+    ? supabase.from("food_item_addon_groups").update(payload).eq("id", group.id)
+    : supabase.from("food_item_addon_groups").insert(payload);
+  const { data, error } = await query.select().single();
+  throwIfError(error);
+  return data;
+}
+
+export async function deleteAddonGroup(id) {
+  const { error } = await supabase.from("food_item_addon_groups").delete().eq("id", id);
+  throwIfError(error);
+}
+
+export async function upsertAddonOption(option) {
+  const payload = {
+    group_id: option.group_id,
+    name: option.name,
+    price_delta: Math.max(0, Number(option.price_delta) || 0),
+    available: option.available !== false,
+    active: option.active !== false,
+  };
+  const query = option.id
+    ? supabase.from("food_item_addon_options").update(payload).eq("id", option.id)
+    : supabase.from("food_item_addon_options").insert(payload);
+  const { data, error } = await query.select().single();
+  throwIfError(error);
+  return data;
+}
+
+export async function deleteAddonOption(id) {
+  const { error } = await supabase.from("food_item_addon_options").delete().eq("id", id);
+  throwIfError(error);
+}
+
+// Client-side compression before upload -- resizes the longest edge down to
+// 1280px and re-encodes as JPEG at 0.8 quality via <canvas>, so a phone
+// camera photo (often 3-8MB) lands well under the food-images bucket's 5MB
+// cap and loads fast on a student's data plan. Falls back to uploading the
+// original file untouched if canvas/image decoding isn't available (e.g.
+// some test/SSR environments) rather than blocking the upload entirely.
+async function compressImage(file, maxDim = 1280, quality = 0.8) {
+  if (typeof document === "undefined" || !file.type.startsWith("image/")) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+    return blob ? new File([blob], file.name.replace(/\.\w+$/, ".jpg"), { type: "image/jpeg" }) : file;
+  } catch {
+    return file; // best-effort -- never block an upload on a compression failure
+  }
+}
+
+// food-images is a public bucket, RLS-scoped so a caller can only write into
+// their own `${auth.uid()}/...` folder (supabase/migrations/20260814001500_storage_buckets.sql).
+export async function uploadFoodImage(file, ownerId) {
+  const compressed = await compressImage(file);
+  const path = `${ownerId}/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
+  const { error } = await supabase.storage.from("food-images").upload(path, compressed, { contentType: "image/jpeg" });
+  throwIfError(error);
+  const { data } = supabase.storage.from("food-images").getPublicUrl(path);
+  return data.publicUrl;
+}
+
+/* =========================================================================
+   OPENING HOURS / HOLIDAY / TEMPORARY CLOSURE
+   (supabase/migrations/20260817000500_food_menu_depth.sql)
+========================================================================= */
+
+export async function listCanteenHours(canteenId) {
+  const { data, error } = await supabase.from("canteen_hours").select("*").eq("canteen_id", canteenId).order("day_of_week");
+  throwIfError(error);
+  return data || [];
+}
+
+export async function upsertCanteenHour({ id, canteenId, dayOfWeek, opensAt, closesAt, closed }) {
+  const payload = { canteen_id: canteenId, day_of_week: dayOfWeek, opens_at: opensAt, closes_at: closesAt, closed: Boolean(closed) };
+  const query = id
+    ? supabase.from("canteen_hours").update(payload).eq("id", id)
+    : supabase.from("canteen_hours").upsert(payload, { onConflict: "canteen_id,day_of_week" });
+  const { data, error } = await query.select().single();
+  throwIfError(error);
+  return data;
+}
+
+export async function deleteCanteenHour(id) {
+  const { error } = await supabase.from("canteen_hours").delete().eq("id", id);
+  throwIfError(error);
+}
+
+export async function listCanteenClosures(canteenId) {
+  const { data, error } = await supabase.from("canteen_closures").select("*").eq("canteen_id", canteenId).order("starts_at", { ascending: false });
+  throwIfError(error);
+  return data || [];
+}
+
+export async function addCanteenClosure({ canteenId, startsAt, endsAt, reason }) {
+  const { data, error } = await supabase.from("canteen_closures")
+    .insert({ canteen_id: canteenId, starts_at: startsAt, ends_at: endsAt, reason: reason || null })
+    .select().single();
+  throwIfError(error);
+  return data;
+}
+
+export async function deleteCanteenClosure(id) {
+  const { error } = await supabase.from("canteen_closures").delete().eq("id", id);
+  throwIfError(error);
+}
+
+export async function updateCanteenGst(canteenId, { gstRegistered, gstNumber }) {
+  const { data, error } = await supabase.from("canteens")
+    .update({ gst_registered: Boolean(gstRegistered), gst_number: gstNumber || null })
+    .eq("id", canteenId).select().single();
+  throwIfError(error);
+  return data;
+}
+
+/* =========================================================================
+   VENDOR STAFF SUB-ACCOUNTS
+   (supabase/migrations/20260817000400_food_vendor_staff.sql)
+========================================================================= */
+
+export async function listCanteenStaffAccounts(canteenId) {
+  const { data, error } = await supabase
+    .from("canteen_staff_accounts")
+    .select("*, profiles:user_id(name, email)")
+    .eq("canteen_id", canteenId)
+    .eq("active", true)
+    .order("created_at");
+  throwIfError(error);
+  return data || [];
+}
+
+export async function addCanteenStaffAccount(canteenId, email) {
+  const { data, error } = await supabase.rpc("add_canteen_staff_account", { p_canteen_id: canteenId, p_email: email });
+  throwIfError(error);
+  return data;
+}
+
+export async function removeCanteenStaffAccount(staffAccountId) {
+  const { error } = await supabase.rpc("remove_canteen_staff_account", { p_staff_account_id: staffAccountId });
+  throwIfError(error);
+}
+
+/* =========================================================================
+   INVENTORY (stock audit trail + report)
+   (supabase/migrations/20260817000600_food_inventory_ops.sql)
+========================================================================= */
+
+export async function getInventoryReport(days = 30) {
+  const { data, error } = await supabase.rpc("vendor_inventory_report", { p_days: days });
+  throwIfError(error);
+  return data || [];
+}
+
+export async function adjustItemStock(foodItemId, variantId, delta, reason) {
+  const { data, error } = await supabase.rpc("adjust_item_stock", {
+    p_food_item_id: foodItemId, p_variant_id: variantId || null, p_delta: delta, p_reason: reason || null,
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function listStockAdjustments(foodItemId, limit = 30) {
+  const { data, error } = await supabase
+    .from("stock_adjustments")
+    .select("*")
+    .eq("food_item_id", foodItemId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  throwIfError(error);
+  return data || [];
+}
+
+/* =========================================================================
+   BILLING: settlement report + payouts (vendor-visible half)
+   (supabase/migrations/20260817000700_food_billing_payouts.sql)
+========================================================================= */
+
+export async function getSettlementReport(startDate, endDate) {
+  const { data, error } = await supabase.rpc("vendor_settlement_report", { p_start: startDate, p_end: endDate });
+  throwIfError(error);
+  return data || [];
+}
+
+export async function listMyPayouts(canteenId) {
+  const { data, error } = await supabase.from("vendor_payouts").select("*").eq("canteen_id", canteenId).order("period_start", { ascending: false });
+  throwIfError(error);
+  return data || [];
 }

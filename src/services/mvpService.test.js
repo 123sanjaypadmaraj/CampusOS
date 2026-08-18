@@ -15,6 +15,7 @@ jest.mock("../lib/supabase", () => ({
     functions: { invoke: jest.fn() },
     auth: { linkIdentity: jest.fn() },
     from: (...args) => mockFrom(...args),
+    storage: { from: jest.fn() },
   },
 }));
 
@@ -46,21 +47,46 @@ import {
   getCampusEvents,
   getCampusFood,
   getUserNotifications,
+  validatePrintFile,
+  uploadPrintJob,
+  startPrintJobPayment,
+  cancelPrintJob,
+  startPrintJobRefund,
+  getMyPrintFileUrl,
+  getPrintRateCard,
+  getPrintBindingRates,
+  getPrintShopStatus,
+  adminGetConversationMessages,
+  publishPost,
+  uploadPostImage,
+  getSavedPosts,
+  toggleSavedPost,
+  submitSuspensionAppeal,
+  getMySuspensionAppeal,
+  listBannedWords,
+  addBannedWord,
+  removeBannedWord,
+  listSuspensionAppeals,
+  resolveSuspensionAppeal,
 } from "./mvpService";
 
 describe("createFoodOrder", () => {
   beforeEach(() => jest.clearAllMocks());
 
-  it("groups duplicate cart entries into quantities before calling the RPC", async () => {
+  it("passes each cart entry's own quantity through to the RPC (not a re-derived count of array entries)", async () => {
+    // mergeCartItem() (mvpHelpers.js) keeps the food cart as at most one
+    // entry per distinct (item, variant, add-ons) with a real running
+    // `.quantity` on that entry, never duplicate rows for the same line --
+    // this used to silently drop that `.quantity` and place every order at
+    // 1 no matter how many were in the cart. Regression test for that fix.
     supabase.rpc.mockResolvedValue({ data: { id: "order-1", status: "PAYMENT_PENDING" }, error: null });
 
     await createFoodOrder({
       userId: "user-1",
       canteenId: "canteen-1",
       cart: [
-        { id: "item-1", price: 55 },
-        { id: "item-1", price: 55 },
-        { id: "item-2", price: 90 },
+        { id: "item-1", price: 55, quantity: 3 },
+        { id: "item-2", price: 90, quantity: 1 },
       ],
       idempotencyKey: "key-1",
     });
@@ -68,13 +94,33 @@ describe("createFoodOrder", () => {
     expect(supabase.rpc).toHaveBeenCalledWith("create_food_order", {
       p_canteen_id: "canteen-1",
       p_items: [
-        { food_item_id: "item-1", quantity: 2, special_instructions: null },
-        { food_item_id: "item-2", quantity: 1, special_instructions: null },
+        { food_item_id: "item-1", quantity: 3, special_instructions: null, variant_id: null, addon_option_ids: null },
+        { food_item_id: "item-2", quantity: 1, special_instructions: null, variant_id: null, addon_option_ids: null },
       ],
       p_notes: "",
       p_fulfillment_type: "pickup",
       p_idempotency_key: "key-1",
     });
+  });
+
+  it("passes variant_id and addon_option_ids through when a cart line has them", async () => {
+    supabase.rpc.mockResolvedValue({ data: { id: "order-1", status: "PAYMENT_PENDING" }, error: null });
+
+    await createFoodOrder({
+      userId: "user-1",
+      canteenId: "canteen-1",
+      cart: [{ id: "item-1", price: 120, quantity: 2, variantId: "variant-1", addonOptionIds: ["addon-a", "addon-b"] }],
+      idempotencyKey: "key-2",
+    });
+
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      "create_food_order",
+      expect.objectContaining({
+        p_items: [
+          { food_item_id: "item-1", quantity: 2, special_instructions: null, variant_id: "variant-1", addon_option_ids: ["addon-a", "addon-b"] },
+        ],
+      })
+    );
   });
 
   it("strips the ORDER_* code prefix from the RPC error before surfacing it", async () => {
@@ -493,6 +539,34 @@ describe("listErrorLogs / setErrorLogResolved (Admin CMS Errors tab)", () => {
   });
 });
 
+describe("adminGetConversationMessages (moderator-only message view for a conversation report)", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("calls admin_get_conversation_messages with the conversation id and a default limit", async () => {
+    supabase.rpc.mockResolvedValue({ data: [{ id: "m1" }], error: null });
+
+    const result = await adminGetConversationMessages("conv-1");
+
+    expect(supabase.rpc).toHaveBeenCalledWith("admin_get_conversation_messages", {
+      p_conversation_id: "conv-1",
+      p_limit: 50,
+    });
+    expect(result).toEqual([{ id: "m1" }]);
+  });
+
+  it("returns [] instead of null", async () => {
+    supabase.rpc.mockResolvedValue({ data: null, error: null });
+
+    expect(await adminGetConversationMessages("conv-1")).toEqual([]);
+  });
+
+  it("throws when the caller isn't a moderator", async () => {
+    supabase.rpc.mockResolvedValue({ data: null, error: new Error("Not authorized") });
+
+    await expect(adminGetConversationMessages("conv-1")).rejects.toThrow("Not authorized");
+  });
+});
+
 describe("emergency contacts (doc §113, 20260815000600_emergency_contacts.sql)", () => {
   beforeEach(() => jest.clearAllMocks());
 
@@ -728,7 +802,20 @@ describe("offline cache fallback (doc §9 'Offline Mode')", () => {
           resolve
         ),
     };
-    mockFrom.mockReturnValueOnce(canteenBuilder).mockReturnValueOnce(foodBuilder);
+    const hoursBuilder = {
+      select: jest.fn(() => hoursBuilder),
+      then: (resolve) => Promise.resolve({ data: [], error: null }).then(resolve),
+    };
+    const closuresBuilder = {
+      select: jest.fn(() => closuresBuilder),
+      gte: jest.fn(() => closuresBuilder),
+      then: (resolve) => Promise.resolve({ data: [], error: null }).then(resolve),
+    };
+    mockFrom
+      .mockReturnValueOnce(canteenBuilder)
+      .mockReturnValueOnce(foodBuilder)
+      .mockReturnValueOnce(hoursBuilder)
+      .mockReturnValueOnce(closuresBuilder);
     const first = await getCampusFood(campusId);
     expect(first.canteens).toHaveLength(1);
     expect(first.items).toHaveLength(1);
@@ -737,9 +824,392 @@ describe("offline cache fallback (doc §9 'Offline Mode')", () => {
       select: jest.fn(() => failBuilder),
       eq: jest.fn(() => failBuilder),
       order: jest.fn(() => failBuilder),
+      gte: jest.fn(() => failBuilder),
       then: (resolve, reject) => Promise.reject(new Error("offline")).then(resolve, reject),
     };
-    mockFrom.mockReturnValueOnce(failBuilder).mockReturnValueOnce(failBuilder);
+    mockFrom
+      .mockReturnValueOnce(failBuilder)
+      .mockReturnValueOnce(failBuilder)
+      .mockReturnValueOnce(failBuilder)
+      .mockReturnValueOnce(failBuilder);
     await expect(getCampusFood(campusId)).resolves.toEqual(first);
+  });
+});
+
+describe("printing (Phase 6)", () => {
+  beforeAll(() => {
+    if (!global.crypto.randomUUID) {
+      global.crypto.randomUUID = () => "test-uuid";
+    }
+  });
+
+  beforeEach(() => jest.clearAllMocks());
+
+  describe("validatePrintFile", () => {
+    it("rejects a non-PDF file by MIME type", () => {
+      expect(() => validatePrintFile({ name: "photo.png", type: "image/png", size: 100 }))
+        .toThrow("Only PDF files can be printed.");
+    });
+
+    it("falls back to the file extension when the browser gives no MIME type", () => {
+      expect(() => validatePrintFile({ name: "notes.docx", type: "", size: 100 }))
+        .toThrow("Only PDF files can be printed.");
+      expect(() => validatePrintFile({ name: "notes.pdf", type: "", size: 100 })).not.toThrow();
+    });
+
+    it("rejects a file over the 25MB limit", () => {
+      expect(() => validatePrintFile({ name: "big.pdf", type: "application/pdf", size: 26214401 }))
+        .toThrow("File is too large");
+    });
+
+    it("accepts a valid PDF under the size limit", () => {
+      expect(() => validatePrintFile({ name: "report.pdf", type: "application/pdf", size: 1000 })).not.toThrow();
+    });
+
+    it("requires a file at all", () => {
+      expect(() => validatePrintFile(null)).toThrow("Choose a document.");
+    });
+  });
+
+  describe("uploadPrintJob", () => {
+    it("uploads the file then creates an AWAITING_PAYMENT job with every field, including duplex/size", async () => {
+      const upload = jest.fn().mockResolvedValue({ error: null });
+      const remove = jest.fn().mockResolvedValue({ error: null });
+      supabase.storage.from.mockReturnValue({ upload, remove });
+      supabase.rpc.mockResolvedValue({
+        data: { id: "job-1", status: "AWAITING_PAYMENT", price: 140, pickup_code: "123456" },
+        error: null,
+      });
+
+      const file = { name: "report.pdf", type: "application/pdf", size: 5000 };
+      const job = await uploadPrintJob({
+        userId: "user-1",
+        file,
+        pages: 10,
+        copies: 2,
+        colorMode: "colour",
+        paperSize: "A3",
+        binding: "spiral",
+        duplex: true,
+      });
+
+      expect(upload).toHaveBeenCalledWith(
+        "user-1/test-uuid-report.pdf",
+        file,
+        expect.objectContaining({ contentType: "application/pdf" })
+      );
+      expect(supabase.rpc).toHaveBeenCalledWith("create_print_job", {
+        p_file_url: "user-1/test-uuid-report.pdf",
+        p_file_name: "report.pdf",
+        p_pages: 10,
+        p_copies: 2,
+        p_color_mode: "colour",
+        p_paper_size: "A3",
+        p_binding: "spiral",
+        p_duplex: true,
+        p_file_size_bytes: 5000,
+      });
+      expect(job.status).toBe("AWAITING_PAYMENT");
+      expect(remove).not.toHaveBeenCalled();
+    });
+
+    it("removes the uploaded file if create_print_job() fails, instead of leaving an orphaned upload", async () => {
+      const upload = jest.fn().mockResolvedValue({ error: null });
+      const remove = jest.fn().mockResolvedValue({ error: null });
+      supabase.storage.from.mockReturnValue({ upload, remove });
+      supabase.rpc.mockResolvedValue({ data: null, error: { message: "RATE_LIMITED" } });
+
+      await expect(
+        uploadPrintJob({ userId: "user-1", file: { name: "a.pdf", type: "application/pdf", size: 10 } })
+      ).rejects.toThrow();
+
+      expect(remove).toHaveBeenCalledWith(["user-1/test-uuid-a.pdf"]);
+    });
+
+    it("rejects before ever touching storage when the file fails client-side validation", async () => {
+      const upload = jest.fn();
+      supabase.storage.from.mockReturnValue({ upload });
+
+      await expect(
+        uploadPrintJob({ userId: "user-1", file: { name: "notes.docx", type: "image/png", size: 10 } })
+      ).rejects.toThrow("Only PDF files can be printed.");
+      expect(upload).not.toHaveBeenCalled();
+    });
+
+    it("requires sign-in", async () => {
+      await expect(uploadPrintJob({ file: { name: "a.pdf", type: "application/pdf", size: 10 } }))
+        .rejects.toThrow("Please sign in first.");
+    });
+  });
+
+  describe("startPrintJobPayment", () => {
+    it("invokes create-razorpay-order with print_job_id", async () => {
+      supabase.functions.invoke.mockResolvedValue({
+        data: { key_id: "rzp_test_x", gateway_order_id: "order_y", amount: 1400, currency: "INR" },
+        error: null,
+      });
+
+      const result = await startPrintJobPayment("job-1");
+
+      expect(supabase.functions.invoke).toHaveBeenCalledWith("create-razorpay-order", {
+        body: { print_job_id: "job-1" },
+      });
+      expect(result.gateway_order_id).toBe("order_y");
+    });
+
+    it("surfaces a friendly error when the gateway call fails", async () => {
+      supabase.functions.invoke.mockResolvedValue({ data: null, error: { message: "GATEWAY_NOT_CONFIGURED" } });
+      await expect(startPrintJobPayment("job-1")).rejects.toThrow();
+    });
+  });
+
+  describe("cancelPrintJob / startPrintJobRefund", () => {
+    it("calls cancel_print_job with the job id and reason", async () => {
+      supabase.rpc.mockResolvedValue({
+        data: { job: { id: "job-1", status: "CANCELLED" }, refund_id: "refund-1" },
+        error: null,
+      });
+
+      const result = await cancelPrintJob("job-1", "Changed my mind");
+
+      expect(supabase.rpc).toHaveBeenCalledWith("cancel_print_job", { p_job_id: "job-1", p_reason: "Changed my mind" });
+      expect(result.refund_id).toBe("refund-1");
+    });
+
+    it("passes null when no reason is given", async () => {
+      supabase.rpc.mockResolvedValue({ data: { job: {}, refund_id: null }, error: null });
+      await cancelPrintJob("job-1");
+      expect(supabase.rpc).toHaveBeenCalledWith("cancel_print_job", { p_job_id: "job-1", p_reason: null });
+    });
+
+    it("invokes razorpay-refund with the refund id", async () => {
+      supabase.functions.invoke.mockResolvedValue({ data: { ok: true }, error: null });
+      await startPrintJobRefund("refund-1");
+      expect(supabase.functions.invoke).toHaveBeenCalledWith("razorpay-refund", { body: { refund_id: "refund-1" } });
+    });
+  });
+
+  describe("getMyPrintFileUrl", () => {
+    it("resolves a signed URL for the caller's own file", async () => {
+      const createSignedUrl = jest.fn().mockResolvedValue({ data: { signedUrl: "https://signed.example/report.pdf" }, error: null });
+      supabase.storage.from.mockReturnValue({ createSignedUrl });
+
+      const url = await getMyPrintFileUrl("user-1/abc-report.pdf");
+
+      expect(createSignedUrl).toHaveBeenCalledWith("user-1/abc-report.pdf", 300);
+      expect(url).toBe("https://signed.example/report.pdf");
+    });
+
+    it("returns null without calling storage when the path is already gone (file deleted)", async () => {
+      const createSignedUrl = jest.fn();
+      supabase.storage.from.mockReturnValue({ createSignedUrl });
+      expect(await getMyPrintFileUrl(null)).toBeNull();
+      expect(createSignedUrl).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("rate card / binding rates / shop status reads", () => {
+    it("getPrintRateCard filters by campus when given one", async () => {
+      const builder = {
+        select: jest.fn(() => builder),
+        eq: jest.fn(() => builder),
+        then: (resolve) => Promise.resolve({ data: [{ color_mode: "colour", price_per_page: 8 }], error: null }).then(resolve),
+      };
+      mockFrom.mockReturnValue(builder);
+
+      const rates = await getPrintRateCard("campus-1");
+
+      expect(mockFrom).toHaveBeenCalledWith("print_rate_card");
+      expect(builder.eq).toHaveBeenCalledWith("campus_id", "campus-1");
+      expect(rates).toHaveLength(1);
+    });
+
+    it("getPrintBindingRates resolves a single row for the campus", async () => {
+      const builder = {
+        select: jest.fn(() => builder),
+        eq: jest.fn(() => builder),
+        maybeSingle: jest.fn().mockResolvedValue({ data: { staple_fee: 20, spiral_fee: 40 }, error: null }),
+      };
+      mockFrom.mockReturnValue(builder);
+
+      const rates = await getPrintBindingRates("campus-1");
+
+      expect(builder.eq).toHaveBeenCalledWith("campus_id", "campus-1");
+      expect(rates.spiral_fee).toBe(40);
+    });
+
+    it("getPrintShopStatus resolves a single row for the campus", async () => {
+      const builder = {
+        select: jest.fn(() => builder),
+        eq: jest.fn(() => builder),
+        maybeSingle: jest.fn().mockResolvedValue({ data: { status: "online" }, error: null }),
+      };
+      mockFrom.mockReturnValue(builder);
+
+      const status = await getPrintShopStatus("campus-1");
+
+      expect(status.status).toBe("online");
+    });
+  });
+});
+
+// supabase/migrations/20260818000600_community_hardening.sql +
+// mvpService.js additions -- saved posts, real post image upload,
+// suspension appeals, admin profanity-filter/appeal management.
+describe("Community hardening", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  describe("publishPost", () => {
+    it("passes imageUrls through as image_urls on the insert", async () => {
+      const builder = {
+        insert: jest.fn(() => builder),
+        select: jest.fn(() => builder),
+        single: jest.fn(() => Promise.resolve({ data: { id: "post-1" }, error: null })),
+      };
+      mockFrom.mockReturnValue(builder);
+
+      await publishPost({
+        userId: "user-1",
+        campusId: "campus-1",
+        title: "Hello campus",
+        tags: ["robotics"],
+        imageUrls: ["https://x/img1.jpg"],
+      });
+
+      expect(builder.insert).toHaveBeenCalledWith(
+        expect.objectContaining({ image_urls: ["https://x/img1.jpg"] })
+      );
+    });
+
+    it("defaults image_urls to an empty array when none are given", async () => {
+      const builder = {
+        insert: jest.fn(() => builder),
+        select: jest.fn(() => builder),
+        single: jest.fn(() => Promise.resolve({ data: { id: "post-1" }, error: null })),
+      };
+      mockFrom.mockReturnValue(builder);
+
+      await publishPost({ userId: "user-1", campusId: "campus-1", title: "Hi" });
+
+      expect(builder.insert).toHaveBeenCalledWith(expect.objectContaining({ image_urls: [] }));
+    });
+
+    it("surfaces a clean message for a rejected duplicate/profanity post (CODE: message parsing)", async () => {
+      const builder = {
+        insert: jest.fn(() => builder),
+        select: jest.fn(() => builder),
+        single: jest.fn(() =>
+          Promise.resolve({ data: null, error: { message: "DUPLICATE_POST: You already posted something very similar recently. Please wait a bit or change the content." } })
+        ),
+      };
+      mockFrom.mockReturnValue(builder);
+
+      await expect(
+        publishPost({ userId: "user-1", campusId: "campus-1", title: "Hi" })
+      ).rejects.toMatchObject({ code: "DUPLICATE_POST", message: expect.stringContaining("already posted") });
+    });
+  });
+
+  describe("uploadPostImage", () => {
+    it("uploads to the post-media bucket under the owner's folder and returns the public URL", async () => {
+      const upload = jest.fn().mockResolvedValue({ error: null });
+      const getPublicUrl = jest.fn().mockReturnValue({ data: { publicUrl: "https://cdn/post-media/user-1/x.jpg" } });
+      supabase.storage.from.mockReturnValue({ upload, getPublicUrl });
+
+      const url = await uploadPostImage({ name: "pic.png", type: "image/png" }, "user-1");
+
+      expect(supabase.storage.from).toHaveBeenCalledWith("post-media");
+      expect(upload.mock.calls[0][0]).toMatch(/^user-1\//);
+      expect(url).toBe("https://cdn/post-media/user-1/x.jpg");
+    });
+
+    it("rejects without touching storage when no owner id is given", async () => {
+      await expect(uploadPostImage({ name: "pic.png", type: "image/png" }, null)).rejects.toThrow("sign in");
+      expect(supabase.storage.from).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("saved posts", () => {
+    const postId = "11111111-1111-4111-8111-111111111111";
+
+    it("getSavedPosts returns the flat list of saved post ids", async () => {
+      const builder = { select: jest.fn(() => builder), eq: jest.fn(() => Promise.resolve({ data: [{ post_id: postId }], error: null })) };
+      mockFrom.mockReturnValue(builder);
+
+      await expect(getSavedPosts("user-1")).resolves.toEqual([postId]);
+      expect(mockFrom).toHaveBeenCalledWith("saved_posts");
+    });
+
+    it("toggleSavedPost inserts (returns true) when not already saved", async () => {
+      const readBuilder = { select: jest.fn(() => readBuilder), eq: jest.fn(() => readBuilder), maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null }) };
+      const insertBuilder = { insert: jest.fn().mockResolvedValue({ error: null }) };
+      mockFrom.mockReturnValueOnce(readBuilder).mockReturnValueOnce(insertBuilder);
+
+      await expect(toggleSavedPost({ postId, userId: "user-1" })).resolves.toBe(true);
+      expect(insertBuilder.insert).toHaveBeenCalledWith({ post_id: postId, user_id: "user-1" });
+    });
+
+    it("toggleSavedPost deletes (returns false) when already saved", async () => {
+      const readBuilder = { select: jest.fn(() => readBuilder), eq: jest.fn(() => readBuilder), maybeSingle: jest.fn().mockResolvedValue({ data: { post_id: postId }, error: null }) };
+      const deleteBuilder = { delete: jest.fn(() => deleteBuilder), eq: jest.fn(() => deleteBuilder), then: (resolve) => Promise.resolve({ error: null }).then(resolve) };
+      mockFrom.mockReturnValueOnce(readBuilder).mockReturnValueOnce(deleteBuilder);
+
+      await expect(toggleSavedPost({ postId, userId: "user-1" })).resolves.toBe(false);
+    });
+
+    it("toggleSavedPost rejects an invalid post id before ever calling supabase", async () => {
+      await expect(toggleSavedPost({ postId: "not-a-uuid", userId: "user-1" })).rejects.toThrow(/Invalid post ID/);
+      expect(mockFrom).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("suspension appeals", () => {
+    it("submitSuspensionAppeal calls the RPC with the given reason", async () => {
+      supabase.rpc.mockResolvedValue({ data: { id: "appeal-1", status: "pending" }, error: null });
+
+      const result = await submitSuspensionAppeal("Please review, it was a mistake");
+
+      expect(supabase.rpc).toHaveBeenCalledWith("submit_suspension_appeal", { p_reason: "Please review, it was a mistake" });
+      expect(result.status).toBe("pending");
+    });
+
+    it("getMySuspensionAppeal returns null when the RPC returns no row", async () => {
+      supabase.rpc.mockResolvedValue({ data: null, error: null });
+      await expect(getMySuspensionAppeal()).resolves.toBeNull();
+    });
+
+    it("surfaces a clean message when appealing while not suspended", async () => {
+      supabase.rpc.mockResolvedValue({ data: null, error: new Error("Only a suspended account can submit an appeal.") });
+      await expect(submitSuspensionAppeal("why")).rejects.toThrow(/suspended account/);
+    });
+  });
+
+  describe("admin: banned words + appeal review", () => {
+    it("listBannedWords / addBannedWord / removeBannedWord", async () => {
+      const builder = { select: jest.fn(() => builder), order: jest.fn(() => Promise.resolve({ data: [{ word: "spam" }], error: null })) };
+      mockFrom.mockReturnValue(builder);
+      await expect(listBannedWords()).resolves.toEqual([{ word: "spam" }]);
+
+      supabase.rpc.mockResolvedValue({ data: null, error: null });
+      await addBannedWord("newword");
+      expect(supabase.rpc).toHaveBeenCalledWith("admin_add_banned_word", { p_word: "newword" });
+
+      await removeBannedWord("spam");
+      expect(supabase.rpc).toHaveBeenCalledWith("admin_remove_banned_word", { p_word: "spam" });
+    });
+
+    it("listSuspensionAppeals / resolveSuspensionAppeal", async () => {
+      supabase.rpc.mockResolvedValue({ data: [{ id: "appeal-1", status: "pending" }], error: null });
+      await expect(listSuspensionAppeals("pending")).resolves.toEqual([{ id: "appeal-1", status: "pending" }]);
+      expect(supabase.rpc).toHaveBeenCalledWith("admin_list_suspension_appeals", { p_status: "pending" });
+
+      supabase.rpc.mockResolvedValue({ data: { id: "appeal-1", status: "approved" }, error: null });
+      await resolveSuspensionAppeal("appeal-1", "approved");
+      expect(supabase.rpc).toHaveBeenCalledWith("resolve_suspension_appeal", {
+        p_appeal_id: "appeal-1",
+        p_decision: "approved",
+        p_admin_note: null,
+      });
+    });
   });
 });

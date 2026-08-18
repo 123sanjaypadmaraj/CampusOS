@@ -12,13 +12,21 @@
 // Usage: node scripts/live-check-community-discovery.mjs
 //        node scripts/live-check-community-discovery.mjs --env=production --yes-production
 
+import fs from "node:fs";
+import path from "node:path";
 import { resolveTarget } from "./env-target.mjs";
 
-const { SUPABASE_URL, ANON_KEY, SERVICE_ROLE_KEY, target } = resolveTarget();
+const { SUPABASE_URL, ANON_KEY, SERVICE_ROLE_KEY, root, target } = resolveTarget();
 
-const VENDOR_PASSWORD = target === "staging" ? "StagingTest@2026!" : undefined;
-if (!VENDOR_PASSWORD) {
-  throw new Error("This script's Udupi vendor password is only known for staging -- pass it in for production runs.");
+// Udupi's password isn't a fixed constant -- see the identical comment in
+// live-check-food-hardening.mjs. Read it from the shared credentials file
+// (kept in sync by live-check-store-variants-stock.mjs's admin-API reset)
+// instead of a hardcoded value that goes stale the moment that runs.
+const vendorCredsFile = target === "production" ? ".vendor-credentials.local.json" : ".vendor-credentials.staging.local.json";
+const vendorCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts", vendorCredsFile), "utf8"));
+const VENDOR_PASSWORD = vendorCreds.find((v) => v.vendor === "Udupi Canteen")?.password;
+if (!VENDOR_PASSWORD || VENDOR_PASSWORD.startsWith("(")) {
+  throw new Error(`This script's Udupi vendor password isn't known in ${vendorCredsFile} for ${target} runs.`);
 }
 
 const ALICE = { email: "e2e.alice@nhce.edu.in", password: "TestPass!2026Alice" };
@@ -116,6 +124,21 @@ async function main() {
       headers: { apikey: SERVICE_ROLE_KEY, Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
     });
   }
+  // events.club_id is ON DELETE SET NULL, not CASCADE (deliberate -- a real
+  // student's saved/registered event shouldn't vanish just because the club
+  // that hosted it later got deleted), so deleting the club above does NOT
+  // delete its "E2E Club Meetup" event below -- it's orphaned with
+  // club_id=null instead. Previously nothing cleaned that orphan up, and
+  // since events.event_date is `date` (not timestamptz) on staging, any two
+  // runs on the same calendar day collided on the (campus_id, title,
+  // event_date) unique constraint. Clean up any leftover event by title too.
+  const { data: existingEvent } = await svc.get("events", "select=id&title=eq.E2E Club Meetup");
+  if (existingEvent?.length) {
+    await fetch(`${SUPABASE_URL}/rest/v1/events?id=eq.${existingEvent[0].id}`, {
+      method: "DELETE",
+      headers: { apikey: SERVICE_ROLE_KEY, Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
+    });
+  }
   const { data: clubRows } = await svc.post("clubs", { campus_id: campusId, name: "E2E Test Club", category: "Testing", description: "seeded by live-check script" });
   const clubId = clubRows[0].id;
   await svc.post("club_members", { club_id: clubId, user_id: alice.userId, role: "owner" });
@@ -151,7 +174,15 @@ async function main() {
   const demoteLastOwner = await aliceC.rpc("set_club_member_role", { p_member_id: ownerMemberRow.id, p_role: "member" });
   check("cannot demote the last owner (CLUB_LAST_OWNER guard)", !demoteLastOwner.ok, demoteLastOwner.data);
 
-  // Clean up the fixture.
+  // Clean up the fixture. The event first (club_id is SET NULL, not
+  // CASCADE, on club delete -- see the comment above where this event was
+  // pre-cleaned) so no orphan is left for the next run to collide with.
+  if (eventId) {
+    await fetch(`${SUPABASE_URL}/rest/v1/events?id=eq.${eventId}`, {
+      method: "DELETE",
+      headers: { apikey: SERVICE_ROLE_KEY, Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
+    });
+  }
   await fetch(`${SUPABASE_URL}/rest/v1/clubs?id=eq.${clubId}`, {
     method: "DELETE",
     headers: { apikey: SERVICE_ROLE_KEY, Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
@@ -163,7 +194,11 @@ async function main() {
 
   const { data: oldListings } = await svc.get("marketplace_listings", "select=id&title=eq.E2E Test Widget");
   for (const l of oldListings || []) {
-    await fetch(`${SUPABASE_URL}/rest/v1/marketplace_listings?id=eq.${l.id}`, { method: "DELETE", headers: { apikey: SERVICE_ROLE_KEY, Authorization: `Bearer ${SERVICE_ROLE_KEY}` } });
+    const delRes = await fetch(`${SUPABASE_URL}/rest/v1/marketplace_listings?id=eq.${l.id}`, { method: "DELETE", headers: { apikey: SERVICE_ROLE_KEY, Authorization: `Bearer ${SERVICE_ROLE_KEY}` } });
+    // Previously unchecked -- a silent failure here (e.g. the now-fixed
+    // undeletable-rated-listing trigger bug) let stale fixtures accumulate
+    // across runs and inflate seller_rating_summary's count. Surface it loudly.
+    if (!delRes.ok) console.log(`  [warn] cleanup: failed to delete stale listing ${l.id}: ${delRes.status} ${await delRes.text()}`);
   }
   const listing = await aliceC.post("marketplace_listings", { campus_id: campusId, seller_id: alice.userId, title: "E2E Test Widget", price: 100, category: "Other" });
   check("alice can create a listing", listing.ok, listing.data);
@@ -188,7 +223,22 @@ async function main() {
   check("seller_rating_summary reflects the new rating", summary.ok && Number(summary.data?.[0]?.avg_rating) === 5 && Number(summary.data?.[0]?.rating_count) === 1, summary.data);
 
   console.log("  (leaving E2E Test Widget listing + rating for manual inspection is unnecessary; cleaning up)");
-  await fetch(`${SUPABASE_URL}/rest/v1/marketplace_listings?id=eq.${listingId}`, { method: "DELETE", headers: { apikey: SERVICE_ROLE_KEY, Authorization: `Bearer ${SERVICE_ROLE_KEY}` } });
+  // Deleting the listing only nulls seller_ratings.listing_id (ON DELETE SET
+  // NULL, not CASCADE -- ratings are meant to be a permanent record) -- the
+  // rating row itself survives forever unless deleted explicitly, which
+  // previously nothing did. seller_rating_summary aggregates ALL of a
+  // seller's rows regardless of listing_id, so across repeated runs against
+  // this same shared alice/bob fixture, rating_count silently climbed by 1
+  // every time (2, then 3, ...) and permanently broke the "count === 1"
+  // assertion below for good, not just for the run that happened to leave a
+  // stale row. Delete the rating this run created too, by id (captured
+  // before the listing/FK-null happens), so the fixture is fully isolated.
+  const ratingId = bobRatesAlice.data?.id;
+  if (ratingId) {
+    await fetch(`${SUPABASE_URL}/rest/v1/seller_ratings?id=eq.${ratingId}`, { method: "DELETE", headers: { apikey: SERVICE_ROLE_KEY, Authorization: `Bearer ${SERVICE_ROLE_KEY}` } });
+  }
+  const finalDelRes = await fetch(`${SUPABASE_URL}/rest/v1/marketplace_listings?id=eq.${listingId}`, { method: "DELETE", headers: { apikey: SERVICE_ROLE_KEY, Authorization: `Bearer ${SERVICE_ROLE_KEY}` } });
+  if (!finalDelRes.ok) console.log(`  [warn] cleanup: failed to delete ${listingId}: ${finalDelRes.status} ${await finalDelRes.text()}`);
 
   /* ===================== ANALYTICS ===================== */
   console.log("\n=== Analytics (DAU/GMV/AOV/SLA) ===");

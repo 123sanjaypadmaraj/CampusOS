@@ -8,19 +8,45 @@
 // Usage: node scripts/live-check-vendor-order-ops.mjs
 //        node scripts/live-check-vendor-order-ops.mjs --env=production --yes-production
 
+import fs from "node:fs";
+import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { resolveTarget } from "./env-target.mjs";
 
-const { SUPABASE_URL, ANON_KEY, SERVICE_ROLE_KEY, target } = resolveTarget();
+const { SUPABASE_URL, ANON_KEY, SERVICE_ROLE_KEY, root, target } = resolveTarget();
 
-const VENDOR_PASSWORD = target === "staging" ? "StagingTest@2026!" : undefined;
-if (!VENDOR_PASSWORD) {
-  throw new Error("This script's vendor passwords are only known for staging -- pass them in for production runs.");
+// Both Tango's and Udupi's passwords now live in .vendor-credentials.<env>.
+// local.json, not hardcoded -- the 2026-08-18 credential-rotation incident
+// (see SECURITY.md) rotated every test vendor account on both environments,
+// so a literal here (Tango's old comment called it "the one place with no
+// other known source") goes stale the moment that rotation happens, exactly
+// like Udupi's already did. See the identical comment in
+// live-check-food-hardening.mjs.
+const vendorCredsFile = target === "production" ? ".vendor-credentials.local.json" : ".vendor-credentials.staging.local.json";
+const vendorCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts", vendorCredsFile), "utf8"));
+const vendorPassword = (vendor) => {
+  const password = vendorCreds.find((v) => v.vendor === vendor)?.password;
+  if (!password || password.startsWith("(")) {
+    throw new Error(`This script's ${vendor} vendor password isn't known in ${vendorCredsFile} for ${target} runs.`);
+  }
+  return password;
+};
+const TANGO_PASSWORD = vendorPassword("Tango Canteen");
+const UDUPI_PASSWORD = vendorPassword("Udupi Canteen");
+
+// Same reasoning as the vendor passwords above -- e2e.alice no longer has a
+// fixed literal password; scripts/setup-test-users.mjs mints/persists it
+// into this gitignored file now.
+const e2eCredsFile = target === "production" ? ".e2e-credentials.local.json" : ".e2e-credentials.staging.local.json";
+const e2eCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts", e2eCredsFile), "utf8"));
+const alicePassword = e2eCreds.find((r) => r.email === "e2e.alice@nhce.edu.in")?.password;
+if (!alicePassword) {
+  throw new Error(`No password known for e2e.alice@nhce.edu.in in ${e2eCredsFile} -- run scripts/setup-test-users.mjs first.`);
 }
 
-const ALICE = { email: "e2e.alice@nhce.edu.in", password: "TestPass!2026Alice" };
-const UDUPI_VENDOR = { email: "udupi.canteen@nhce.edu.in", password: VENDOR_PASSWORD };
-const TANGO_VENDOR = { email: "tango.canteen@nhce.edu.in", password: VENDOR_PASSWORD };
+const ALICE = { email: "e2e.alice@nhce.edu.in", password: alicePassword };
+const UDUPI_VENDOR = { email: "udupi.canteen@nhce.edu.in", password: UDUPI_PASSWORD };
+const TANGO_VENDOR = { email: "tango.canteen@nhce.edu.in", password: TANGO_PASSWORD };
 
 let passCount = 0;
 let failCount = 0;

@@ -24,6 +24,7 @@ import {
   blockUser,
   unblockUser,
   listBlockedUsers,
+  deleteMessage,
 } from "./messagingService";
 
 describe("messagingService", () => {
@@ -208,6 +209,20 @@ describe("messagingService", () => {
     expect(eq).toHaveBeenCalledWith("conversation_id", "conv-1");
     expect(order).toHaveBeenCalledWith("created_at", { ascending: true });
     expect(result).toEqual([{ id: "m1" }]);
+  });
+
+  it("deleteMessage calls delete_message with the message id", async () => {
+    supabase.rpc.mockResolvedValue({ data: null, error: null });
+
+    await deleteMessage("m1");
+
+    expect(supabase.rpc).toHaveBeenCalledWith("delete_message", { p_message_id: "m1" });
+  });
+
+  it("deleteMessage throws the RPC error rather than swallowing it", async () => {
+    supabase.rpc.mockResolvedValue({ data: null, error: new Error("Not authorized to delete this message") });
+
+    await expect(deleteMessage("m1")).rejects.toThrow("Not authorized to delete this message");
   });
 
   it("subscribeToConversationMessages returns a no-op unsubscribe without a conversation id", () => {

@@ -1,11 +1,13 @@
 // Edge Function: create-razorpay-order
 //
 // Called by the authenticated student right before opening Razorpay
-// Checkout. It NEVER trusts an amount from the browser -- it re-derives the
-// authoritative total by calling the create_payment_order() RPC (which
-// itself re-reads the locked order row), then asks Razorpay to create a
-// matching order, and only then hands the browser what it needs to open
-// checkout (doc §24-25).
+// Checkout, either for a food order OR a print job (mutually exclusive --
+// pass exactly one of order_id/print_job_id). It NEVER trusts an amount from
+// the browser -- it re-derives the authoritative total by calling
+// create_payment_order()/create_print_payment_order() (which re-reads the
+// locked order/print_job row), then asks Razorpay to create a matching
+// order, and only then hands the browser what it needs to open checkout
+// (doc §24-25, §29).
 //
 // Required secrets (set via `supabase secrets set`):
 //   RAZORPAY_KEY_ID
@@ -27,22 +29,25 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ code: "UNAUTHENTICATED", message: "Sign in required" }, 401);
     }
 
-    const { order_id } = await req.json();
-    if (!order_id) {
-      return jsonResponse({ code: "BAD_REQUEST", message: "order_id is required" }, 400);
+    const { order_id, print_job_id } = await req.json();
+    if (!order_id && !print_job_id) {
+      return jsonResponse({ code: "BAD_REQUEST", message: "order_id or print_job_id is required" }, 400);
+    }
+    if (order_id && print_job_id) {
+      return jsonResponse({ code: "BAD_REQUEST", message: "Pass only one of order_id / print_job_id" }, 400);
     }
 
     // Client scoped to the caller's JWT -- RLS/ownership is enforced by the
-    // create_payment_order() RPC itself.
+    // create_payment_order()/create_print_payment_order() RPC itself.
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
     });
 
-    const { data: payment, error } = await userClient.rpc("create_payment_order", {
-      p_order_id: order_id,
-    });
+    const { data: payment, error } = order_id
+      ? await userClient.rpc("create_payment_order", { p_order_id: order_id })
+      : await userClient.rpc("create_print_payment_order", { p_print_job_id: print_job_id });
     if (error) {
       return jsonResponse({ code: "PAYMENT_ORDER_FAILED", message: error.message }, 400);
     }
@@ -78,7 +83,7 @@ Deno.serve(async (req: Request) => {
         amount: Math.round(Number(payment.amount) * 100), // paise
         currency: payment.currency || "INR",
         receipt: payment.id,
-        notes: { order_id, payment_id: payment.id },
+        notes: order_id ? { order_id, payment_id: payment.id } : { print_job_id, payment_id: payment.id },
       }),
     });
 

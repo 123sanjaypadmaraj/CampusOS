@@ -303,7 +303,7 @@ export function hasLinkedinIdentity(identities) {
  */
 export async function signUpWithUsn({ name, usn, password }) {
   if (!name?.trim()) throw new Error("Enter your full name.");
-  if (!isValidUsn(usn || "")) throw new Error("USN must be exactly 10 letters/numbers.");
+  if (!isValidUsn(usn || "")) throw new Error("Enter a valid NHCE USN, e.g. 1NH22CS201.");
   if (!password || password.length < 8) throw new Error("Password must be at least 8 characters.");
 
   const { data, error } = await supabase.functions.invoke("signup-with-usn", {
@@ -331,7 +331,11 @@ export async function signUpWithUsn({ name, usn, password }) {
 }
 
 export async function signInWithUsn({ usn, password }) {
-  if (!isValidUsn(usn || "")) throw new Error("USN must be exactly 10 letters/numbers.");
+  // Deliberately NOT isValidUsn() here -- that's the strict NHCE-format
+  // check signUpWithUsn() gates new accounts on. This is a LOGIN against an
+  // already-existing account, which may predate that stricter format; all
+  // this needs is "non-empty enough to derive an email from."
+  if (!usn?.trim()) throw new Error("Enter your USN.");
   const { data, error } = await supabase.auth.signInWithPassword({
     email: usnToEmail(usn),
     password,
@@ -673,7 +677,7 @@ export async function getCohortGroupMembers({ campusId, course, year, limit = 30
 export async function listAllUsers(campusId, { search = "", role = null, limit = 50, cursor = null } = {}) {
   let query = supabase
     .from("profiles")
-    .select("id, name, email, usn, course, year, role, status, suspended_reason, created_at")
+    .select("id, name, email, usn, course, year, role, status, suspended_reason, ai_blocked, ai_blocked_reason, created_at")
     .order("created_at", { ascending: false })
     .limit(limit);
   if (campusId) query = query.eq("campus_id", campusId);
@@ -697,6 +701,106 @@ export async function setUserRole(userId, newRole, reason) {
   throwIfError(error);
 }
 
+// Role-assignment approval (doc "Admin" checklist item) -- the maker-checker
+// path a college_admin now goes through instead of admin_set_user_role()
+// directly (that RPC is super_admin-only as of the role-escalation fix).
+// listRoleChangeRequests()/decideRoleChange() are also how a super_admin
+// approves a college_admin's proposal.
+export async function proposeRoleChange(userId, newRole, reason) {
+  const { data, error } = await supabase.rpc("propose_role_change", {
+    p_target_user: userId,
+    p_new_role: newRole,
+    p_reason: reason || null,
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function listRoleChangeRequests(status = "pending") {
+  let query = supabase
+    .from("role_change_requests")
+    .select("*, target:profiles!role_change_requests_target_user_fkey(name, email, role), proposer:profiles!role_change_requests_requested_by_fkey(name)")
+    .order("requested_at", { ascending: false });
+  if (status) query = query.eq("status", status);
+  const { data, error } = await query;
+  throwIfError(error);
+  return data || [];
+}
+
+export async function decideRoleChange(requestId, approve, reason) {
+  const { data, error } = await supabase.rpc("decide_role_change", {
+    p_request_id: requestId,
+    p_approve: approve,
+    p_reason: reason || null,
+  });
+  throwIfError(error);
+  return data;
+}
+
+// Account deletion request (doc "Student" checklist item) -- self-service
+// request, admin-executed soft-delete. request_account_deletion()/
+// cancel_account_deletion_request() are self-scoped by auth.uid() server-side
+// (no userId param needed); getMyAccountDeletionRequest() still takes one to
+// match getMyVerification()'s existing shape used the same way in Profile.
+export async function requestAccountDeletion(reason) {
+  const { data, error } = await supabase.rpc("request_account_deletion", { p_reason: reason || null });
+  throwIfError(error);
+  return data;
+}
+
+export async function cancelAccountDeletionRequest(requestId) {
+  const { error } = await supabase.rpc("cancel_account_deletion_request", { p_request_id: requestId });
+  throwIfError(error);
+}
+
+// Suspension appeal (supabase/migrations/20260818000600_community_hardening.sql)
+// -- the one path a suspended account has left, since reject_if_suspended()
+// blocks nearly everything else. Self-scoped server-side (no userId param).
+export async function submitSuspensionAppeal(reason) {
+  const { data, error } = await supabase.rpc("submit_suspension_appeal", { p_reason: reason });
+  throwIfError(error);
+  return data;
+}
+
+export async function getMySuspensionAppeal() {
+  const { data, error } = await supabase.rpc("get_my_suspension_appeal");
+  throwIfError(error);
+  return data || null;
+}
+
+export async function getMyAccountDeletionRequest(userId) {
+  if (!userId) return null;
+  const { data, error } = await supabase
+    .from("account_deletion_requests")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("status", "pending")
+    .maybeSingle();
+  throwIfError(error);
+  return data;
+}
+
+export async function listAccountDeletionRequests(status = "pending") {
+  let query = supabase
+    .from("account_deletion_requests")
+    .select("*, profiles!account_deletion_requests_user_id_fkey(name, email, usn, role)")
+    .order("requested_at", { ascending: false });
+  if (status) query = query.eq("status", status);
+  const { data, error } = await query;
+  throwIfError(error);
+  return data || [];
+}
+
+export async function adminProcessAccountDeletion(requestId, action, note) {
+  const { data, error } = await supabase.rpc("admin_process_account_deletion", {
+    p_request_id: requestId,
+    p_action: action,
+    p_note: note || null,
+  });
+  throwIfError(error);
+  return data;
+}
+
 export async function setUserStatus(userId, status, reason) {
   const { data, error } = await supabase.rpc("admin_set_user_status", {
     p_target_user: userId,
@@ -705,6 +809,59 @@ export async function setUserStatus(userId, status, reason) {
   });
   throwIfError(error);
   return data;
+}
+
+/* =========================================================================
+   ADMIN: AI ASSISTANT (doc "AI" checklist -- security hardening, trust &
+   quality, feedback/analytics). Access kill-switch reuses profiles.role's
+   own admin-gate pattern (admin_set_ai_access); knowledge base and
+   analytics are new RPC-only surfaces added in
+   20260817001300_ai_hardening.sql.
+========================================================================= */
+
+export async function setAiAccess(userId, blocked, reason) {
+  const { data, error } = await supabase.rpc("admin_set_ai_access", {
+    p_target_user: userId,
+    p_blocked: blocked,
+    p_reason: reason || null,
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function listAiKnowledge() {
+  const { data, error } = await supabase.rpc("admin_list_ai_knowledge");
+  throwIfError(error);
+  return data || [];
+}
+
+export async function upsertAiKnowledge({ id, question, answer, campusId, active }) {
+  const { data, error } = await supabase.rpc("upsert_ai_knowledge", {
+    p_id: id || null,
+    p_question: question,
+    p_answer: answer,
+    p_campus_id: campusId || null,
+    p_active: active !== false,
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function deleteAiKnowledge(id) {
+  const { error } = await supabase.rpc("delete_ai_knowledge", { p_id: id });
+  throwIfError(error);
+}
+
+export async function getAiUsageSummary(days = 30) {
+  const { data, error } = await supabase.rpc("ai_admin_usage_summary", { p_days: days });
+  throwIfError(error);
+  return data?.[0] || null;
+}
+
+export async function listAiReports(limit = 50) {
+  const { data, error } = await supabase.rpc("ai_admin_list_reports", { p_limit: limit });
+  throwIfError(error);
+  return data || [];
 }
 
 /* =========================================================================
@@ -746,12 +903,64 @@ export async function moderateContent(targetType, targetId, action, reason) {
   throwIfError(error);
 }
 
+// Conversation reports only ever showed the last message's snippet -- a
+// moderator reviewing one has no way to see (or remove) the actual
+// offending message otherwise, since they aren't a participant and plain
+// RLS blocks them. See 20260817001000_message_delete_moderation.sql;
+// deleteMessage() (messagingService.js) is the same RPC-backed removal
+// used here, sender-side and moderator-side both go through delete_message().
+export async function adminGetConversationMessages(conversationId, limit = 50) {
+  const { data, error } = await supabase.rpc("admin_get_conversation_messages", {
+    p_conversation_id: conversationId,
+    p_limit: limit,
+  });
+  throwIfError(error);
+  return data || [];
+}
+
 export async function resolveReport(reportId, reviewerId, status = "resolved") {
   const { error } = await supabase
     .from("content_reports")
     .update({ status, reviewed_by: reviewerId, reviewed_at: new Date().toISOString() })
     .eq("id", reportId);
   throwIfError(error);
+}
+
+/* =========================================================================
+   PROFANITY FILTER WORD LIST + SUSPENSION APPEALS
+   (supabase/migrations/20260818000600_community_hardening.sql)
+========================================================================= */
+
+export async function listBannedWords() {
+  const { data, error } = await supabase.from("banned_words").select("word, added_by, created_at").order("word");
+  throwIfError(error);
+  return data || [];
+}
+
+export async function addBannedWord(word) {
+  const { error } = await supabase.rpc("admin_add_banned_word", { p_word: word });
+  throwIfError(error);
+}
+
+export async function removeBannedWord(word) {
+  const { error } = await supabase.rpc("admin_remove_banned_word", { p_word: word });
+  throwIfError(error);
+}
+
+export async function listSuspensionAppeals(status = "pending") {
+  const { data, error } = await supabase.rpc("admin_list_suspension_appeals", { p_status: status });
+  throwIfError(error);
+  return data || [];
+}
+
+export async function resolveSuspensionAppeal(appealId, decision, adminNote) {
+  const { data, error } = await supabase.rpc("resolve_suspension_appeal", {
+    p_appeal_id: appealId,
+    p_decision: decision,
+    p_admin_note: adminNote || null,
+  });
+  throwIfError(error);
+  return data;
 }
 
 /* =========================================================================
@@ -1103,6 +1312,7 @@ export async function getCampusPosts(
       title,
       content,
       tags,
+      image_urls,
       created_at,
       campus_id,
       author_id
@@ -1184,9 +1394,45 @@ export async function getCampusPosts(
       counts[post.id]?.comments || 0,
     liked: false,
     tags: post.tags || [],
+    images: post.image_urls || [],
     accent: "violet",
     verified: true,
   }));
+}
+
+// Client-side compression before upload -- same technique as
+// features/vendor/api.js's compressImage (longest edge to 1280px, JPEG
+// q0.8), duplicated locally rather than imported since mvpService.js is a
+// shared/core service and vendor/api.js is a feature module -- importing
+// the other way round would be the wrong dependency direction.
+async function compressImage(file, maxDim = 1280, quality = 0.8) {
+  if (typeof document === "undefined" || !file.type?.startsWith("image/")) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+    return blob ? new File([blob], file.name.replace(/\.\w+$/, ".jpg"), { type: "image/jpeg" }) : file;
+  } catch {
+    return file; // best-effort -- never block an upload on a compression failure
+  }
+}
+
+// post-media is a public bucket, RLS-scoped so a caller can only write into
+// their own `${auth.uid()}/...` folder (20260814001500_storage_buckets.sql
+// already created it and its policies -- this was the one caller missing).
+export async function uploadPostImage(file, ownerId) {
+  if (!ownerId) throw new Error("Please sign in first.");
+  const compressed = await compressImage(file);
+  const path = `${ownerId}/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
+  const { error } = await supabase.storage.from("post-media").upload(path, compressed, { contentType: "image/jpeg" });
+  throwIfError(error);
+  const { data } = supabase.storage.from("post-media").getPublicUrl(path);
+  return data.publicUrl;
 }
 
 export async function publishPost({
@@ -1196,6 +1442,7 @@ export async function publishPost({
   title,
   content = "",
   tags = [],
+  imageUrls = [],
 }) {
   if (!userId) {
     throw new Error(
@@ -1221,6 +1468,7 @@ export async function publishPost({
       title: title.trim(),
       content: content.trim(),
       tags,
+      image_urls: imageUrls,
     })
     .select()
     .single();
@@ -1853,6 +2101,30 @@ export async function toggleSavedEvent({ eventId, userId }) {
   return true;
 }
 
+// Saved posts (20260818000600_community_hardening.sql) -- same shape/pattern
+// as saved_events above, just against public.posts instead of public.events.
+export async function getSavedPosts(userId) {
+  if (!userId) return [];
+  const { data, error } = await supabase.from("saved_posts").select("post_id").eq("user_id", userId);
+  throwIfError(error);
+  return (data || []).map((row) => row.post_id);
+}
+
+export async function toggleSavedPost({ postId, userId }) {
+  if (!userId) throw new Error("Please sign in first.");
+  if (!isUuid(postId)) throw new Error("Invalid post ID.");
+  const { data: existing, error: readError } = await supabase.from("saved_posts").select("post_id").eq("post_id", postId).eq("user_id", userId).maybeSingle();
+  throwIfError(readError);
+  if (existing) {
+    const { error } = await supabase.from("saved_posts").delete().eq("post_id", postId).eq("user_id", userId);
+    throwIfError(error);
+    return false;
+  }
+  const { error } = await supabase.from("saved_posts").insert({ post_id: postId, user_id: userId });
+  throwIfError(error);
+  return true;
+}
+
 
 /* =========================================================================
    FOOD
@@ -1864,6 +2136,8 @@ export async function getCampusFood(campusId) {
     const [
       canteenResult,
       foodResult,
+      hoursResult,
+      closuresResult,
     ] = await Promise.all([
       (() => {
         let q = supabase
@@ -1897,13 +2171,30 @@ export async function getCampusFood(campusId) {
           image_url,
           is_vegetarian,
           available,
+          dietary_tags,
+          allergens,
+          spice_level,
+          calories,
+          available_days,
+          available_from,
+          available_to,
           food_categories (
             id,
             name
+          ),
+          food_item_variants (
+            id, name, price, available, active
+          ),
+          food_item_addon_groups (
+            id, name, min_select, max_select, active,
+            food_item_addon_options ( id, name, price_delta, available, active )
           )
         `)
         .eq("available", true)
         .order("name"),
+
+      supabase.from("canteen_hours").select("canteen_id, day_of_week, opens_at, closes_at, closed"),
+      supabase.from("canteen_closures").select("canteen_id, starts_at, ends_at, reason").gte("ends_at", new Date().toISOString()),
     ]);
 
     throwIfError(
@@ -1913,9 +2204,19 @@ export async function getCampusFood(campusId) {
     throwIfError(
       foodResult.error
     );
+    throwIfError(hoursResult.error);
+    throwIfError(closuresResult.error);
 
     const canteens =
       canteenResult.data || [];
+    const hoursByCanteen = {};
+    for (const h of hoursResult.data || []) {
+      (hoursByCanteen[h.canteen_id] ||= []).push(h);
+    }
+    const closuresByCanteen = {};
+    for (const c of closuresResult.data || []) {
+      (closuresByCanteen[c.canteen_id] ||= []).push(c);
+    }
 
     const canteenMap =
       Object.fromEntries(
@@ -1940,6 +2241,8 @@ export async function getCampusFood(campusId) {
             canteen.load || 0,
           color:
             canteen.color || "green",
+          hours: hoursByCanteen[canteen.id] || [],
+          closures: closuresByCanteen[canteen.id] || [],
         })
       ),
 
@@ -1967,6 +2270,24 @@ export async function getCampusFood(campusId) {
           Boolean(item.is_vegetarian),
         available:
           item.available,
+        dietaryTags: item.dietary_tags || [],
+        allergens: item.allergens || [],
+        spiceLevel: item.spice_level || null,
+        calories: item.calories ?? null,
+        availableDays: item.available_days || null,
+        availableFrom: item.available_from || null,
+        availableTo: item.available_to || null,
+        variants: (item.food_item_variants || [])
+          .filter((v) => v.active)
+          .map((v) => ({ id: v.id, name: v.name, price: Number(v.price), available: v.available })),
+        addonGroups: (item.food_item_addon_groups || [])
+          .filter((g) => g.active)
+          .map((g) => ({
+            id: g.id, name: g.name, minSelect: g.min_select, maxSelect: g.max_select,
+            options: (g.food_item_addon_options || [])
+              .filter((o) => o.active)
+              .map((o) => ({ id: o.id, name: o.name, priceDelta: Number(o.price_delta), available: o.available })),
+          })),
       })),
     };
   });
@@ -2002,18 +2323,19 @@ export async function createFoodOrder({
     throw new Error("Your food cart is empty.");
   }
 
-  const grouped = Object.values(
-    cart.reduce((acc, item) => {
-      if (!acc[item.id]) acc[item.id] = { ...item, quantity: 0 };
-      acc[item.id].quantity++;
-      return acc;
-    }, {})
-  );
-
-  const items = grouped.map((item) => ({
+  // mergeCartItem() already keeps `cart` as at most one entry per distinct
+  // (item, variant, add-on selection) with a real running `.quantity` on
+  // that entry -- it never creates duplicate rows for the same line. This
+  // used to re-derive quantity by counting array entries per food_item_id
+  // instead of reading item.quantity, which silently placed every order at
+  // quantity 1 no matter how many of an item were actually in the cart
+  // (found while wiring in variant/add-on support -- fixed here).
+  const items = cart.map((item) => ({
     food_item_id: item.id,
-    quantity: item.quantity,
+    quantity: Number(item.quantity) || 1,
     special_instructions: item.specialInstructions || null,
+    variant_id: item.variantId || null,
+    addon_option_ids: item.addonOptionIds && item.addonOptionIds.length ? item.addonOptionIds : null,
   }));
 
   const { data, error } = await supabase.rpc("create_food_order", {
@@ -2060,6 +2382,16 @@ export async function transitionOrderStatus(orderId, toStatus, reason) {
 // is unused, unexpired, and belongs to a READY order, then completes it.
 export async function redeemPickupToken(token) {
   const { data, error } = await supabase.rpc("redeem_pickup_token", { p_token: token });
+  throwIfError(error);
+  return data;
+}
+
+// Generates (or, on a repeat call, just returns) the GST invoice for a paid
+// food order -- see generate_order_invoice() (doc Phase 3 "Invoice
+// generation"). Idempotent server-side; safe to call every time a receipt
+// is opened rather than caching the result client-side.
+export async function getOrCreateOrderInvoice(orderId) {
+  const { data, error } = await supabase.rpc("generate_order_invoice", { p_order_id: orderId });
   throwIfError(error);
   return data;
 }
@@ -2169,6 +2501,55 @@ export async function getMyPayments(userId) {
    PRINT
 ========================================================================= */
 
+export const PRINT_FILE_MAX_BYTES = 26214400; // 25MB, mirrors the print-files bucket's own limit
+const PRINT_FILE_ALLOWED_TYPES = ["application/pdf"];
+
+// Real, honest structural validation (file type + size) run before ever
+// touching the network -- not virus scanning (deliberately out of scope,
+// no AV engine is reachable from an Edge Function in this deployment), just
+// the same checks the bucket enforces server-side anyway, surfaced as a
+// friendly error instead of a raw storage-API failure.
+export function validatePrintFile(file) {
+  if (!file) throw new Error("Choose a document.");
+  const looksLikePdf = file.type
+    ? PRINT_FILE_ALLOWED_TYPES.includes(file.type)
+    : /\.pdf$/i.test(file.name || "");
+  if (!looksLikePdf) {
+    throw new Error("Only PDF files can be printed.");
+  }
+  if (file.size > PRINT_FILE_MAX_BYTES) {
+    throw new Error(`File is too large (max ${PRINT_FILE_MAX_BYTES / 1024 / 1024}MB).`);
+  }
+}
+
+export async function getPrintRateCard(campusId) {
+  let query = supabase.from("print_rate_card").select("*");
+  if (campusId) query = query.eq("campus_id", campusId);
+  const { data, error } = await query;
+  throwIfError(error);
+  return data || [];
+}
+
+export async function getPrintBindingRates(campusId) {
+  let query = supabase.from("print_binding_rates").select("*");
+  query = campusId ? query.eq("campus_id", campusId).maybeSingle() : query.limit(1).maybeSingle();
+  const { data, error } = await query;
+  throwIfError(error);
+  return data || null;
+}
+
+export async function getPrintShopStatus(campusId) {
+  let query = supabase.from("print_shop_status").select("*");
+  query = campusId ? query.eq("campus_id", campusId).maybeSingle() : query.limit(1).maybeSingle();
+  const { data, error } = await query;
+  throwIfError(error);
+  return data || null;
+}
+
+// Two-step flow: upload the file + create an AWAITING_PAYMENT job (price is
+// computed server-side from the rate card, never trusted from the browser),
+// then the caller drives startPrintJobPayment() to actually charge for it.
+// A job that's never paid for just expires (see 20260817001200_printing_v2.sql).
 export async function uploadPrintJob({
   userId,
   file,
@@ -2176,52 +2557,33 @@ export async function uploadPrintJob({
   copies = 1,
   colorMode = "black_white",
   paperSize = "A4",
-  binding = null,
+  binding = "none",
+  duplex = false,
 }) {
   if (!userId) {
-    throw new Error(
-      "Please sign in first."
-    );
+    throw new Error("Please sign in first.");
   }
 
-  if (!file) {
-    throw new Error(
-      "Choose a document."
-    );
-  }
+  validatePrintFile(file);
 
-  const safeName =
-    file.name.replace(
-      /[^a-zA-Z0-9._-]/g,
-      "_"
-    );
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const path = `${userId}/${crypto.randomUUID()}-${safeName}`;
 
-  const path =
-    `${userId}/${crypto.randomUUID()}-${safeName}`;
-
-  const {
-    error: uploadError,
-  } = await supabase.storage
+  const { error: uploadError } = await supabase.storage
     .from("print-files")
-    .upload(
-      path,
-      file,
-      {
-        cacheControl: "3600",
-        upsert: false,
-        contentType:
-          file.type ||
-          "application/octet-stream",
-      }
-    );
+    .upload(path, file, {
+      cacheControl: "3600",
+      upsert: false,
+      contentType: file.type || "application/octet-stream",
+    });
 
   throwIfError(uploadError);
 
   // Price is computed server-side from the campus rate card inside
-  // create_print_job() (doc §29, §66) -- calculatePrintJobPrice() above is
-  // now only used for the pre-upload UI estimate, never as the charged
-  // amount. `file_url` stores the storage path; the print vendor UI resolves
-  // it to a signed URL when it actually needs to open the file.
+  // create_print_job() (doc §29, §66) -- calculatePrintJobPrice() is only
+  // used for the pre-upload UI estimate, never as the charged amount.
+  // `file_url` stores the storage path; only the owner or print.manage/admin
+  // can ever resolve it to a signed URL (storage RLS), never a raw link.
   const { data: job, error: jobError } = await supabase.rpc("create_print_job", {
     p_file_url: path,
     p_file_name: file.name,
@@ -2230,35 +2592,71 @@ export async function uploadPrintJob({
     p_color_mode: colorMode,
     p_paper_size: paperSize,
     p_binding: binding || "none",
+    p_duplex: Boolean(duplex),
+    p_file_size_bytes: file.size ?? null,
   });
 
   if (jobError) {
-    await supabase.storage
-      .from("print-files")
-      .remove([path]);
-
-    throw jobError;
+    await supabase.storage.from("print-files").remove([path]);
+    throw new Error(jobError.message || "Unable to create print job");
   }
 
   return job;
 }
 
+// Mirrors startFoodOrderPayment() -- asks create-razorpay-order for a
+// gateway order to open Checkout against; the job only actually becomes
+// UPLOADED (visible to the print shop) once razorpay-webhook verifies the
+// payment server-side.
+export async function startPrintJobPayment(printJobId) {
+  const { data, error } = await supabase.functions.invoke("create-razorpay-order", {
+    body: { print_job_id: printJobId },
+  });
+  if (error) throw new Error(error.message || "Unable to start payment");
+  return data; // { key_id, gateway_order_id, amount, currency, payment_id }
+}
 
-export async function getMyPrintJobs(
-  userId
-) {
+// Self-service cancellation (doc §29 "Cancellation"/"Refund"). Only legal
+// before printing has actually started -- see cancel_print_job()'s own
+// status check. If a captured payment existed, a 'pending' refund row comes
+// back too; the caller is expected to immediately drive it through the
+// razorpay-refund Edge Function the same way a vendor-initiated food refund
+// does (see startPrintJobRefund below).
+export async function cancelPrintJob(jobId, reason) {
+  const { data, error } = await supabase.rpc("cancel_print_job", {
+    p_job_id: jobId,
+    p_reason: reason || null,
+  });
+  throwIfError(error);
+  return data; // { job, refund_id }
+}
+
+export async function startPrintJobRefund(refundId) {
+  const { data, error } = await supabase.functions.invoke("razorpay-refund", {
+    body: { refund_id: refundId },
+  });
+  if (error) throw new Error(error.message || "Unable to process refund");
+  return data;
+}
+
+// A student re-opening their own past job's file (e.g. to confirm what they
+// uploaded) -- same signed-URL convention as documents/club-files/message
+// attachments (300s). Storage RLS already restricts this to the owner.
+export async function getMyPrintFileUrl(path) {
+  if (!path) return null;
+  const { data, error } = await supabase.storage.from("print-files").createSignedUrl(path, 300);
+  throwIfError(error);
+  return data?.signedUrl || null;
+}
+
+export async function getMyPrintJobs(userId) {
   if (!userId) return [];
 
-  const {
-    data,
-    error,
-  } = await supabase
+  const { data, error } = await supabase
     .from("print_jobs")
     .select("*")
     .eq("user_id", userId)
-    .order("created_at", {
-      ascending: false,
-    });
+    .order("created_at", { ascending: false });
 
   throwIfError(error);
 

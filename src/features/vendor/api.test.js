@@ -10,11 +10,16 @@ const mockFrom = jest.fn();
 const mockRpc = jest.fn();
 const mockFunctionsInvoke = jest.fn();
 
+const mockStorageFrom = jest.fn();
+
 jest.mock("../../lib/supabase", () => ({
   supabase: {
     from: (...args) => mockFrom(...args),
     rpc: (...args) => mockRpc(...args),
     functions: { invoke: (...args) => mockFunctionsInvoke(...args) },
+    storage: { from: (...args) => mockStorageFrom(...args) },
+    channel: jest.fn(),
+    removeChannel: jest.fn(),
   },
 }));
 
@@ -49,6 +54,14 @@ import {
   initiateRefund,
   getCanteenDashboardStats,
   getPrintShopDashboardStats,
+  getMyPrintBindingRates,
+  updatePrintBindingRates,
+  getMyPrintShopStatus,
+  setPrintShopStatus,
+  listActivePrintJobs,
+  listPrintJobHistory,
+  transitionPrintJob,
+  getPrintFileSignedUrl,
 } from "./api";
 
 function chain(result) {
@@ -56,6 +69,7 @@ function chain(result) {
     select: jest.fn(() => builder),
     eq: jest.fn(() => builder),
     in: jest.fn(() => builder),
+    limit: jest.fn(() => builder),
     order: jest.fn(() => builder),
     delete: jest.fn(() => builder),
     update: jest.fn(() => builder),
@@ -513,12 +527,14 @@ describe("getCanteenDashboardStats", () => {
 });
 
 describe("getPrintShopDashboardStats", () => {
-  it("summarizes today's print jobs by status", async () => {
+  it("summarizes today's print jobs by status and sums revenue, excluding unpaid/cancelled jobs", async () => {
     const builder = chain({
       data: [
-        { id: "j1", status: "PROCESSING" },
-        { id: "j2", status: "READY" },
-        { id: "j3", status: "COLLECTED" },
+        { id: "j1", status: "PROCESSING", price: 40 },
+        { id: "j2", status: "READY", price: 60 },
+        { id: "j3", status: "COLLECTED", price: 20 },
+        { id: "j4", status: "AWAITING_PAYMENT", price: 100 },
+        { id: "j5", status: "CANCELLED", price: 30 },
       ],
       error: null,
     });
@@ -527,7 +543,125 @@ describe("getPrintShopDashboardStats", () => {
     const stats = await getPrintShopDashboardStats();
 
     expect(mockFrom).toHaveBeenCalledWith("print_jobs");
-    expect(stats).toEqual({ jobsToday: 3, activeCount: 1, readyCount: 1 });
+    expect(stats).toEqual({ jobsToday: 5, activeCount: 1, readyCount: 1, revenueToday: 120 });
+  });
+});
+
+describe("print binding rates / shop status (doc §29-30)", () => {
+  beforeEach(() => { mockFrom.mockReset(); mockRpc.mockReset(); });
+
+  it("getMyPrintBindingRates looks up the row for this campus", async () => {
+    const builder = chain({ data: { campus_id: "campus-1", staple_fee: 20, spiral_fee: 40 }, error: null });
+    mockFrom.mockReturnValue(builder);
+
+    const result = await getMyPrintBindingRates("campus-1");
+
+    expect(mockFrom).toHaveBeenCalledWith("print_binding_rates");
+    expect(builder.eq).toHaveBeenCalledWith("campus_id", "campus-1");
+    expect(result.spiral_fee).toBe(40);
+  });
+
+  it("updatePrintBindingRates writes both fees for the campus", async () => {
+    const builder = chain({ data: { staple_fee: 25, spiral_fee: 45 }, error: null });
+    mockFrom.mockReturnValue(builder);
+
+    await updatePrintBindingRates("campus-1", { stapleFee: 25, spiralFee: 45 });
+
+    expect(builder.update).toHaveBeenCalledWith({ staple_fee: 25, spiral_fee: 45 });
+    expect(builder.eq).toHaveBeenCalledWith("campus_id", "campus-1");
+  });
+
+  it("getMyPrintShopStatus filters by campus", async () => {
+    const builder = chain({ data: { status: "online" }, error: null });
+    mockFrom.mockReturnValue(builder);
+
+    const status = await getMyPrintShopStatus("campus-1");
+
+    expect(mockFrom).toHaveBeenCalledWith("print_shop_status");
+    expect(builder.eq).toHaveBeenCalledWith("campus_id", "campus-1");
+    expect(status.status).toBe("online");
+  });
+
+  it("setPrintShopStatus calls the RPC with status and message", async () => {
+    mockRpc.mockResolvedValue({ data: { status: "offline", message: "Out of toner" }, error: null });
+
+    const result = await setPrintShopStatus("offline", "Out of toner");
+
+    expect(mockRpc).toHaveBeenCalledWith("set_print_shop_status", { p_status: "offline", p_message: "Out of toner" });
+    expect(result.status).toBe("offline");
+  });
+});
+
+describe("print job queue (doc §29-30)", () => {
+  beforeEach(() => { mockFrom.mockReset(); mockRpc.mockReset(); mockStorageFrom.mockReset(); });
+
+  it("listActivePrintJobs filters to active statuses and attaches uploader profiles", async () => {
+    const builder = chain({ data: [{ id: "job-1", user_id: "u1", status: "QUEUED" }], error: null });
+    mockFrom.mockReturnValue(builder);
+    mockRpc.mockResolvedValue({ data: [{ id: "u1", name: "Alice" }], error: null });
+
+    const jobs = await listActivePrintJobs();
+
+    expect(builder.in).toHaveBeenCalledWith("status", ["UPLOADED", "PROCESSING", "QUEUED", "PRINTING", "READY"]);
+    expect(mockRpc).toHaveBeenCalledWith("get_profile_snippets", { p_ids: ["u1"] });
+    expect(jobs[0].profiles).toEqual({ id: "u1", name: "Alice" });
+  });
+
+  it("listPrintJobHistory filters to terminal statuses, newest first, capped", async () => {
+    const builder = chain({ data: [], error: null });
+    mockFrom.mockReturnValue(builder);
+
+    await listPrintJobHistory({ limit: 10 });
+
+    expect(builder.in).toHaveBeenCalledWith("status", ["COLLECTED", "CANCELLED", "FAILED"]);
+    expect(builder.order).toHaveBeenCalledWith("created_at", { ascending: false });
+  });
+
+  it("transitionPrintJob calls the RPC with job id, new status and pickup code", async () => {
+    mockRpc.mockResolvedValue({ data: { id: "job-1", status: "COLLECTED" }, error: null });
+
+    await transitionPrintJob("job-1", "COLLECTED", "482913");
+
+    expect(mockRpc).toHaveBeenCalledWith("transition_print_job", {
+      p_job_id: "job-1",
+      p_new_status: "COLLECTED",
+      p_pickup_code: "482913",
+    });
+  });
+
+  it("transitionPrintJob sends null when no pickup code is given (non-COLLECTED transitions)", async () => {
+    mockRpc.mockResolvedValue({ data: { id: "job-1", status: "PROCESSING" }, error: null });
+
+    await transitionPrintJob("job-1", "PROCESSING");
+
+    expect(mockRpc).toHaveBeenCalledWith("transition_print_job", {
+      p_job_id: "job-1",
+      p_new_status: "PROCESSING",
+      p_pickup_code: null,
+    });
+  });
+
+  it("surfaces a mismatched pickup code as a rejected promise", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { message: "Pickup code does not match" } });
+    await expect(transitionPrintJob("job-1", "COLLECTED", "000000")).rejects.toMatchObject({ message: "Pickup code does not match" });
+  });
+
+  it("getPrintFileSignedUrl resolves a signed URL for preview/download", async () => {
+    const createSignedUrl = jest.fn().mockResolvedValue({ data: { signedUrl: "https://signed.example/report.pdf" }, error: null });
+    mockStorageFrom.mockReturnValue({ createSignedUrl });
+
+    const url = await getPrintFileSignedUrl("user-1/report.pdf");
+
+    expect(mockStorageFrom).toHaveBeenCalledWith("print-files");
+    expect(createSignedUrl).toHaveBeenCalledWith("user-1/report.pdf", 300);
+    expect(url).toBe("https://signed.example/report.pdf");
+  });
+
+  it("getPrintFileSignedUrl returns null without a storage call when the file was already cleaned up", async () => {
+    const createSignedUrl = jest.fn();
+    mockStorageFrom.mockReturnValue({ createSignedUrl });
+    expect(await getPrintFileSignedUrl(null)).toBeNull();
+    expect(createSignedUrl).not.toHaveBeenCalled();
   });
 });
 

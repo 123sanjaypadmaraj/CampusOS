@@ -1493,6 +1493,15 @@
 .ai-action-buttons button { flex: 1; height: 34px; font-size: 12px; border-radius: 8px; }
 .ai-action-result { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12px; }
 .ai-action-result.success { color: #13845b; }
+
+/* Trust & quality: which tool(s) backed this reply. Feedback loop:
+   thumbs up/down + a "reported" tag once a down-vote's reason was sent. */
+.ai-sources { margin: 4px 0 0; padding: 0; font-size: 10px; color: var(--muted); background: none; }
+.ai-feedback-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.ai-feedback-btn { width: 26px; height: 26px; border: 1px solid var(--line); border-radius: 8px; background: #fff; display: grid; place-items: center; color: var(--muted); font-size: 12px; }
+.ai-feedback-btn:disabled { opacity: 0.5; }
+.ai-feedback-btn.active { color: var(--purple); border-color: var(--purple); }
+.ai-feedback-reported { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--muted); }
 .ai-action-result.error { color: #c23a3a; }
 
 .ai-capabilities {
@@ -1927,8 +1936,9 @@
 
 .cart-list > div {
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 2px;
+  grid-template-columns: 1fr auto auto auto; /* text | qty controls | price | remove -- extra columns are unused unless a caller passes onUpdateQuantity/onRemove, see the inline grid-column overrides on each cell */
+  gap: 2px 10px;
+  align-items: center;
   padding: 12px;
   border-bottom: 1px solid var(--line);
 }
@@ -2937,6 +2947,19 @@
   color: var(--purple);
   display: grid;
   place-items: center;
+}
+
+/* Defensive fix for a bug that's recurred more than once: a `.resource-row`
+   whose first child is real title/body text rather than a `.resource-icon`
+   used to land that content in the fixed 44px icon column and wrap it one
+   word per line. `.resource-row` is a 4-column grid built for icon/label/
+   action rows, but plenty of call sites only ever render 2-3 children (no
+   icon) -- rather than auditing and patching every one of those call sites,
+   drop the fixed icon column here whenever a row genuinely has no
+   `.resource-icon` first child, so its content lands in the wide `1fr`
+   column instead. Rows that do pair the icon correctly are untouched. */
+.resource-row:not(:has(> .resource-icon)) {
+  grid-template-columns: 1fr auto auto;
 }
 
 .resource-row b,
@@ -5496,10 +5519,13 @@
 .messages-thread-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; max-height: 460px; }
 .message-bubble { max-width: 70%; padding: 10px 13px; border-radius: 14px; background: var(--surface-2); }
 .message-bubble p { margin: 0; font-size: 13px; white-space: pre-wrap; word-break: break-word; }
-.message-bubble small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
+.message-bubble small { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: var(--muted); font-size: 10px; }
 .message-bubble.mine { align-self: flex-end; background: var(--purple); }
 .message-bubble.mine p { color: #fff; }
 .message-bubble.mine small { color: #ffffffaa; }
+.message-deleted { font-style: italic; opacity: 0.75; }
+.message-delete-btn { background: none; border: none; padding: 0; color: inherit; opacity: 0.7; cursor: pointer; display: inline-flex; }
+.message-delete-btn:hover { opacity: 1; }
 .message-attachment-img { display: block; max-width: 220px; max-height: 220px; border-radius: 10px; cursor: pointer; object-fit: cover; }
 .message-attachment-img.loading { width: 160px; height: 120px; background: var(--border); opacity: 0.5; }
 .messages-compose { display: flex; gap: 10px; padding: 14px 16px; border-top: 1px solid var(--border); }

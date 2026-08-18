@@ -253,7 +253,7 @@ function CanteenOverview({ canteen, onNavigate }) {
   );
 }
 
-function PrintShopOverview({ onNavigate }) {
+function PrintShopOverview({ onNavigate, notify, campusId }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [stats, setStats] = useState(null);
@@ -297,12 +297,15 @@ function PrintShopOverview({ onNavigate }) {
           value={stats.readyCount}
           tone={stats.readyCount > 0 ? "warning" : "good"}
         />
+        <DashboardStatCard icon={<HiCurrencyRupee />} label="Sales today" value={`₹${stats.revenueToday}`} />
       </div>
+
+      <PrintShopStatusToggle notify={notify} campusId={campusId} />
 
       <div className="item-form-section-label">Quick actions</div>
       <div className="vendor-quicklink-grid">
         <QuickLinkCard icon={<HiPrinter />} label="Print queue" sub="Process and hand off jobs" ariaLabel="Process incoming jobs" onClick={() => onNavigate("jobs")} />
-        <QuickLinkCard icon={<HiCurrencyRupee />} label="Pricing" sub="Black & white / colour rates" ariaLabel="Edit page rates" onClick={() => onNavigate("pricing")} />
+        <QuickLinkCard icon={<HiCurrencyRupee />} label="Pricing" sub="Black & white / colour / binding rates" ariaLabel="Edit page rates" onClick={() => onNavigate("pricing")} />
         <QuickLinkCard icon={<HiChartBar />} label="Analytics" sub="Turnaround & SLA over time" ariaLabel="View performance stats" onClick={() => onNavigate("analytics")} />
       </div>
     </div>
@@ -433,12 +436,24 @@ function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
         <button className={tab === "dashboard" ? "chip active" : "chip"} onClick={() => setTab("dashboard")}>Dashboard</button>
         <button className={tab === "orders" ? "chip active" : "chip"} onClick={() => setTab("orders")}>Orders</button>
         <button className={tab === "menu" ? "chip active" : "chip"} onClick={() => setTab("menu")}>Menu</button>
+        <button className={tab === "hours" ? "chip active" : "chip"} onClick={() => setTab("hours")}>Hours</button>
+        <button className={tab === "inventory" ? "chip active" : "chip"} onClick={() => setTab("inventory")}>Inventory</button>
+        <button className={tab === "staff" ? "chip active" : "chip"} onClick={() => setTab("staff")}>Staff</button>
+        <button className={tab === "billing" ? "chip active" : "chip"} onClick={() => setTab("billing")}>Billing</button>
         <button className={tab === "analytics" ? "chip active" : "chip"} onClick={() => setTab("analytics")}>Analytics</button>
       </div>
 
       {tab === "dashboard" && <CanteenOverview canteen={canteen} notify={notify} onNavigate={setTab} />}
 
       {tab === "orders" && <OrderQueue canteen={canteen} notify={notify} />}
+
+      {tab === "hours" && <CanteenHoursManager canteenId={canteen.id} notify={notify} />}
+
+      {tab === "inventory" && <InventoryReportPanel canteenId={canteen.id} notify={notify} />}
+
+      {tab === "staff" && <CanteenStaffManager canteenId={canteen.id} notify={notify} />}
+
+      {tab === "billing" && <BillingPanel canteen={canteen} notify={notify} onCanteenChanged={onCanteenChanged} />}
 
       {tab === "analytics" && <VendorAnalytics />}
 
@@ -610,9 +625,10 @@ function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
         <FoodItemForm
           item={itemModal}
           canteenId={canteen.id}
+          ownerId={canteen.owner_id}
           categories={categories}
           onClose={() => setItemModal(null)}
-          onSaved={() => { setItemModal(null); reload(); }}
+          onSaved={(saved) => { setItemModal(saved); reload(); }}
           notify={notify}
         />
       )}
@@ -628,6 +644,372 @@ function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
         />
       )}
     </section>
+  );
+}
+
+/* =========================================================
+   OPENING HOURS / HOLIDAY / TEMPORARY CLOSURE (doc Phase 3 "Availability
+   schedules") -- replaces the manual-only Open/Busy/Closed toggle (still
+   set from "Edit canteen details") with a real weekly schedule plus
+   one-off closures. No canteen_hours rows at all = students see the
+   status field alone, unchanged from today (see is_canteen_open() in
+   20260817000500_food_menu_depth.sql).
+========================================================= */
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function CanteenHoursManager({ canteenId, notify }) {
+  const [hours, setHours] = useState([]);
+  const [closures, setClosures] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [closureForm, setClosureForm] = useState({ starts_at: "", ends_at: "", reason: "" });
+  const [savingClosure, setSavingClosure] = useState(false);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      const [h, c] = await Promise.all([vendorApi.listCanteenHours(canteenId), vendorApi.listCanteenClosures(canteenId)]);
+      setHours(h);
+      setClosures(c);
+    } catch (err) {
+      notify(err.message || "Could not load hours");
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { reload(); }, [canteenId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const rowFor = (day) => hours.find((h) => h.day_of_week === day);
+
+  const saveDay = async (day, patch) => {
+    const existing = rowFor(day);
+    try {
+      await vendorApi.upsertCanteenHour({
+        id: existing?.id,
+        canteenId,
+        dayOfWeek: day,
+        opensAt: patch.opens_at ?? existing?.opens_at ?? "09:00",
+        closesAt: patch.closes_at ?? existing?.closes_at ?? "18:00",
+        closed: patch.closed ?? existing?.closed ?? false,
+      });
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not save hours");
+    }
+  };
+
+  if (loading) return <LoadingState label="Loading hours…" />;
+
+  return (
+    <div>
+      <div className="section-head"><h2>Weekly hours</h2></div>
+      <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 12 }}>
+        Leave a day unset and students see your Open/Busy/Closed status alone, same as before. Set any day and the schedule below takes over automatically.
+      </p>
+      <div className="resource-list">
+        {WEEKDAYS.map((label, day) => {
+          const row = rowFor(day);
+          return (
+            <article className="resource-row" key={day}>
+              <div className="resource-icon"><HiClock /></div>
+              <div><b>{label}</b><small>{row ? (row.closed ? "Closed" : `${row.opens_at}–${row.closes_at}`) : "Not set (falls back to status)"}</small></div>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <input type="time" defaultValue={row?.opens_at || "09:00"} onBlur={(e) => saveDay(day, { opens_at: e.target.value })} disabled={row?.closed} />
+                <input type="time" defaultValue={row?.closes_at || "18:00"} onBlur={(e) => saveDay(day, { closes_at: e.target.value })} disabled={row?.closed} />
+                <ToggleSwitch label="Closed" checked={Boolean(row?.closed)} onChange={(v) => saveDay(day, { closed: v })} />
+              </div>
+            </article>
+          );
+        })}
+      </div>
+
+      <div className="section-head" style={{ marginTop: 24 }}><h2>Holiday / temporary closures</h2></div>
+      <div className="form-grid">
+        <label>Starts<input type="datetime-local" value={closureForm.starts_at} onChange={(e) => setClosureForm((f) => ({ ...f, starts_at: e.target.value }))} /></label>
+        <label>Ends<input type="datetime-local" value={closureForm.ends_at} onChange={(e) => setClosureForm((f) => ({ ...f, ends_at: e.target.value }))} /></label>
+        <label>Reason<input value={closureForm.reason} onChange={(e) => setClosureForm((f) => ({ ...f, reason: e.target.value }))} placeholder="e.g. Festival holiday" /></label>
+      </div>
+      <button
+        className="primary"
+        disabled={savingClosure || !closureForm.starts_at || !closureForm.ends_at}
+        onClick={async () => {
+          try {
+            setSavingClosure(true);
+            await vendorApi.addCanteenClosure({ canteenId, startsAt: closureForm.starts_at, endsAt: closureForm.ends_at, reason: closureForm.reason });
+            notify("Closure added — orders will be blocked for that window");
+            setClosureForm({ starts_at: "", ends_at: "", reason: "" });
+            await reload();
+          } catch (err) { notify(err.message || "Could not add closure"); } finally { setSavingClosure(false); }
+        }}
+      >
+        <HiPlus /> Add closure
+      </button>
+
+      <div className="resource-list" style={{ marginTop: 16 }}>
+        {closures.length === 0 && <EmptyState title="No closures scheduled" text="Add one above for holidays or unplanned downtime." />}
+        {closures.map((c) => (
+          <article className="resource-row" key={c.id}>
+            <div className="resource-icon"><HiXCircle /></div>
+            <div>
+              <b>{new Date(c.starts_at).toLocaleString()} → {new Date(c.ends_at).toLocaleString()}</b>
+              <small>{c.reason || "No reason given"}</small>
+            </div>
+            <button className="ghost" onClick={async () => { await vendorApi.deleteCanteenClosure(c.id); notify("Closure removed"); reload(); }}>
+              <HiTrash />
+            </button>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   VENDOR STAFF SUB-ACCOUNTS (doc Phase 3 "Vendor staff sub-accounts")
+========================================================= */
+
+function CanteenStaffManager({ canteenId, notify }) {
+  const [staff, setStaff] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [email, setEmail] = useState("");
+  const [adding, setAdding] = useState(false);
+
+  const reload = async () => {
+    try { setLoading(true); setStaff(await vendorApi.listCanteenStaffAccounts(canteenId)); }
+    catch (err) { notify(err.message || "Could not load staff"); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { reload(); }, [canteenId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading) return <LoadingState label="Loading staff…" />;
+
+  return (
+    <div>
+      <div className="section-head">
+        <h2>Staff accounts</h2>
+        <p style={{ color: "var(--muted)", fontSize: 13 }}>
+          Staff can run your order queue (accept, prepare, mark ready, adjust stock) but never see pricing, menu edits, payouts or refunds.
+        </p>
+      </div>
+
+      <div className="form-grid" style={{ maxWidth: 420 }}>
+        <label>Add staff by email
+          <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="student@nhce.edu.in" />
+        </label>
+      </div>
+      <button
+        className="primary"
+        disabled={adding || !email.trim()}
+        onClick={async () => {
+          try {
+            setAdding(true);
+            await vendorApi.addCanteenStaffAccount(canteenId, email.trim());
+            notify("Staff account added");
+            setEmail("");
+            await reload();
+          } catch (err) { notify(err.message || "Could not add staff — they need an existing CampusOS account"); }
+          finally { setAdding(false); }
+        }}
+      >
+        <HiPlus /> Add staff
+      </button>
+
+      <div className="resource-list" style={{ marginTop: 16 }}>
+        {staff.length === 0 && <EmptyState title="No staff yet" text="Add someone by the email they signed up with." />}
+        {staff.map((s) => (
+          <article className="resource-row" key={s.id}>
+            <div className="resource-icon"><HiUserGroup /></div>
+            <div><b>{s.profiles?.name || "Staff member"}</b><small>{s.profiles?.email}</small></div>
+            <button
+              className="ghost"
+              onClick={async () => {
+                if (!window.confirm(`Remove ${s.profiles?.name || "this staff member"}? They'll lose access to the order queue.`)) return;
+                try { await vendorApi.removeCanteenStaffAccount(s.id); notify("Staff account removed"); reload(); }
+                catch (err) { notify(err.message || "Could not remove staff"); }
+              }}
+            >
+              <HiTrash />
+            </button>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   INVENTORY REPORT + manual stock adjustments (doc Phase 3 "Stock
+   adjustment audit trail" / "Inventory reports")
+========================================================= */
+
+function InventoryReportPanel({ canteenId, notify }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [adjusting, setAdjusting] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true); setError("");
+      setRows(await vendorApi.getInventoryReport(30));
+    } catch (err) { setError(err.message || "Could not load the inventory report"); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { reload(); }, [canteenId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const adjust = async (row, delta) => {
+    const key = `${row.food_item_id}:${row.variant_id || ""}`;
+    try {
+      setAdjusting(key);
+      await vendorApi.adjustItemStock(row.food_item_id, row.variant_id, delta, delta > 0 ? "Manual restock" : "Manual correction");
+      await reload();
+    } catch (err) { notify(err.message || "Could not adjust stock"); }
+    finally { setAdjusting(null); }
+  };
+
+  if (loading) return <LoadingState label="Loading inventory report…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  return (
+    <div>
+      <div className="section-head"><h2>Inventory report</h2><p style={{ color: "var(--muted)", fontSize: 13 }}>Only items with stock tracking turned on appear here. Last 30 days of movement.</p></div>
+      {rows.length === 0 && <EmptyState title="Nothing tracked yet" text="Turn on 'Track stock' for a menu item or its variants to see it here." />}
+      <div className="resource-list">
+        {rows.map((row) => {
+          const key = `${row.food_item_id}:${row.variant_id || ""}`;
+          return (
+            <article className="resource-row" key={key}>
+              <div className="resource-icon"><HiCubeTransparent /></div>
+              <div>
+                <b>{row.item_name}{row.variant_name ? ` (${row.variant_name})` : ""}</b>
+                <small>
+                  {row.stock_quantity ?? 0} in stock · {row.consumed_qty} sold · {row.restocked_qty} restocked (30d)
+                  {row.low_stock && <span style={{ color: "#c23434", fontWeight: 700 }}> · Low stock</span>}
+                  {!row.available && <span style={{ color: "#c23434", fontWeight: 700 }}> · Hidden from menu</span>}
+                </small>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button className="ghost" disabled={adjusting === key} onClick={() => adjust(row, -1)}>−1</button>
+                <button className="ghost" disabled={adjusting === key} onClick={() => adjust(row, 5)}>+5</button>
+                <button className="ghost" disabled={adjusting === key} onClick={() => {
+                  const n = Number(window.prompt("Adjust stock by how much? (negative to remove)", "0"));
+                  if (Number.isFinite(n) && n !== 0) adjust(row, n);
+                }}>Custom</button>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   BILLING: GST configuration, settlement report, payout history (doc Phase
+   3 "Vendor payout system" / "Settlement reports" / "Tax handling" /
+   "Refund reconciliation"). Payout GENERATION is admin-only
+   (generate_vendor_payout/mark_payout_paid) -- this panel is read-only for
+   the vendor plus their own self-editable GST config.
+========================================================= */
+
+function BillingPanel({ canteen, notify, onCanteenChanged }) {
+  const [gstRegistered, setGstRegistered] = useState(Boolean(canteen.gst_registered));
+  const [gstNumber, setGstNumber] = useState(canteen.gst_number || "");
+  const [savingGst, setSavingGst] = useState(false);
+
+  const [range, setRange] = useState(() => {
+    const end = new Date().toISOString().slice(0, 10);
+    const start = new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10);
+    return { start, end };
+  });
+  const [settlement, setSettlement] = useState([]);
+  const [payouts, setPayouts] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      const [s, p] = await Promise.all([
+        vendorApi.getSettlementReport(range.start, range.end),
+        vendorApi.listMyPayouts(canteen.id),
+      ]);
+      setSettlement(s);
+      setPayouts(p);
+    } catch (err) { notify(err.message || "Could not load billing data"); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { reload(); }, [canteen.id, range.start, range.end]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const settlementTotal = settlement.reduce((sum, r) => sum + Number(r.net_amount || 0), 0);
+
+  return (
+    <div>
+      <div className="section-head"><h2>GST configuration</h2></div>
+      <div className="form-grid" style={{ maxWidth: 420 }}>
+        <ToggleSwitch label="GST registered" checked={gstRegistered} onChange={setGstRegistered} />
+        {gstRegistered && (
+          <label>GSTIN<input value={gstNumber} onChange={(e) => setGstNumber(e.target.value)} placeholder="29ABCDE1234F1Z5" /></label>
+        )}
+      </div>
+      <button
+        className="ghost"
+        disabled={savingGst}
+        onClick={async () => {
+          try {
+            setSavingGst(true);
+            await vendorApi.updateCanteenGst(canteen.id, { gstRegistered, gstNumber });
+            notify("GST settings saved");
+            onCanteenChanged?.();
+          } catch (err) { notify(err.message || "Could not save GST settings"); } finally { setSavingGst(false); }
+        }}
+      >
+        Save GST settings
+      </button>
+
+      <div className="section-head" style={{ marginTop: 24 }}>
+        <h2>Settlement report</h2>
+      </div>
+      <div className="form-grid" style={{ maxWidth: 420 }}>
+        <label>From<input type="date" value={range.start} onChange={(e) => setRange((r) => ({ ...r, start: e.target.value }))} /></label>
+        <label>To<input type="date" value={range.end} onChange={(e) => setRange((r) => ({ ...r, end: e.target.value }))} /></label>
+      </div>
+
+      {loading ? <LoadingState label="Loading…" /> : (
+        <>
+          <div className="resource-row" style={{ marginTop: 12 }}>
+            <div><b>Net for this period</b><small>{settlement.length} line item{settlement.length === 1 ? "" : "s"} (orders minus completed refunds)</small></div>
+            <strong>₹{settlementTotal.toFixed(2)}</strong>
+          </div>
+          <div className="resource-list">
+            {settlement.map((row, i) => (
+              <article className="resource-row" key={`${row.order_id}-${row.row_type}-${i}`}>
+                <div className="resource-icon">{row.row_type === "refund" ? <HiArrowUturnLeft /> : <HiBanknotes />}</div>
+                <div><b>{row.description}</b><small>{row.occurred_on}</small></div>
+                <strong style={{ color: Number(row.net_amount) < 0 ? "#c23434" : undefined }}>₹{Number(row.net_amount).toFixed(2)}</strong>
+              </article>
+            ))}
+          </div>
+
+          <div className="section-head" style={{ marginTop: 24 }}><h2>Payout history</h2></div>
+          <div className="resource-list">
+            {payouts.length === 0 && <EmptyState title="No payouts yet" text="An admin generates payouts for a settlement period; they'll show up here once issued." />}
+            {payouts.map((p) => (
+              <article className="resource-row" key={p.id}>
+                <div className="resource-icon"><HiCurrencyRupee /></div>
+                <div>
+                  <b>{p.period_start} → {p.period_end}</b>
+                  <small>Gross ₹{p.gross_amount} · Fee ₹{p.platform_fee_amount} · Refunds ₹{p.refund_amount}</small>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <strong>₹{p.net_amount}</strong>
+                  <div><span className="listing-tag">{p.status}</span></div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -1405,7 +1787,7 @@ function ToggleSwitch({ checked, onChange, label }) {
    MENU ITEM EDITOR -- redesigned: sectioned form + live preview
 ========================================================= */
 
-function FoodItemForm({ item, canteenId, categories, onClose, onSaved, notify }) {
+function FoodItemForm({ item, canteenId, ownerId, categories, onClose, onSaved, notify }) {
   const [form, setForm] = useState({
     category_id: item.category_id || "",
     name: item.name || "", description: item.description || "", price: item.price ?? 0,
@@ -1414,10 +1796,43 @@ function FoodItemForm({ item, canteenId, categories, onClose, onSaved, notify })
     active: item.active !== false, featured: Boolean(item.featured),
     track_stock: Boolean(item.track_stock), stock_quantity: item.stock_quantity ?? "",
     low_stock_threshold: item.low_stock_threshold ?? 5,
+    dietary_tags_input: (item.dietary_tags || []).join(", "),
+    allergens_input: (item.allergens || []).join(", "),
+    spice_level: item.spice_level || "",
+    calories: item.calories ?? "",
+    available_days: item.available_days || null, // null = every day
+    available_from: item.available_from || "",
+    available_to: item.available_to || "",
   });
   const [saving, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const change = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const categoryName = categories.find((c) => c.id === form.category_id)?.name;
+
+  const toggleDay = (day) => {
+    setForm((f) => {
+      const current = f.available_days || [];
+      const has = current.includes(day);
+      const next = has ? current.filter((d) => d !== day) : [...current, day].sort();
+      return { ...f, available_days: next.length === 0 ? null : next };
+    });
+  };
+
+  const save = async () => {
+    try {
+      setSaving(true);
+      const saved = await vendorApi.upsertFoodItem({
+        ...item, ...form, canteen_id: canteenId,
+        dietary_tags: form.dietary_tags_input.split(",").map((s) => s.trim()).filter(Boolean),
+        allergens: form.allergens_input.split(",").map((s) => s.trim()).filter(Boolean),
+        available_days: form.available_days,
+        available_from: form.available_from || null,
+        available_to: form.available_to || null,
+      });
+      notify("Menu item saved");
+      onSaved(saved);
+    } catch (err) { notify(err.message || "Could not save item"); } finally { setSaving(false); }
+  };
 
   return (
     <Modal kicker="MENU" title={item.id ? "Edit menu item" : "New menu item"} onClose={onClose} className="item-form-modal">
@@ -1432,7 +1847,27 @@ function FoodItemForm({ item, canteenId, categories, onClose, onSaved, notify })
             </select>
           </label>
           <label>Description<textarea value={form.description} onChange={(e) => change("description", e.target.value)} placeholder="What's in it, how it's made…" /></label>
-          <label>Photo URL<input value={form.image_url} onChange={(e) => change("image_url", e.target.value)} placeholder="https://…" /></label>
+
+          <label>Photo
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              disabled={uploadingImage}
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file || !ownerId) return;
+                try {
+                  setUploadingImage(true);
+                  const url = await vendorApi.uploadFoodImage(file, ownerId);
+                  change("image_url", url);
+                  notify("Photo uploaded");
+                } catch (err) { notify(err.message || "Could not upload photo"); }
+                finally { setUploadingImage(false); }
+              }}
+            />
+          </label>
+          {uploadingImage && <small>Compressing &amp; uploading…</small>}
+          <label>Photo URL (or paste one instead)<input value={form.image_url} onChange={(e) => change("image_url", e.target.value)} placeholder="https://…" /></label>
 
           <div className="item-form-section-label">Pricing &amp; prep</div>
           <div className="form-grid">
@@ -1443,6 +1878,38 @@ function FoodItemForm({ item, canteenId, categories, onClose, onSaved, notify })
               </div>
             </label>
             <label>Prep time (min)<input type="number" min="1" value={form.preparation_time_min} onChange={(e) => change("preparation_time_min", e.target.value)} /></label>
+          </div>
+
+          <div className="item-form-section-label">Dietary &amp; allergen info</div>
+          <div className="form-grid">
+            <label>Dietary tags<input value={form.dietary_tags_input} onChange={(e) => change("dietary_tags_input", e.target.value)} placeholder="vegan, jain, gluten-free" /></label>
+            <label>Allergens<input value={form.allergens_input} onChange={(e) => change("allergens_input", e.target.value)} placeholder="nuts, dairy, gluten" /></label>
+            <label>Spice level
+              <select value={form.spice_level} onChange={(e) => change("spice_level", e.target.value)}>
+                <option value="">Not specified</option>
+                <option value="mild">Mild</option>
+                <option value="medium">Medium</option>
+                <option value="hot">Hot</option>
+                <option value="extra_hot">Extra hot</option>
+              </select>
+            </label>
+            <label>Calories<input type="number" min="0" value={form.calories} onChange={(e) => change("calories", e.target.value)} placeholder="e.g. 450" /></label>
+          </div>
+
+          <div className="item-form-section-label">Availability window</div>
+          <p style={{ color: "var(--muted)", fontSize: 12, marginTop: -6, marginBottom: 8 }}>
+            Leave days/times unset to serve this item whenever the canteen itself is open.
+          </p>
+          <div className="socialize-filter-row">
+            {WEEKDAYS.map((label, day) => (
+              <button key={day} type="button" className={(form.available_days || []).includes(day) ? "chip active" : "chip"} onClick={() => toggleDay(day)}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="form-grid">
+            <label>From<input type="time" value={form.available_from} onChange={(e) => change("available_from", e.target.value)} /></label>
+            <label>To<input type="time" value={form.available_to} onChange={(e) => change("available_to", e.target.value)} /></label>
           </div>
 
           <div className="item-form-section-label">Visibility</div>
@@ -1483,13 +1950,22 @@ function FoodItemForm({ item, canteenId, categories, onClose, onSaved, notify })
             className="primary wide"
             style={{ marginTop: 20 }}
             disabled={saving || !form.name.trim() || Number(form.price) < 0}
-            onClick={async () => {
-              try { setSaving(true); await vendorApi.upsertFoodItem({ ...item, ...form, canteen_id: canteenId }); notify("Menu item saved"); onSaved(); }
-              catch (err) { notify(err.message || "Could not save item"); } finally { setSaving(false); }
-            }}
+            onClick={save}
           >
             {saving ? "Saving…" : "Save item"}
           </button>
+
+          {item.id && (
+            <>
+              <VariantManager foodItemId={item.id} notify={notify} />
+              <AddonManager foodItemId={item.id} notify={notify} />
+            </>
+          )}
+          {!item.id && (
+            <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 12 }}>
+              Save this item first to add variants (Half/Full, sizes…) or add-ons (toppings, spice level…).
+            </p>
+          )}
         </div>
 
         <div className="item-form-preview">
@@ -1518,6 +1994,146 @@ function FoodItemForm({ item, canteenId, categories, onClose, onSaved, notify })
         </div>
       </div>
     </Modal>
+  );
+}
+
+/* =========================================================
+   VARIANTS + ADD-ONS management (doc Phase 3 "Menu variants" /
+   "Add-ons/modifiers") -- inline lists within the item editor, only shown
+   once the item has a real id to attach to.
+========================================================= */
+
+function VariantManager({ foodItemId, notify }) {
+  const [variants, setVariants] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState({ name: "", price: "" });
+  const [saving, setSaving] = useState(false);
+
+  const reload = async () => {
+    try { setLoading(true); setVariants(await vendorApi.listVariants(foodItemId)); }
+    catch (err) { notify(err.message || "Could not load variants"); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { reload(); }, [foodItemId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div style={{ marginTop: 20 }}>
+      <div className="item-form-section-label">Variants (e.g. Half / Full)</div>
+      {!loading && variants.map((v) => (
+        <div key={v.id} className="resource-row">
+          <div><b>{v.name}</b><small>₹{v.price}{!v.available ? " · unavailable" : ""}</small></div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button className="ghost" onClick={async () => {
+              await vendorApi.upsertVariant({ ...v, available: !v.available });
+              reload();
+            }}>{v.available ? "Hide" : "Show"}</button>
+            <button className="ghost" onClick={async () => {
+              if (!window.confirm(`Remove variant "${v.name}"?`)) return;
+              await vendorApi.deleteVariant(v.id);
+              notify("Variant removed");
+              reload();
+            }}><HiTrash /></button>
+          </div>
+        </div>
+      ))}
+      <div className="form-grid">
+        <label>Name<input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Full" /></label>
+        <label>Price<input type="number" min="0" step="0.01" value={form.price} onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))} /></label>
+      </div>
+      <button
+        className="ghost"
+        disabled={saving || !form.name.trim() || form.price === ""}
+        onClick={async () => {
+          try {
+            setSaving(true);
+            await vendorApi.upsertVariant({ food_item_id: foodItemId, name: form.name.trim(), price: form.price });
+            setForm({ name: "", price: "" });
+            await reload();
+          } catch (err) { notify(err.message || "Could not add variant"); } finally { setSaving(false); }
+        }}
+      >
+        <HiPlus /> Add variant
+      </button>
+    </div>
+  );
+}
+
+function AddonManager({ foodItemId, notify }) {
+  const [groups, setGroups] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [groupForm, setGroupForm] = useState({ name: "", min_select: 0, max_select: 1 });
+  const [optionForms, setOptionForms] = useState({}); // groupId -> {name, price_delta}
+
+  const reload = async () => {
+    try { setLoading(true); setGroups(await vendorApi.listAddonGroups(foodItemId)); }
+    catch (err) { notify(err.message || "Could not load add-ons"); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { reload(); }, [foodItemId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div style={{ marginTop: 20 }}>
+      <div className="item-form-section-label">Add-ons / modifiers (e.g. Toppings, Spice level)</div>
+      {!loading && groups.map((g) => (
+        <div key={g.id} className="resource-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <b>{g.name} <small>(choose {g.min_select}-{g.max_select})</small></b>
+            <button className="ghost" onClick={async () => {
+              if (!window.confirm(`Remove the "${g.name}" group and all its options?`)) return;
+              await vendorApi.deleteAddonGroup(g.id);
+              notify("Group removed");
+              reload();
+            }}><HiTrash /></button>
+          </div>
+          {(g.food_item_addon_options || []).map((o) => (
+            <div key={o.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <small>{o.name}{o.price_delta > 0 ? ` (+₹${o.price_delta})` : ""}</small>
+              <button className="ghost" onClick={async () => { await vendorApi.deleteAddonOption(o.id); reload(); }}><HiXMark /></button>
+            </div>
+          ))}
+          <div className="form-grid">
+            <input
+              placeholder="Option name"
+              value={optionForms[g.id]?.name || ""}
+              onChange={(e) => setOptionForms((f) => ({ ...f, [g.id]: { ...f[g.id], name: e.target.value } }))}
+            />
+            <input
+              type="number" min="0" step="0.01" placeholder="+₹"
+              value={optionForms[g.id]?.price_delta || ""}
+              onChange={(e) => setOptionForms((f) => ({ ...f, [g.id]: { ...f[g.id], price_delta: e.target.value } }))}
+            />
+          </div>
+          <button
+            className="ghost"
+            disabled={!optionForms[g.id]?.name?.trim()}
+            onClick={async () => {
+              await vendorApi.upsertAddonOption({ group_id: g.id, name: optionForms[g.id].name.trim(), price_delta: optionForms[g.id].price_delta || 0 });
+              setOptionForms((f) => ({ ...f, [g.id]: { name: "", price_delta: "" } }));
+              reload();
+            }}
+          >
+            <HiPlus /> Add option
+          </button>
+        </div>
+      ))}
+
+      <div className="form-grid">
+        <input placeholder="Group name (e.g. Toppings)" value={groupForm.name} onChange={(e) => setGroupForm((f) => ({ ...f, name: e.target.value }))} />
+        <input type="number" min="0" placeholder="Min select" value={groupForm.min_select} onChange={(e) => setGroupForm((f) => ({ ...f, min_select: e.target.value }))} />
+        <input type="number" min="1" placeholder="Max select" value={groupForm.max_select} onChange={(e) => setGroupForm((f) => ({ ...f, max_select: e.target.value }))} />
+      </div>
+      <button
+        className="ghost"
+        disabled={!groupForm.name.trim()}
+        onClick={async () => {
+          await vendorApi.upsertAddonGroup({ food_item_id: foodItemId, name: groupForm.name.trim(), min_select: groupForm.min_select, max_select: groupForm.max_select });
+          setGroupForm({ name: "", min_select: 0, max_select: 1 });
+          reload();
+        }}
+      >
+        <HiPlus /> Add group
+      </button>
+    </div>
   );
 }
 
@@ -1622,6 +2238,7 @@ const RATE_LABELS = { black_white: "Black & White (per page)", colour: "Colour (
 
 function PrintPricingManager({ rates, notify, onChanged }) {
   const [tab, setTab] = useState("dashboard");
+  const campusId = rates[0]?.campus_id;
 
   return (
     <section className="page-section admin-cms">
@@ -1636,22 +2253,29 @@ function PrintPricingManager({ rates, notify, onChanged }) {
       <div className="socialize-filter-row">
         <button className={tab === "dashboard" ? "chip active" : "chip"} onClick={() => setTab("dashboard")}>Dashboard</button>
         <button className={tab === "jobs" ? "chip active" : "chip"} onClick={() => setTab("jobs")}>Print Queue</button>
+        <button className={tab === "history" ? "chip active" : "chip"} onClick={() => setTab("history")}>Job History</button>
         <button className={tab === "pricing" ? "chip active" : "chip"} onClick={() => setTab("pricing")}>Pricing</button>
         <button className={tab === "analytics" ? "chip active" : "chip"} onClick={() => setTab("analytics")}>Analytics</button>
       </div>
 
-      {tab === "dashboard" && <PrintShopOverview notify={notify} onNavigate={setTab} />}
+      {tab === "dashboard" && <PrintShopOverview notify={notify} onNavigate={setTab} campusId={campusId} />}
 
       {tab === "jobs" && <PrintJobQueue notify={notify} />}
+
+      {tab === "history" && <PrintJobHistory notify={notify} />}
 
       {tab === "analytics" && <VendorAnalytics />}
 
       {tab === "pricing" && (
-        <div className="resource-list">
-          {rates.map((rate) => (
-            <PrintRateRow key={rate.id} rate={rate} notify={notify} onChanged={onChanged} />
-          ))}
-        </div>
+        <>
+          <div className="resource-list">
+            {rates.map((rate) => (
+              <PrintRateRow key={rate.id} rate={rate} notify={notify} onChanged={onChanged} />
+            ))}
+          </div>
+          <div className="item-form-section-label">Binding fees</div>
+          <PrintBindingRatesEditor notify={notify} campusId={campusId} />
+        </>
       )}
     </section>
   );
@@ -1662,14 +2286,81 @@ const PRINT_NEXT_STEP = {
   PROCESSING: { label: "Queue for printing", to: "QUEUED" },
   QUEUED: { label: "Start printing", to: "PRINTING" },
   PRINTING: { label: "Mark ready", to: "READY" },
-  READY: { label: "Mark collected", to: "COLLECTED" },
 };
+
+function PrintJobRowVendor({ job, notify, onChanged }) {
+  const [busy, setBusy] = useState(false);
+  const [pickupInput, setPickupInput] = useState("");
+
+  const transition = async (status, pickupCode) => {
+    try {
+      setBusy(true);
+      await vendorApi.transitionPrintJob(job.id, status, pickupCode);
+      notify(`Job ${job.file_name} → ${status}`);
+      onChanged();
+    } catch (err) {
+      notify(err.message || "Could not update this job");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openFile = async (mode) => {
+    try {
+      const url = await vendorApi.getPrintFileSignedUrl(job.file_url);
+      if (!url) { notify("This file is no longer available."); return; }
+      const win = window.open(url, "_blank", "noopener,noreferrer");
+      if (mode === "download" && win) win.document.title = job.file_name;
+    } catch (err) {
+      notify(err.message || "Could not open this file");
+    }
+  };
+
+  const next = PRINT_NEXT_STEP[job.status];
+
+  return (
+    <article className="resource-row">
+      <div className="resource-icon"><HiPrinter /></div>
+      <div>
+        <b>{job.file_name} · {job.status}</b>
+        <small>
+          {job.profiles?.name || "Student"} · {job.pages}pg × {job.copies} · {job.color_mode === "colour" ? "Colour" : "B&W"} ·{" "}
+          {job.paper_size}{job.duplex ? " · Duplex" : ""} · {job.binding !== "none" ? job.binding : "No binding"} · Pickup {job.pickup_code}
+        </small>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <button className="ghost" disabled={busy || !job.file_url} onClick={() => openFile("preview")}>Preview</button>
+        <button className="ghost" disabled={busy || !job.file_url} onClick={() => openFile("download")}>Download</button>
+        {next && (
+          <button className="primary" disabled={busy} onClick={() => transition(next.to)}>{next.label}</button>
+        )}
+        {job.status === "READY" && (
+          <>
+            <input
+              placeholder="Pickup code"
+              value={pickupInput}
+              onChange={(e) => setPickupInput(e.target.value)}
+              style={{ width: 100 }}
+            />
+            <button className="primary" disabled={busy || pickupInput.trim().length === 0} onClick={() => transition("COLLECTED", pickupInput.trim())}>
+              Confirm pickup
+            </button>
+          </>
+        )}
+        {job.status === "FAILED" ? (
+          <button disabled={busy} onClick={() => transition("QUEUED")}>Reprint</button>
+        ) : (
+          <button disabled={busy} onClick={() => transition("FAILED")}>Mark failed</button>
+        )}
+      </div>
+    </article>
+  );
+}
 
 function PrintJobQueue({ notify }) {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [busyId, setBusyId] = useState(null);
 
   const reload = async () => {
     try {
@@ -1688,46 +2379,160 @@ function PrintJobQueue({ notify }) {
     return unsubscribe;
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const act = async (job, status) => {
-    try {
-      setBusyId(job.id);
-      await vendorApi.setPrintJobStatus(job.id, status);
-      notify(`Job ${job.file_name} → ${status}`);
-      await reload();
-    } catch (err) {
-      notify(err.message || "Could not update this job");
-    } finally {
-      setBusyId(null);
-    }
-  };
-
   if (loading) return <LoadingState label="Loading print queue…" />;
   if (error) return <ErrorState text={error} onRetry={reload} />;
 
   return (
     <div className="resource-list">
       {jobs.length === 0 && <EmptyState icon={<HiPrinter />} title="No active jobs" text="New uploads will appear here." />}
-      {jobs.map((job) => {
-        const next = PRINT_NEXT_STEP[job.status];
-        return (
+      {jobs.map((job) => (
+        <PrintJobRowVendor key={job.id} job={job} notify={notify} onChanged={reload} />
+      ))}
+    </div>
+  );
+}
+
+function PrintJobHistory({ notify }) {
+  const [jobs, setJobs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      setJobs(await vendorApi.listPrintJobHistory({ limit: 50 }));
+    } catch (err) {
+      setError(err.message || "Could not load job history");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading) return <LoadingState label="Loading job history…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  return (
+    <div className="resource-list">
+      {jobs.length === 0 && <EmptyState icon={<HiPrinter />} title="No finished jobs yet" text="Collected, cancelled and failed jobs will show up here." />}
+      {jobs.map((job) =>
+        // FAILED sits in "history" (it's not an active queue status) but is
+        // still actionable -- transition_print_job supports FAILED->QUEUED
+        // reprint, so it needs the same row as the active queue (Preview/
+        // Download/Reprint), not a dead-end read-only row with no way back in.
+        job.status === "FAILED" ? (
+          <PrintJobRowVendor key={job.id} job={job} notify={notify} onChanged={reload} />
+        ) : (
           <article className="resource-row" key={job.id}>
+            <div className="resource-icon"><HiPrinter /></div>
             <div>
-              <b>{job.file_name} · {job.status}</b>
+              <b>{job.file_name}</b>
               <small>
-                {job.profiles?.name || "Student"} · {job.pages}pg × {job.copies} · {job.color_mode === "colour" ? "Colour" : "B&W"} ·{" "}
-                {job.binding !== "none" ? job.binding : "No binding"} · Pickup {job.pickup_code}
+                {job.profiles?.name || "Student"} · {job.pages}pg × {job.copies} · ₹{job.price} ·{" "}
+                {job.created_at ? new Date(job.created_at).toLocaleDateString() : ""}
               </small>
             </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {next && (
-                <button className="primary" disabled={busyId === job.id} onClick={() => act(job, next.to)}>{next.label}</button>
-              )}
-              <button disabled={busyId === job.id} onClick={() => act(job, "FAILED")}>Mark failed</button>
-            </div>
+            <strong>{job.status}</strong>
           </article>
-        );
-      })}
+        )
+      )}
     </div>
+  );
+}
+
+function PrintShopStatusToggle({ notify, campusId }) {
+  const [status, setStatus] = useState(null);
+  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!campusId) return;
+    vendorApi.getMyPrintShopStatus(campusId).then((row) => {
+      setStatus(row?.status || "online");
+      setMessage(row?.message || "");
+    }).catch(() => {});
+  }, [campusId]);
+
+  const set = async (nextStatus) => {
+    try {
+      setSaving(true);
+      const row = await vendorApi.setPrintShopStatus(nextStatus, message);
+      setStatus(row.status);
+      notify(`Printer status set to ${nextStatus}`);
+    } catch (err) {
+      notify(err.message || "Could not update printer status");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (status == null) return null;
+
+  return (
+    <div className="item-form-section" style={{ marginTop: 16 }}>
+      <div className="item-form-section-label">Printer status</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        {["online", "offline", "maintenance"].map((opt) => (
+          <button key={opt} className={status === opt ? "chip active" : "chip"} disabled={saving} onClick={() => set(opt)}>
+            {opt}
+          </button>
+        ))}
+        <input
+          placeholder="Optional note (e.g. out of toner)"
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          onBlur={() => status && set(status)}
+          style={{ flex: 1, minWidth: 180 }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function PrintBindingRatesEditor({ notify, campusId }) {
+  const [rates, setRates] = useState(null);
+  const [staple, setStaple] = useState("");
+  const [spiral, setSpiral] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!campusId) return;
+    vendorApi.getMyPrintBindingRates(campusId).then((row) => {
+      setRates(row);
+      setStaple(String(row?.staple_fee ?? 20));
+      setSpiral(String(row?.spiral_fee ?? 40));
+    }).catch(() => {});
+  }, [campusId]);
+
+  if (!rates) return null;
+
+  const save = async () => {
+    try {
+      setSaving(true);
+      await vendorApi.updatePrintBindingRates(rates.campus_id, { stapleFee: Number(staple), spiralFee: Number(spiral) });
+      notify("Binding fees updated");
+    } catch (err) {
+      notify(err.message || "Could not update binding fees");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <article className="resource-row">
+      <div className="resource-icon"><HiCurrencyRupee /></div>
+      <div>
+        <b>Binding fees</b>
+        <small>Applied once per copy on top of the per-page price</small>
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <label>Staple ₹<input type="number" min="0" value={staple} onChange={(e) => setStaple(e.target.value)} style={{ width: 70 }} /></label>
+        <label>Spiral ₹<input type="number" min="0" value={spiral} onChange={(e) => setSpiral(e.target.value)} style={{ width: 70 }} /></label>
+      </div>
+      <button className="primary" disabled={saving} onClick={save}>Save</button>
+    </article>
   );
 }
 

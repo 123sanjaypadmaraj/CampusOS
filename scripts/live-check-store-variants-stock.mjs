@@ -46,10 +46,17 @@ async function signIn(email, password) {
   return { sb, userId: data.user.id };
 }
 
-// Udupi's staging password isn't known to this script (see
-// .vendor-credentials.staging.local.json) -- reset it via the Admin API for
-// the duration of this one negative-RLS check. Staging-only account, no
-// real student/vendor depends on this password.
+// Udupi's staging password isn't fixed -- reset it via the Admin API for the
+// duration of this one negative-RLS check. IMPORTANT: this account is shared
+// with live-check-food-hardening.mjs/live-check-food-stock.mjs/
+// live-check-vendor-order-ops.mjs (all of which read the password back out of
+// vendorCredsFile rather than hardcoding it), plus anyone signing in on
+// staging by hand -- a reset with no corresponding write-back here previously
+// left the credentials file permanently stale relative to the account's real
+// password (production incident lesson: this caused cascading sign-in
+// failures in every one of those other scripts once this one had run first).
+// Always persist the new password to vendorCredsFile in the same call so it
+// stays the single source of truth for every script that reads it.
 async function adminResetPassword(userId, newPassword) {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userId}`, {
     method: "PUT",
@@ -61,6 +68,12 @@ async function adminResetPassword(userId, newPassword) {
     body: JSON.stringify({ password: newPassword }),
   });
   if (!res.ok) throw new Error(`Password reset failed for ${userId}: ${res.status} ${await res.text()}`);
+
+  const entry = vendorCreds.find((v) => v.userId === userId);
+  if (entry) {
+    entry.password = newPassword;
+    fs.writeFileSync(path.join(root, "scripts", vendorCredsFile), JSON.stringify(vendorCreds, null, 2));
+  }
 }
 
 async function main() {

@@ -68,6 +68,15 @@ export async function upsertFoodItem(item) {
     low_stock_threshold: Number.isFinite(Number(item.low_stock_threshold))
       ? Math.max(0, Math.floor(Number(item.low_stock_threshold)))
       : 5,
+    dietary_tags: Array.isArray(item.dietary_tags) ? item.dietary_tags : [],
+    allergens: Array.isArray(item.allergens) ? item.allergens : [],
+    spice_level: item.spice_level || null,
+    calories: item.calories !== "" && item.calories != null && Number.isFinite(Number(item.calories))
+      ? Math.max(0, Math.floor(Number(item.calories)))
+      : null,
+    available_days: Array.isArray(item.available_days) && item.available_days.length ? item.available_days : null,
+    available_from: item.available_from || null,
+    available_to: item.available_to || null,
   };
   const query = item.id
     ? supabase.from("food_items").update(payload).eq("id", item.id)
@@ -210,6 +219,7 @@ export {
   listOpenReports,
   getReportContext,
   moderateContent,
+  adminGetConversationMessages,
   resolveReport,
   listPendingOrgRequests,
   approveOrgRequest,
@@ -223,4 +233,21 @@ export {
   setErrorLogResolved,
   listPendingEmergencyContacts,
   verifyEmergencyContact,
+  setAiAccess,
+  listAiKnowledge,
+  upsertAiKnowledge,
+  deleteAiKnowledge,
+  getAiUsageSummary,
+  listAiReports,
+  getAuditLogs,
+  proposeRoleChange,
+  listRoleChangeRequests,
+  decideRoleChange,
+  listAccountDeletionRequests,
+  adminProcessAccountDeletion,
+  listBannedWords,
+  addBannedWord,
+  removeBannedWord,
+  listSuspensionAppeals,
+  resolveSuspensionAppeal,
 } from "../../services/mvpService";

@@ -13,11 +13,14 @@ import {
   HiMagnifyingGlassCircle,
   HiExclamationTriangle,
   HiPhone,
+  HiQuestionMarkCircle,
 } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
+import { StatTile } from "../../components/ui/Charts";
 import * as adminApi from "./api";
 import * as opportunitiesApi from "../../services/opportunitiesService";
 import * as teamsApi from "../teams/api";
+import { deleteMessage } from "../../services/messagingService";
 import AdminAnalytics from "./Analytics";
 import SosAlertsPanel from "../facilities/SosAlerts";
 
@@ -49,11 +52,13 @@ const TABS = [
   ["verifications", "Student Verifications"],
   ["emergencycontacts", "Emergency Contacts"],
   ["users", "Users"],
+  ["auditlog", "Audit Log"],
   ["moderation", "Moderation"],
   ["requests", "Requests"],
   ["lostfound", "Lost & Found"],
   ["opportunities", "Opportunities & Mentors"],
   ["teams", "Teams"],
+  ["ai", "AI Assistant"],
   ["errors", "Errors"],
 ];
 
@@ -89,11 +94,13 @@ export default function AdminCMS({ notify, campusId, authUser }) {
       {tab === "verifications" && <VerificationsTab notify={notify} campusId={campusId} authUser={authUser} />}
       {tab === "emergencycontacts" && <EmergencyContactsTab notify={notify} />}
       {tab === "users" && <UsersTab notify={notify} campusId={campusId} authUser={authUser} />}
+      {tab === "auditlog" && <AuditLogTab />}
       {tab === "moderation" && <ModerationTab notify={notify} authUser={authUser} />}
       {tab === "requests" && <RequestsTab notify={notify} campusId={campusId} />}
       {tab === "lostfound" && <LostFoundTab notify={notify} campusId={campusId} authUser={authUser} />}
       {tab === "opportunities" && <OpportunitiesMentorsTab notify={notify} campusId={campusId} />}
       {tab === "teams" && <TeamsAdminTab notify={notify} campusId={campusId} />}
+      {tab === "ai" && <AiAssistantTab notify={notify} campusId={campusId} />}
       {tab === "errors" && <ErrorLogsTab notify={notify} />}
     </section>
   );
@@ -191,6 +198,7 @@ function ModerationTab({ notify, authUser }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState(null);
+  const [openConversationReportId, setOpenConversationReportId] = useState(null);
 
   const reload = async () => {
     try {
@@ -279,6 +287,14 @@ function ModerationTab({ notify, authUser }) {
                   <button disabled={busyId === report.id} onClick={() => act(report, "remove")}>Remove</button>
                 </>
               )}
+              {report.target_type === "conversation" && (
+                <button
+                  disabled={busyId === report.id}
+                  onClick={() => setOpenConversationReportId((cur) => (cur === report.id ? null : report.id))}
+                >
+                  {openConversationReportId === report.id ? "Hide messages" : "View messages"}
+                </button>
+              )}
               {ctx && typeof ctx === "object" && (
                 <button
                   disabled={busyId === report.id}
@@ -289,9 +305,209 @@ function ModerationTab({ notify, authUser }) {
               )}
               <button disabled={busyId === report.id} onClick={() => act(report, "dismiss")}>Dismiss</button>
             </div>
+            {report.target_type === "conversation" && openConversationReportId === report.id && (
+              <ConversationModerationPanel conversationId={report.target_id} notify={notify} />
+            )}
           </article>
         );
       })}
+
+      <SuspensionAppealsPanel notify={notify} />
+      <BannedWordsPanel notify={notify} />
+    </div>
+  );
+}
+
+// Lets a suspended student ask for a human review instead of the suspension
+// being a dead end -- see submit_suspension_appeal()/resolve_suspension_appeal()
+// in 20260818000600_community_hardening.sql. Approving reactivates the
+// account through the same admin_set_user_status() path a manual
+// reactivation would use, so nothing here bypasses that audit trail.
+function SuspensionAppealsPanel({ notify }) {
+  const [appeals, setAppeals] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setAppeals(await adminApi.listSuspensionAppeals("pending"));
+    } catch (err) {
+      notify(err.message || "Could not load suspension appeals");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const decide = async (appeal, decision) => {
+    const note = decision === "denied" ? window.prompt("Note for this student (optional)?") || "" : "";
+    try {
+      setBusyId(appeal.id);
+      await adminApi.resolveSuspensionAppeal(appeal.id, decision, note);
+      notify(decision === "approved" ? `${appeal.appellant_name} reactivated` : "Appeal denied");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not resolve this appeal");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 32 }}>
+      <span className="section-kicker">SUSPENSION APPEALS</span>
+      {loading && <LoadingState label="Loading appeals…" />}
+      {!loading && appeals.length === 0 && (
+        <EmptyState icon={<HiShieldCheck />} title="No pending appeals" text="No suspended student is waiting on a review." />
+      )}
+      {!loading && appeals.map((appeal) => (
+        <article className="resource-row" key={appeal.id} style={{ alignItems: "flex-start" }}>
+          <div>
+            <b>{appeal.appellant_name}</b>
+            <small>Submitted {new Date(appeal.created_at).toLocaleString()}</small>
+            <small>&ldquo;{appeal.reason}&rdquo;</small>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button disabled={busyId === appeal.id} onClick={() => decide(appeal, "approved")}>Approve &amp; reactivate</button>
+            <button disabled={busyId === appeal.id} onClick={() => decide(appeal, "denied")}>Deny</button>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+// Admin-editable profanity word list -- posts_reject_profanity()/
+// comments_reject_profanity() (same migration) check every new post/comment
+// against this table server-side; this panel is the only way to extend it
+// beyond the seed list without a direct SQL edit.
+function BannedWordsPanel({ notify }) {
+  const [words, setWords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [newWord, setNewWord] = useState("");
+  const [busyWord, setBusyWord] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setWords(await adminApi.listBannedWords());
+    } catch (err) {
+      notify(err.message || "Could not load the profanity filter list");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const add = async () => {
+    if (!newWord.trim()) return;
+    try {
+      setBusyWord(newWord.trim());
+      await adminApi.addBannedWord(newWord.trim());
+      setNewWord("");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not add this word");
+    } finally {
+      setBusyWord(null);
+    }
+  };
+
+  const remove = async (word) => {
+    try {
+      setBusyWord(word);
+      await adminApi.removeBannedWord(word);
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not remove this word");
+    } finally {
+      setBusyWord(null);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 32 }}>
+      <span className="section-kicker">PROFANITY FILTER</span>
+      <p style={{ fontSize: "0.85rem", opacity: 0.8 }}>
+        Posts and comments containing any word below are rejected server-side before they save.
+      </p>
+      <div style={{ display: "flex", gap: 8, margin: "12px 0" }}>
+        <input
+          value={newWord}
+          onChange={(e) => setNewWord(e.target.value)}
+          placeholder="Add a word…"
+          style={{ flex: 1, padding: "6px 12px", borderRadius: "6px" }}
+        />
+        <button className="primary" disabled={!newWord.trim() || busyWord === newWord.trim()} onClick={add}>Add</button>
+      </div>
+      {loading && <LoadingState label="Loading…" />}
+      {!loading && (
+        <div className="chips">
+          {words.map((row) => (
+            <button key={row.word} className="chip" disabled={busyWord === row.word} onClick={() => remove(row.word)} title="Click to remove">
+              {row.word} ×
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Lets a moderator see the actual message history behind a conversation
+// report (not just the last-message snippet get_report_context() already
+// showed) and remove one specific offending message -- previously the only
+// options for a conversation report were Suspend-the-user or Dismiss, with
+// no way to touch the message itself. See admin_get_conversation_messages()/
+// delete_message() in 20260817001000_message_delete_moderation.sql.
+function ConversationModerationPanel({ conversationId, notify }) {
+  const [messages, setMessages] = useState(null);
+  const [busyId, setBusyId] = useState(null);
+
+  const reload = () => {
+    adminApi
+      .adminGetConversationMessages(conversationId)
+      .then(setMessages)
+      .catch((err) => notify(err.message || "Could not load these messages"));
+  };
+
+  useEffect(() => { reload(); }, [conversationId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const remove = async (messageId) => {
+    try {
+      setBusyId(messageId);
+      await deleteMessage(messageId);
+      notify("Message removed");
+      reload();
+    } catch (err) {
+      notify(err.message || "Could not remove this message");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (messages === null) return <p style={{ fontSize: 12, color: "var(--muted)" }}>Loading messages…</p>;
+  if (messages.length === 0) return <p style={{ fontSize: 12, color: "var(--muted)" }}>No messages in this conversation.</p>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, width: "100%", marginTop: 8 }}>
+      {[...messages].reverse().map((m) => (
+        <div key={m.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12, borderTop: "1px solid var(--border)", paddingTop: 6 }}>
+          <span>
+            <b>{m.sender_name}</b>{" "}
+            {m.deleted_at
+              ? <i style={{ color: "var(--muted)" }}>(deleted)</i>
+              : m.body || (m.attachment_path ? "📷 Photo" : "(no text)")}
+            {" · "}{new Date(m.created_at).toLocaleString()}
+          </span>
+          {!m.deleted_at && (
+            <button disabled={busyId === m.id} onClick={() => remove(m.id)}>Remove</button>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -309,6 +525,7 @@ function UsersTab({ notify, campusId, authUser }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState(null);
+  const [requestsRefreshKey, setRequestsRefreshKey] = useState(0);
 
   const reload = async () => {
     try {
@@ -324,16 +541,38 @@ function UsersTab({ notify, campusId, authUser }) {
 
   useEffect(() => { reload(); }, [campusId, roleFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Role-escalation fix: admin_set_user_role() is now super_admin-only
+  // (only super_admin holds 'users.roles.manage'). A college_admin can no
+  // longer change a role instantly -- they propose it, and a DIFFERENT admin
+  // has to approve via the "Pending role requests" list below.
+  const isSuperAdmin = authUser?.role === "super_admin";
+
   const changeRole = async (user, newRole) => {
     if (newRole === user.role) return;
-    if (!window.confirm(`Change ${user.name}'s role from ${user.role} to ${newRole}?`)) return;
+    if (isSuperAdmin) {
+      if (!window.confirm(`Change ${user.name}'s role from ${user.role} to ${newRole}?`)) return;
+      try {
+        setBusyId(user.id);
+        await adminApi.setUserRole(user.id, newRole);
+        notify(`${user.name} is now ${newRole}`);
+        await reload();
+      } catch (err) {
+        notify(err.message || "Could not change role");
+      } finally {
+        setBusyId(null);
+      }
+      return;
+    }
+
+    const reason = window.prompt(`Why should ${user.name}'s role change from ${user.role} to ${newRole}? (A different admin must approve this.)`);
+    if (reason === null) return;
     try {
       setBusyId(user.id);
-      await adminApi.setUserRole(user.id, newRole);
-      notify(`${user.name} is now ${newRole}`);
-      await reload();
+      await adminApi.proposeRoleChange(user.id, newRole, reason);
+      notify(`Role change submitted for approval (${user.name} → ${newRole})`);
+      setRequestsRefreshKey((k) => k + 1);
     } catch (err) {
-      notify(err.message || "Could not change role");
+      notify(err.message || "Could not submit role change");
     } finally {
       setBusyId(null);
     }
@@ -353,6 +592,29 @@ function UsersTab({ notify, campusId, authUser }) {
       await reload();
     } catch (err) {
       notify(err.message || "Could not change account status");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // AI abuse-prevention kill-switch (doc "AI" checklist) -- independent of
+  // account suspension, since a student can otherwise misbehave
+  // specifically in the assistant (e.g. sustained prompt-injection probing)
+  // without warranting a full account suspension.
+  const toggleAiAccess = async (user) => {
+    const nextBlocked = !user.ai_blocked;
+    let reason;
+    if (nextBlocked) {
+      reason = window.prompt(`Reason for blocking ${user.name}'s AI access?`);
+      if (reason === null) return;
+    }
+    try {
+      setBusyId(user.id);
+      await adminApi.setAiAccess(user.id, nextBlocked, reason);
+      notify(nextBlocked ? `${user.name}'s AI access blocked` : `${user.name}'s AI access restored`);
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not change AI access");
     } finally {
       setBusyId(null);
     }
@@ -395,6 +657,7 @@ function UsersTab({ notify, campusId, authUser }) {
                 {user.status === "suspended" && user.suspended_reason && (
                   <small>Reason: {user.suspended_reason}</small>
                 )}
+                {user.ai_blocked && <small>AI access blocked{user.ai_blocked_reason ? `: ${user.ai_blocked_reason}` : ""}</small>}
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <select
@@ -410,11 +673,147 @@ function UsersTab({ notify, campusId, authUser }) {
                 >
                   {user.status === "suspended" ? "Reactivate" : "Suspend"}
                 </button>
+                <button disabled={busyId === user.id} onClick={() => toggleAiAccess(user)}>
+                  {user.ai_blocked ? "Unblock AI" : "Block AI"}
+                </button>
               </div>
             </article>
           ))}
         </div>
       )}
+
+      <PendingRoleChangeRequests notify={notify} authUser={authUser} refreshKey={requestsRefreshKey} onDecided={reload} />
+      <PendingAccountDeletionRequests notify={notify} />
+    </div>
+  );
+}
+
+// Role-assignment approval (doc "Admin" checklist item) -- the review queue
+// for proposals filed by changeRole() above. A proposer can't approve their
+// own request (server-enforced too; the button is just hidden here to match).
+function PendingRoleChangeRequests({ notify, authUser, refreshKey, onDecided }) {
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setRequests(await adminApi.listRoleChangeRequests("pending"));
+    } catch (err) {
+      notify(err.message || "Could not load role change requests");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const decide = async (req, approve) => {
+    const reason = approve
+      ? null
+      : window.prompt(`Why reject promoting ${req.target?.name || "this user"} to ${req.requested_role}? (optional)`);
+    if (!approve && reason === null) return;
+    if (approve && !window.confirm(`Approve promoting ${req.target?.name || "this user"} to ${req.requested_role}?`)) return;
+    try {
+      setBusyId(req.id);
+      await adminApi.decideRoleChange(req.id, approve, reason);
+      notify(approve ? "Role change approved" : "Role change rejected");
+      await reload();
+      await onDecided?.();
+    } catch (err) {
+      notify(err.message || "Could not decide role change");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (loading || requests.length === 0) return null;
+
+  return (
+    <div style={{ marginTop: 24 }}>
+      <span className="section-kicker">PENDING ROLE CHANGE REQUESTS</span>
+      <div className="resource-list" style={{ marginTop: 8 }}>
+        {requests.map((req) => {
+          const isOwnProposal = req.requested_by === authUser?.id;
+          return (
+            <article className="resource-row" key={req.id}>
+              <div className="resource-icon"><HiUserGroup /></div>
+              <div>
+                <b>{req.target?.name || "Unknown user"} → {req.requested_role}</b>
+                <small>Proposed by {req.proposer?.name || "an admin"} · currently {req.target?.role}</small>
+                {req.reason && <small>Reason: {req.reason}</small>}
+                {isOwnProposal && <small>Awaiting approval from a different admin</small>}
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button disabled={isOwnProposal || busyId === req.id} onClick={() => decide(req, true)}>Approve</button>
+                <button disabled={isOwnProposal || busyId === req.id} onClick={() => decide(req, false)}>Reject</button>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Account deletion requests (doc "Student" checklist item).
+function PendingAccountDeletionRequests({ notify }) {
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setRequests(await adminApi.listAccountDeletionRequests("pending"));
+    } catch (err) {
+      notify(err.message || "Could not load deletion requests");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const process = async (req, action) => {
+    const label = action === "complete" ? "delete" : "reject the deletion of";
+    const note = window.prompt(`Note for this decision (optional) -- about to ${label} ${req.profiles?.name || "this account"}:`);
+    if (note === null && !window.confirm(`Continue without a note?`)) return;
+    if (action === "complete" && !window.confirm(`This permanently soft-deletes ${req.profiles?.name || "this account"}. Continue?`)) return;
+    try {
+      setBusyId(req.id);
+      await adminApi.adminProcessAccountDeletion(req.id, action, note || null);
+      notify(action === "complete" ? "Account deleted" : "Deletion request rejected");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not process deletion request");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (loading || requests.length === 0) return null;
+
+  return (
+    <div style={{ marginTop: 24 }}>
+      <span className="section-kicker">PENDING ACCOUNT DELETION REQUESTS</span>
+      <div className="resource-list" style={{ marginTop: 8 }}>
+        {requests.map((req) => (
+          <article className="resource-row" key={req.id}>
+            <div className="resource-icon"><HiXCircle /></div>
+            <div>
+              <b>{req.profiles?.name || "Unknown user"}</b>
+              <small>{req.profiles?.email || "no email"} · {req.profiles?.usn || "no USN"} · requested {new Date(req.requested_at).toLocaleDateString()}</small>
+              {req.reason && <small>Reason: {req.reason}</small>}
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button disabled={busyId === req.id} onClick={() => process(req, "complete")}>Delete account</button>
+              <button disabled={busyId === req.id} onClick={() => process(req, "reject")}>Reject</button>
+            </div>
+          </article>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1666,6 +2065,252 @@ function ErrorLogsTab({ notify }) {
             </article>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+/* =========================================================
+   AI ASSISTANT (doc "AI" checklist -- trust & quality + feedback loop +
+   analytics). The abuse-prevention kill-switch is per-user, so it lives on
+   the Users tab instead (see toggleAiAccess above) -- this tab is usage
+   analytics, reported answers, and the admin-controlled knowledge base
+   (supabase/migrations/20260817001300_ai_hardening.sql).
+========================================================= */
+
+function AiAssistantTab({ notify, campusId }) {
+  const [summary, setSummary] = useState(null);
+  const [reports, setReports] = useState([]);
+  const [knowledge, setKnowledge] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [form, setForm] = useState({ id: null, question: "", answer: "", global: true });
+  const [saving, setSaving] = useState(false);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      const [s, r, k] = await Promise.all([
+        adminApi.getAiUsageSummary(30),
+        adminApi.listAiReports(20),
+        adminApi.listAiKnowledge(),
+      ]);
+      setSummary(s);
+      setReports(r);
+      setKnowledge(k);
+    } catch (err) {
+      setError(err.message || "Could not load AI data");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const resetForm = () => setForm({ id: null, question: "", answer: "", global: true });
+  const editEntry = (entry) => setForm({ id: entry.id, question: entry.question, answer: entry.answer, global: !entry.campus_id });
+
+  const saveEntry = async () => {
+    if (!form.question.trim() || !form.answer.trim()) {
+      notify("Question and answer are both required");
+      return;
+    }
+    try {
+      setSaving(true);
+      await adminApi.upsertAiKnowledge({
+        id: form.id,
+        question: form.question,
+        answer: form.answer,
+        campusId: form.global ? null : campusId,
+        active: true,
+      });
+      notify(form.id ? "Knowledge entry updated" : "Knowledge entry added");
+      resetForm();
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not save entry");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeEntry = async (entry) => {
+    if (!window.confirm(`Remove "${entry.question}"?`)) return;
+    try {
+      await adminApi.deleteAiKnowledge(entry.id);
+      notify("Knowledge entry removed");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not remove entry");
+    }
+  };
+
+  const toggleActive = async (entry) => {
+    try {
+      await adminApi.upsertAiKnowledge({ id: entry.id, question: entry.question, answer: entry.answer, campusId: entry.campus_id, active: !entry.active });
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not update entry");
+    }
+  };
+
+  if (loading) return <LoadingState label="Loading AI data…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  return (
+    <div>
+      <span className="section-kicker">USAGE -- LAST 30 DAYS</span>
+      {summary && (
+        <div className="analytics-grid" style={{ marginBottom: 24 }}>
+          <StatTile label="Messages" value={summary.messages} sub={`${summary.unique_users} unique students`} />
+          <StatTile label="Total tokens" value={summary.total_tokens} sub={`${summary.avg_tokens_per_message} avg/message`} />
+          <StatTile label="Fell back to backup model" value={summary.fallback_count} />
+          <StatTile label="Feedback" value={`${summary.feedback_up} 👍 / ${summary.feedback_down} 👎`} sub={`${summary.reports_open} reported`} />
+          <StatTile label="AI-blocked users" value={summary.blocked_users} />
+        </div>
+      )}
+
+      <span className="section-kicker">REPORTED ANSWERS</span>
+      <div className="resource-list" style={{ margin: "12px 0 24px" }}>
+        {reports.length === 0 && <EmptyState title="No reported answers" />}
+        {reports.map((r) => (
+          <article className="resource-row" key={r.id}>
+            <div>
+              <b>{r.user_name || "Unknown student"}</b>
+              <small>&ldquo;{r.message_excerpt}&rdquo;</small>
+              {r.report_reason && <small>Reason: {r.report_reason}</small>}
+              <small>{new Date(r.created_at).toLocaleString()}</small>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      <span className="section-kicker">KNOWLEDGE BASE</span>
+      <p style={{ fontSize: 12, color: "var(--muted)", margin: "6px 0 12px" }}>
+        Campus-specific facts/FAQs the assistant can draw on (wifi password, hostel rules, library hours, and
+        similar) -- doesn&rsquo;t touch the model or its tool code.
+      </p>
+
+      <div className="feature-modal" style={{ maxWidth: 480, margin: "0 0 16px", padding: 16, position: "static" }}>
+        <label>
+          Question
+          <input value={form.question} onChange={(e) => setForm((f) => ({ ...f, question: e.target.value }))} placeholder="e.g. What's the hostel wifi password?" />
+        </label>
+        <label style={{ display: "block", marginTop: 10 }}>
+          Answer
+          <textarea value={form.answer} onChange={(e) => setForm((f) => ({ ...f, answer: e.target.value }))} rows={3} style={{ width: "100%" }} />
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10 }}>
+          <input type="checkbox" checked={form.global} onChange={(e) => setForm((f) => ({ ...f, global: e.target.checked }))} />
+          Global (every campus, not just this one)
+        </label>
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <button className="primary" disabled={saving} onClick={saveEntry}>{form.id ? "Update" : "Add"} entry</button>
+          {form.id && <button className="ghost" onClick={resetForm}>Cancel edit</button>}
+        </div>
+      </div>
+
+      <div className="resource-list">
+        {knowledge.length === 0 && <EmptyState title="No knowledge base entries yet" />}
+        {knowledge.map((entry) => (
+          <article className="resource-row" key={entry.id}>
+            <div className="resource-icon"><HiQuestionMarkCircle /></div>
+            <div>
+              <b>{entry.question} {!entry.active && <span className="social-type">INACTIVE</span>}</b>
+              <small>{entry.answer}</small>
+              <small>{entry.campus_id ? "This campus only" : "Global"}</small>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => editEntry(entry)}><HiPencilSquare /></button>
+              <button onClick={() => toggleActive(entry)}>{entry.active ? "Deactivate" : "Activate"}</button>
+              <button onClick={() => removeEntry(entry)}><HiTrash /></button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   AUDIT LOG (doc "Admin" checklist: "Admin activity audit")
+   The logging side (audit_logs table, written to by admin_set_user_role/
+   admin_set_user_status/approve_org_request/transition_order_status/etc.)
+   has existed since 20260814000200_rbac.sql, and getAuditLogs() has existed
+   since the AI-hardening pass -- but no UI ever called it, so the audit
+   trail was invisible to every admin. This is that viewer.
+========================================================= */
+
+function AuditLogTab() {
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [actionFilter, setActionFilter] = useState("");
+  const [limit, setLimit] = useState(50);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      setLogs(await adminApi.getAuditLogs(limit));
+    } catch (err) {
+      setError(err.message || "Could not load the audit log");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, [limit]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const actionTypes = [...new Set(logs.map((l) => l.action))].sort();
+  const filtered = actionFilter ? logs.filter((l) => l.action === actionFilter) : logs;
+
+  if (loading) return <LoadingState label="Loading audit log…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  return (
+    <div>
+      <div className="section-head">
+        <h2>Admin activity audit</h2>
+        <p>Every privileged action (role/status changes, moderation, order/refund overrides, org approvals…) that writes to audit_logs.</p>
+      </div>
+
+      {actionTypes.length > 0 && (
+        <div className="chips" style={{ marginBottom: 16 }}>
+          <button className={actionFilter === "" ? "chip active" : "chip"} onClick={() => setActionFilter("")}>All actions</button>
+          {actionTypes.map((action) => (
+            <button key={action} className={actionFilter === action ? "chip active" : "chip"} onClick={() => setActionFilter(action)}>
+              {action}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="resource-list">
+        {filtered.length === 0 && <EmptyState title="No audit log entries yet" />}
+        {filtered.map((entry) => (
+          <article className="resource-row" key={entry.id}>
+            <div className="resource-icon"><HiDocumentText /></div>
+            <div>
+              <b>{entry.action}{entry.entity_type ? ` · ${entry.entity_type}` : ""}</b>
+              <small>{new Date(entry.created_at).toLocaleString()} · actor {entry.actor_id || "system"}{entry.actor_role ? ` (${entry.actor_role})` : ""}</small>
+              {entry.reason && <small>Reason: {entry.reason}</small>}
+              {(entry.old_value || entry.new_value) && (
+                <small>
+                  {entry.old_value ? `From ${JSON.stringify(entry.old_value)} ` : ""}
+                  {entry.new_value ? `To ${JSON.stringify(entry.new_value)}` : ""}
+                </small>
+              )}
+            </div>
+          </article>
+        ))}
+      </div>
+
+      {logs.length >= limit && (
+        <button className="ghost" style={{ marginTop: 12 }} onClick={() => setLimit((l) => l + 50)}>
+          Load more
+        </button>
       )}
     </div>
   );
