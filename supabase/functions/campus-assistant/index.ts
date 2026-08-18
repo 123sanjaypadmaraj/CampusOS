@@ -36,10 +36,12 @@ import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 
 // llama-3.3-70b-versatile was retired by Groq on 2026-08-17 (confirmed via
 // the Groq console: every call started 404ing with `model_not_found` from
-// ~18:54 that day onward, last successful call 00:15 the same day) --
-// llama-3.1-70b-versatile is Groq's other current flagship tool-calling
-// model and the standard replacement.
-const GROQ_MODEL = "llama-3.1-70b-versatile";
+// ~18:54 that day onward, last successful call 00:15 the same day). The
+// presumed replacement, llama-3.1-70b-versatile, ALSO 404'd -- Groq's
+// lineup had moved on further than expected. openai/gpt-oss-120b confirmed
+// via the user's own Groq console (console.groq.com) as a model actually
+// listed as available right now.
+const GROQ_MODEL = "openai/gpt-oss-120b";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const MAX_TOOL_ROUNDS = 4;
 const MAX_HISTORY_MESSAGES = 12; // caller's own chat history, trimmed to keep requests small/fast
