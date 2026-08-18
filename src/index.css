@@ -5545,6 +5545,22 @@
 .push-toggle-row small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; max-width: 480px; }
 .notification-card.clickable:hover { background: var(--surface-2); }
 
+.notification-prefs { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px 18px; margin-bottom: 22px; display: flex; flex-direction: column; gap: 2px; }
+.notification-prefs .section-kicker { margin-bottom: 8px; }
+.notification-pref-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 9px 0; border-top: 1px solid var(--border); }
+.notification-pref-row:first-of-type { border-top: none; }
+.notification-pref-row b { display: block; font-size: 13px; }
+.notification-pref-row small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+.notification-pref-row input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--purple); }
+
+.quiet-hours-range { display: flex; gap: 20px; padding: 10px 0 4px; }
+.quiet-hours-range label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); }
+.quiet-hours-range input[type="time"] { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 13px; background: var(--bg); color: var(--text); }
+
+.contact-recovery-row { display: flex; gap: 8px; align-items: center; }
+.contact-recovery-row input { flex: 1; }
+.contact-recovery-row .chip { flex-shrink: 0; }
+
 /* =========================================================
    FACILITIES: VERIFY PASS
 ========================================================= */

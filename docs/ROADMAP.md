@@ -63,9 +63,25 @@ but the project owner can provide:
   `.github/workflows/uptime.yml`. See `docs/DEPLOYMENT.md`.
 - **§24 Real (non-test) payment gateway.** Still needs a business KYC'd
   Razorpay/Cashfree account — both environments run Razorpay test mode.
-- **§47, §49 Real email/SMS/push providers.** Needs accounts + API keys.
-  (Web push notifications *are* real and working, via VAPID — no account
-  needed for that specific channel.)
+- **§47, §49 Real email/SMS/push providers — code built and ready to wire
+  in as of 2026-08-17, still needs the project owner's own provider
+  accounts + API keys before anything actually sends.** Web push
+  notifications *are* fully real and working today (VAPID, no account
+  needed) including subscription cleanup on a dead endpoint and delivery
+  tracking/retry. Email (Resend) and SMS (Fast2SMS — chosen because it
+  needs no DLT registration, unlike every other India SMS route) both have
+  complete, tested integrations — `notification_preferences.channel_email`/
+  `channel_sms` toggles, delivery-tracking rows, retry sweep, quiet hours,
+  emergency alerts bypassing the opt-in — but `send-email`/`send-sms`
+  return `GATEWAY_NOT_CONFIGURED` until `RESEND_API_KEY`/`FAST2SMS_API_KEY`
+  are set via `supabase secrets set`. Email verification + password
+  recovery for USN+password accounts (whose login email is a synthetic,
+  never-shown address) is also built end-to-end, gated behind the same
+  Resend key. See `supabase/migrations/20260817001700_notification_delivery_infra.sql`
+  through `20260817002200_contact_recovery.sql`,
+  `supabase/functions/{send-email,send-sms,request-password-reset,confirm-password-reset}`,
+  `src/services/{pushService,contactService}.js`. Not yet applied/deployed
+  to any environment.
 - **§94 dev/staging/prod Supabase separation — done as of 2026-08-15.**
   See `docs/ENVIRONMENTS.md` for the full split (separate projects, separate
   Vercel Preview/Production env vars, `scripts/env-target.mjs` defaulting

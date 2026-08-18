@@ -35,9 +35,11 @@ Deno.serve(async (req: Request) => {
   }
 
   let notificationId: string | undefined;
+  let deliveryId: string | undefined;
   try {
     const body = await req.json();
     notificationId = body?.notification_id;
+    deliveryId = body?.delivery_id;
   } catch {
     return json({ code: "BAD_REQUEST", message: "Invalid JSON body" }, 400);
   }
@@ -49,6 +51,13 @@ Deno.serve(async (req: Request) => {
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const admin = createClient(supabaseUrl, serviceKey);
 
+  // Delivery tracking (20260817001300/1600) -- best-effort, never lets a
+  // tracking failure mask the real push result.
+  const reportResult = async (status: "sent" | "failed" | "skipped", error?: string) => {
+    if (!deliveryId) return;
+    await admin.rpc("mark_delivery_result", { p_delivery_id: deliveryId, p_status: status, p_error: error ?? null }).catch(() => {});
+  };
+
   const { data: notif, error: notifError } = await admin
     .from("notifications")
     .select("id, user_id, type, title, body, action_type, action_id")
@@ -56,6 +65,7 @@ Deno.serve(async (req: Request) => {
     .single();
 
   if (notifError || !notif) {
+    await reportResult("failed", "Notification not found");
     return json({ code: "NOT_FOUND", message: "Notification not found" }, 404);
   }
 
@@ -70,6 +80,7 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
 
   if (pref && pref.channel_push === false) {
+    await reportResult("skipped", "channel_push disabled");
     return json({ code: "SKIPPED_PREFERENCE" }, 200);
   }
 
@@ -79,6 +90,7 @@ Deno.serve(async (req: Request) => {
     .eq("user_id", notif.user_id);
 
   if (!subs?.length) {
+    await reportResult("skipped", "no push subscriptions on this account");
     return json({ code: "NO_SUBSCRIPTIONS" }, 200);
   }
 
@@ -88,6 +100,7 @@ Deno.serve(async (req: Request) => {
 
   if (!vapidPublic || !vapidPrivate) {
     console.error("VAPID keys are not configured -- push cannot be delivered.");
+    await reportResult("failed", "VAPID keys not configured");
     return json({ code: "GATEWAY_NOT_CONFIGURED" }, 503);
   }
 
@@ -129,6 +142,12 @@ Deno.serve(async (req: Request) => {
   );
 
   await Promise.allSettled(stalePrunes);
+
+  if (sent > 0) {
+    await reportResult("sent");
+  } else {
+    await reportResult("failed", `delivery failed to all ${subs.length} subscription(s)`);
+  }
 
   return json({ code: "OK", sent, total: subs.length }, 200);
 });

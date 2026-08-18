@@ -117,7 +117,23 @@ import {
   SEARCH_FILTER_GROUPS,
 } from "./services/searchService";
 import { mintCampusPass } from "./services/campusPassService";
-import { subscribeToPush, unsubscribeFromPush, getPushSubscriptionStatus, isPushSupported } from "./services/pushService";
+import {
+  subscribeToPush,
+  unsubscribeFromPush,
+  getPushSubscriptionStatus,
+  isPushSupported,
+  getNotificationCategoryPreferences,
+  setNotificationCategoryPreference,
+  getNotificationChannelPreferences,
+  setNotificationChannelPreference,
+  setQuietHours,
+} from "./services/pushService";
+import {
+  requestContactEmailVerification,
+  confirmContactEmailVerification,
+  requestPasswordReset,
+  confirmPasswordReset,
+} from "./services/contactService";
 import QRCode from "qrcode";
 import {
   getStores,
@@ -251,6 +267,7 @@ const ROUTABLE_KEYS = new Set([
   "map", "legal", "people", "clubs", "food", "store", "ai", "admin", "vendor",
   "facilities", "autonomous", "calendar", "notifications", "activity",
   "print", "issues", "booking", "lost", "market", "pass", "hostel", "delivery", "academics",
+  "verify-email", "reset-password",
 ]);
 
 // A vendor account (canteen or print shop) is a purpose-built ordering
@@ -260,7 +277,7 @@ const ROUTABLE_KEYS = new Set([
 // how a swiggy/zomato vendor can see their details"). Only their dashboard,
 // profile, notifications (order alerts), and the legal page Profile links
 // to stay reachable; everything else bounces back to the dashboard below.
-const VENDOR_ALLOWED_KEYS = new Set(["vendor", "profile", "notifications", "legal"]);
+const VENDOR_ALLOWED_KEYS = new Set(["vendor", "profile", "notifications", "legal", "verify-email", "reset-password"]);
 
 const keyToPath = (key) => (key === "home" ? "/" : `/${key}`);
 
@@ -2164,6 +2181,14 @@ function App() {
       return <LegalPage go={go} />;
     }
 
+    if (active === "verify-email") {
+      return <VerifyEmailPage go={go} />;
+    }
+
+    if (active === "reset-password") {
+      return <ResetPasswordPage go={go} notify={notify} />;
+    }
+
     if (active === "people") {
       return (
         <People notify={notify} people={people} campusId={campusId} authUser={authUser} openLogin={() => setLoginOpen(true)} onOpenConversation={goToConversation} />
@@ -2259,6 +2284,7 @@ function App() {
           notify={notify}
           onOpenConversation={goToConversation}
           authUser={authUser}
+          profile={profile}
         />
       );
     }
@@ -4923,6 +4949,103 @@ function StoreProductCard({ item, addStore }) {
   );
 }
 
+// A real, reachable email + phone -- needed for password recovery
+// (USN+password accounts have no real inbox on auth.users.email, see
+// mvpService.js's usnToEmail()) and for the Email/SMS notification channel
+// toggles in Notifications settings, which stay disabled until these are
+// filled in (see NotificationChannelPanel). profiles.phone already existed
+// (added for event-registration contact details) but was never surfaced
+// here directly.
+function ContactRecoveryPanel({ profile, onProfileUpdated, notify }) {
+  const [email, setEmail] = useState(profile?.contact_email || "");
+  const [phone, setPhone] = useState(profile?.phone || "");
+  const [sendingVerify, setSendingVerify] = useState(false);
+  const [savingPhone, setSavingPhone] = useState(false);
+
+  useEffect(() => { setEmail(profile?.contact_email || ""); }, [profile?.contact_email]);
+  useEffect(() => { setPhone(profile?.phone || ""); }, [profile?.phone]);
+
+  if (!profile) return null;
+
+  const isVerified = !!profile.contact_email_verified_at;
+  const isPending = !!profile.contact_email && !isVerified;
+
+  const handleSendVerification = async () => {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes("@")) { notify("Enter a valid email address"); return; }
+    try {
+      setSendingVerify(true);
+      await requestContactEmailVerification(cleanEmail);
+      onProfileUpdated({ ...profile, contact_email: cleanEmail, contact_email_verified_at: null });
+      notify("Verification email sent -- check your inbox");
+    } catch (error) {
+      notify(error.message || "Could not send verification email");
+    } finally {
+      setSendingVerify(false);
+    }
+  };
+
+  const handleSavePhone = async () => {
+    const trimmed = phone.trim();
+    if (trimmed === (profile?.phone || "")) return;
+    if (trimmed && !/^\+?[0-9\s-]{7,15}$/.test(trimmed)) { notify("Enter a valid phone number"); return; }
+    try {
+      setSavingPhone(true);
+      const next = await updateProfile(profile.id, { phone: trimmed || null });
+      onProfileUpdated(next);
+    } catch (error) {
+      notify(error.message || "Could not save phone number");
+    } finally {
+      setSavingPhone(false);
+    }
+  };
+
+  return (
+    <div className="profile-box profile-wide-box">
+      <span className="section-kicker">CONTACT &amp; RECOVERY</span>
+      <p>
+        A verified email unlocks password recovery and email notifications;
+        a phone number unlocks SMS notifications (and always receives
+        emergency alerts, regardless of your SMS setting).
+      </p>
+
+      <label>
+        Contact email
+        <div className="contact-recovery-row">
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+          />
+          {isVerified && email.trim().toLowerCase() === (profile.contact_email || "").toLowerCase() ? (
+            <span className="chip active">Verified</span>
+          ) : (
+            <button className="ghost" disabled={sendingVerify} onClick={handleSendVerification}>
+              {sendingVerify ? "Sending…" : isPending ? "Resend" : "Verify"}
+            </button>
+          )}
+        </div>
+        {isPending && email.trim().toLowerCase() === (profile.contact_email || "").toLowerCase() && (
+          <small>Check your inbox for a verification link.</small>
+        )}
+      </label>
+
+      <label>
+        Phone number
+        <input
+          type="tel"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          onBlur={handleSavePhone}
+          placeholder="+91XXXXXXXXXX"
+          disabled={savingPhone}
+        />
+      </label>
+    </div>
+  );
+}
+
 /* =========================================================
    LINKEDIN-STYLE PROFILE
 ========================================================= */
@@ -5188,6 +5311,8 @@ function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfil
           <HiPhone /> Manage emergency contacts
         </button>
       </div>
+
+      <ContactRecoveryPanel profile={profile} onProfileUpdated={onProfileUpdated} notify={notify} />
 
       <div className="profile-box profile-wide-box">
         <span className="section-kicker">PERSONALIZATION</span>
@@ -7142,6 +7267,111 @@ function LegalPage({ go }) {
   );
 }
 
+// Landed on directly from an emailed link (?token=...) -- no session
+// assumed, works signed in or out, same as LegalPage above. Query strings
+// survive pathToKey()'s pathname-only routing untouched, so the token is
+// still readable off window.location.search here.
+function VerifyEmailPage({ go }) {
+  const [status, setStatus] = useState("verifying"); // verifying | done | error
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const token = new URLSearchParams(window.location.search).get("token");
+    if (!token) {
+      setStatus("error");
+      setError("No verification token in this link.");
+      return;
+    }
+    confirmContactEmailVerification(token)
+      .then(() => setStatus("done"))
+      .catch((err) => {
+        setStatus("error");
+        setError(err.message || "This verification link is invalid or has expired.");
+      });
+  }, []);
+
+  return (
+    <section className="page-section">
+      <PageHeader kicker="ACCOUNT" title="Verify email" text="Confirming your contact email." />
+      <div className="profile-box profile-wide-box">
+        {status === "verifying" && <LoadingState label="Verifying…" />}
+        {status === "done" && (
+          <EmptyState icon={<HiCheckCircle />} title="Email verified" text="Password recovery and email notifications are now available on this account." />
+        )}
+        {status === "error" && (
+          <EmptyState icon={<HiXMark />} title="Couldn't verify" text={error} />
+        )}
+        {go && (
+          <button className="ghost" style={{ marginTop: 16 }} onClick={() => go("home")}>
+            <HiArrowLeft /> Back to CampusOS
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// Landed on directly from an emailed password-reset link. Deliberately
+// doesn't check whether anyone is signed in -- "forgot my password" only
+// makes sense signed out, and this token IS the authorization (see
+// confirm-password-reset, which validates it server-side and never trusts
+// auth.uid()).
+function ResetPasswordPage({ go, notify }) {
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [done, setDone] = useState(false);
+  const token = new URLSearchParams(window.location.search).get("token");
+
+  const handleSubmit = async () => {
+    if (!token) { notify("This reset link is missing its token."); return; }
+    if (!password || password.length < 8) { notify("Password must be at least 8 characters"); return; }
+    if (password !== confirmPassword) { notify("Passwords don't match"); return; }
+    try {
+      setLoading(true);
+      await confirmPasswordReset(token, password);
+      setDone(true);
+      notify("Password reset -- sign in with your new password");
+    } catch (error) {
+      notify(error.message || "Unable to reset password");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <section className="page-section">
+      <PageHeader kicker="ACCOUNT" title="Reset password" text="Choose a new password for your account." />
+      <div className="profile-box profile-wide-box">
+        {!token && <EmptyState icon={<HiXMark />} title="Invalid link" text="This reset link is missing its token." />}
+        {token && done && (
+          <EmptyState icon={<HiCheckCircle />} title="Password reset" text="Sign in with your new password." />
+        )}
+        {token && !done && (
+          <>
+            <label>
+              New password
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" autoFocus />
+            </label>
+            <label>
+              Confirm password
+              <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="••••••••" />
+            </label>
+            <button className="primary wide" disabled={loading} onClick={handleSubmit}>
+              {loading ? "Resetting…" : "Reset password"}
+            </button>
+          </>
+        )}
+        {go && (
+          <button className="ghost" style={{ marginTop: 16 }} onClick={() => go("home")}>
+            <HiArrowLeft /> Back to CampusOS
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function CampusMap({ notify, openModal }) {
   const [selected, setSelected] = useState(null);
   const [q, setQ] = useState("");
@@ -7827,7 +8057,201 @@ function PushToggle({ authUser, notify }) {
   );
 }
 
-function NotificationsPage({ notifications, markRead, notify, onOpenConversation, authUser }) {
+const NOTIFICATION_CATEGORIES = [
+  ["messages", "Messages", "New DMs and marketplace conversations"],
+  ["events", "Events", "Registrations, reminders and updates"],
+  ["clubs", "Clubs", "Club announcements and membership updates"],
+  ["marketplace", "Marketplace", "Activity on your listings and offers"],
+  ["food", "Food & orders", "Order status updates"],
+  ["services", "Services", "Booking and service-request updates"],
+  ["community", "Community", "Replies and activity on your posts"],
+  ["announcements", "Announcements", "Official campus announcements"],
+];
+
+// Every category here has been individually enforced server-side since
+// 20260814004600 (create_notification()'s own v_col gate) -- this panel is
+// what was actually missing: nothing anywhere in the app ever read or wrote
+// notification_preferences, so a student had no way to turn any of these
+// off short of disabling push entirely.
+function NotificationPreferencesPanel({ authUser, notify }) {
+  const [prefs, setPrefs] = useState(null);
+  const [busyKey, setBusyKey] = useState(null);
+
+  useEffect(() => {
+    if (!authUser?.id) return;
+    getNotificationCategoryPreferences(authUser.id).then(setPrefs).catch(() => {});
+  }, [authUser?.id]);
+
+  if (!authUser?.id || !prefs) return null;
+
+  const toggle = async (key) => {
+    const next = !prefs[key];
+    setPrefs((p) => ({ ...p, [key]: next }));
+    setBusyKey(key);
+    try {
+      await setNotificationCategoryPreference(authUser.id, key, next);
+    } catch (err) {
+      setPrefs((p) => ({ ...p, [key]: !next }));
+      notify(err.message || "Could not update this preference");
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  return (
+    <div className="notification-prefs">
+      <span className="section-kicker">NOTIFY ME ABOUT</span>
+      {NOTIFICATION_CATEGORIES.map(([key, label, hint]) => (
+        <label key={key} className="notification-pref-row">
+          <div>
+            <b>{label}</b>
+            <small>{hint}</small>
+          </div>
+          <input type="checkbox" checked={!!prefs[key]} disabled={busyKey === key} onChange={() => toggle(key)} />
+        </label>
+      ))}
+    </div>
+  );
+}
+
+// Channel delivery (push already had its own toggle above this panel;
+// email is real as of 20260817001600 -- default off, opt-in here) and
+// quiet hours (20260817001300 -- suppresses push/email/sms, never the
+// in-app notification itself, and emergency alerts always bypass it).
+function NotificationChannelPanel({ authUser, profile, notify }) {
+  const [chan, setChan] = useState(null);
+  const [busy, setBusy] = useState(null);
+
+  useEffect(() => {
+    if (!authUser?.id) return;
+    getNotificationChannelPreferences(authUser.id).then(setChan).catch(() => {});
+  }, [authUser?.id]);
+
+  if (!authUser?.id || !chan) return null;
+
+  const canEmail = !!profile?.contact_email_verified_at || (!!authUser?.email && !authUser.email.endsWith("@usn.campusos.internal"));
+  const canSms = !!profile?.phone;
+
+  const toggleEmail = async () => {
+    if (!canEmail) { notify("Add and verify a contact email in your Profile first"); return; }
+    const next = !chan.channel_email;
+    setChan((c) => ({ ...c, channel_email: next }));
+    setBusy("email");
+    try {
+      await setNotificationChannelPreference(authUser.id, "channel_email", next);
+      notify(next ? "Email notifications enabled" : "Email notifications turned off");
+    } catch (err) {
+      setChan((c) => ({ ...c, channel_email: !next }));
+      notify(err.message || "Could not update this preference");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const toggleSms = async () => {
+    if (!canSms) { notify("Add a phone number in your Profile first"); return; }
+    const next = !chan.channel_sms;
+    setChan((c) => ({ ...c, channel_sms: next }));
+    setBusy("sms");
+    try {
+      await setNotificationChannelPreference(authUser.id, "channel_sms", next);
+      notify(next ? "SMS notifications enabled" : "SMS notifications turned off");
+    } catch (err) {
+      setChan((c) => ({ ...c, channel_sms: !next }));
+      notify(err.message || "Could not update this preference");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const toggleQuietHours = async () => {
+    const next = !chan.quiet_hours_enabled;
+    setChan((c) => ({ ...c, quiet_hours_enabled: next }));
+    setBusy("quiet");
+    try {
+      await setQuietHours(authUser.id, { enabled: next });
+    } catch (err) {
+      setChan((c) => ({ ...c, quiet_hours_enabled: !next }));
+      notify(err.message || "Could not update quiet hours");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const changeQuietRange = async (field, value) => {
+    const prevValue = chan[field];
+    setChan((c) => ({ ...c, [field]: value + ":00" }));
+    try {
+      await setQuietHours(authUser.id, {
+        enabled: chan.quiet_hours_enabled,
+        start: field === "quiet_hours_start" ? value : undefined,
+        end: field === "quiet_hours_end" ? value : undefined,
+      });
+    } catch (err) {
+      setChan((c) => ({ ...c, [field]: prevValue }));
+      notify(err.message || "Could not update quiet hours");
+    }
+  };
+
+  return (
+    <div className="notification-prefs">
+      <span className="section-kicker">DELIVERY</span>
+      <label className="notification-pref-row">
+        <div>
+          <b>Email</b>
+          <small>
+            {canEmail
+              ? "Get an email for the things you're notified about above."
+              : "Add and verify a contact email in your Profile to turn this on."}
+          </small>
+        </div>
+        <input type="checkbox" checked={!!chan.channel_email} disabled={busy === "email" || !canEmail} onChange={toggleEmail} />
+      </label>
+
+      <label className="notification-pref-row">
+        <div>
+          <b>SMS</b>
+          <small>
+            {canSms
+              ? "Get a text for the things you're notified about above. Emergency alerts always text you, even with this off."
+              : "Add a phone number in your Profile to turn this on. Emergency alerts will still text you once you do."}
+          </small>
+        </div>
+        <input type="checkbox" checked={!!chan.channel_sms} disabled={busy === "sms" || !canSms} onChange={toggleSms} />
+      </label>
+
+      <label className="notification-pref-row">
+        <div>
+          <b>Quiet hours</b>
+          <small>Pause push/email/SMS overnight -- in-app notifications still land, just no buzz. Emergency alerts always go through.</small>
+        </div>
+        <input type="checkbox" checked={!!chan.quiet_hours_enabled} disabled={busy === "quiet"} onChange={toggleQuietHours} />
+      </label>
+      {chan.quiet_hours_enabled && (
+        <div className="quiet-hours-range">
+          <label>
+            From
+            <input
+              type="time"
+              value={(chan.quiet_hours_start || "22:00:00").slice(0, 5)}
+              onChange={(e) => changeQuietRange("quiet_hours_start", e.target.value)}
+            />
+          </label>
+          <label>
+            To
+            <input
+              type="time"
+              value={(chan.quiet_hours_end || "07:00:00").slice(0, 5)}
+              onChange={(e) => changeQuietRange("quiet_hours_end", e.target.value)}
+            />
+          </label>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NotificationsPage({ notifications, markRead, notify, onOpenConversation, authUser, profile }) {
   return (
     <section className="page-section">
       <PageHeader
@@ -7848,6 +8272,8 @@ function NotificationsPage({ notifications, markRead, notify, onOpenConversation
       />
 
       <PushToggle authUser={authUser} notify={notify} />
+      <NotificationChannelPanel authUser={authUser} profile={profile} notify={notify} />
+      <NotificationPreferencesPanel authUser={authUser} notify={notify} />
 
       <div className="notification-list">
         {notifications.map((notification) => {
@@ -8694,6 +9120,7 @@ function MagicLinkLogin({ onClose, notify }) {
 
 function UsnPasswordLogin({ onClose, notify }) {
   const [signingUp, setSigningUp] = useState(false);
+  const [forgotPassword, setForgotPassword] = useState(false);
   const [name, setName] = useState("");
   const [usn, setUsn] = useState("");
   const [password, setPassword] = useState("");
@@ -8745,6 +9172,10 @@ function UsnPasswordLogin({ onClose, notify }) {
       setLoading(false);
     }
   };
+
+  if (forgotPassword) {
+    return <ForgotPasswordFlow notify={notify} onBack={() => setForgotPassword(false)} />;
+  }
 
   return (
     <>
@@ -8834,6 +9265,76 @@ function UsnPasswordLogin({ onClose, notify }) {
         onClick={() => setSigningUp((current) => !current)}
       >
         {signingUp ? "Already have an account? Sign in" : "New here? Create an account"}
+      </button>
+
+      {!signingUp && (
+        <button type="button" className="link-btn" style={{ marginTop: 8 }} onClick={() => setForgotPassword(true)}>
+          Forgot password?
+        </button>
+      )}
+    </>
+  );
+}
+
+// Only reachable for accounts with a verified contact email (or a real,
+// non-synthetic auth.users.email) -- see request-password-reset's own
+// recipient-resolution logic. The response is always the same generic
+// message regardless of whether the USN exists or has a usable email on
+// file, so this UI can't be used to probe which USNs are real accounts.
+function ForgotPasswordFlow({ notify, onBack }) {
+  const [usn, setUsn] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  const handleSubmit = async () => {
+    const cleanUsn = usn.trim().toUpperCase();
+    if (!/^[A-Za-z0-9]{10}$/.test(cleanUsn)) {
+      notify("USN must be exactly 10 letters/numbers");
+      return;
+    }
+    try {
+      setLoading(true);
+      await requestPasswordReset(cleanUsn);
+      setSent(true);
+    } catch (error) {
+      notify(error.message || "Unable to request a password reset");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (sent) {
+    return (
+      <div className="empty-state">
+        <HiCheckCircle />
+        <h3>Check your email</h3>
+        <p>
+          If that account has a verified email on file, we&apos;ve sent a reset
+          link to it. It expires in 1 hour.
+        </p>
+        <button className="ghost" onClick={onBack}>Back to sign in</button>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <p>Enter your USN and we&apos;ll email a reset link if the account has a verified contact email on file.</p>
+      <label>
+        USN
+        <input
+          value={usn}
+          onChange={(e) => setUsn(e.target.value.toUpperCase())}
+          placeholder="1NH25CS265"
+          maxLength={10}
+          autoFocus
+        />
+      </label>
+      <button className="primary wide" disabled={loading} onClick={handleSubmit}>
+        {loading ? "Sending…" : "Send reset link"}
+      </button>
+      <button type="button" className="ghost wide" style={{ marginTop: 8 }} onClick={onBack}>
+        Back to sign in
       </button>
     </>
   );

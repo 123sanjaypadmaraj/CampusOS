@@ -87,6 +87,76 @@ export async function subscribeToPush(userId) {
   return subscription;
 }
 
+// The per-category gate create_notification() has always enforced
+// server-side (0010/0046) -- messages/food/events/clubs/community/services/
+// marketplace/announcements each individually toggleable -- but nothing in
+// the UI ever read or wrote these columns, so a student had no way to turn
+// any of them off short of disabling push entirely at the OS/browser level.
+const NOTIFICATION_CATEGORY_DEFAULTS = {
+  messages: true, events: true, clubs: true, community: true,
+  services: true, marketplace: true, food: true, announcements: true,
+};
+
+// Email delivery is real as of 20260817002000 (Resend) -- default OFF
+// (opt-in), see that migration's notes. SMS delivery is real as of the same
+// migration too (Fast2SMS, see supabase/functions/send-sms) -- also default
+// OFF except for emergency alerts, which bypass this toggle server-side
+// (20260817002200's create_notification() fix) the same way they already
+// bypass the category gate.
+const NOTIFICATION_CHANNEL_DEFAULTS = {
+  channel_push: true, channel_email: false, channel_sms: false,
+  quiet_hours_enabled: false, quiet_hours_start: "22:00:00", quiet_hours_end: "07:00:00",
+};
+
+export async function getNotificationChannelPreferences(userId) {
+  if (!userId) return { ...NOTIFICATION_CHANNEL_DEFAULTS };
+  const { data, error } = await supabase
+    .from("notification_preferences")
+    .select("channel_push, channel_email, channel_sms, quiet_hours_enabled, quiet_hours_start, quiet_hours_end")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data || { ...NOTIFICATION_CHANNEL_DEFAULTS };
+}
+
+export async function setNotificationChannelPreference(userId, field, value) {
+  if (!userId) throw new Error("Sign in required");
+  const { error } = await supabase
+    .from("notification_preferences")
+    .upsert({ user_id: userId, [field]: value }, { onConflict: "user_id" });
+  if (error) throw error;
+}
+
+export async function setQuietHours(userId, { enabled, start, end }) {
+  if (!userId) throw new Error("Sign in required");
+  const patch = { user_id: userId, quiet_hours_enabled: enabled };
+  if (start) patch.quiet_hours_start = start;
+  if (end) patch.quiet_hours_end = end;
+  const { error } = await supabase.from("notification_preferences").upsert(patch, { onConflict: "user_id" });
+  if (error) throw error;
+}
+
+export async function getNotificationCategoryPreferences(userId) {
+  if (!userId) return { ...NOTIFICATION_CATEGORY_DEFAULTS };
+  const { data, error } = await supabase
+    .from("notification_preferences")
+    .select("messages, events, clubs, community, services, marketplace, food, announcements")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  // No row yet means every category is unrestricted -- same fallback
+  // create_notification() itself uses ("v_pref is not null" gate).
+  return data || { ...NOTIFICATION_CATEGORY_DEFAULTS };
+}
+
+export async function setNotificationCategoryPreference(userId, category, enabled) {
+  if (!userId) throw new Error("Sign in required");
+  const { error } = await supabase
+    .from("notification_preferences")
+    .upsert({ user_id: userId, [category]: enabled }, { onConflict: "user_id" });
+  if (error) throw error;
+}
+
 export async function unsubscribeFromPush(userId) {
   if (!isPushSupported()) return;
 
