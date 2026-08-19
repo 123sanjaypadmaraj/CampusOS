@@ -19,6 +19,9 @@ import {
   HiSignal,
   HiFlag,
   HiArrowsRightLeft,
+  HiCheck,
+  HiBuildingOffice2,
+  HiLifebuoy,
 } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import { StatTile } from "../../components/ui/Charts";
@@ -71,6 +74,9 @@ const TABS = [
   ["systemhealth", "System Health"],
   ["campussettings", "Campus Settings"],
   ["featureflags", "Feature Flags"],
+  ["emergencydirectory", "Emergency Directory"],
+  ["resources", "Resources"],
+  ["support", "Support"],
 ];
 
 export default function AdminCMS({ notify, campusId, authUser }) {
@@ -118,6 +124,9 @@ export default function AdminCMS({ notify, campusId, authUser }) {
       {tab === "systemhealth" && <SystemHealthTab notify={notify} />}
       {tab === "campussettings" && <CampusSettingsTab notify={notify} campusId={campusId} />}
       {tab === "featureflags" && <FeatureFlagsTab notify={notify} campusId={campusId} />}
+      {tab === "emergencydirectory" && <EmergencyDirectoryTab notify={notify} />}
+      {tab === "resources" && <ResourcesTab notify={notify} campusId={campusId} />}
+      {tab === "support" && <SupportTicketsTab notify={notify} authUser={authUser} />}
     </section>
   );
 }
@@ -1084,6 +1093,471 @@ export function EmergencyContactsTab({ notify }) {
           </div>
         </article>
       ))}
+    </div>
+  );
+}
+
+/* =========================================================
+   CAMPUS EMERGENCY DIRECTORY MANAGEMENT (doc §113 second half --
+   supabase/migrations/20260817000100_emergency_directory.sql). Distinct
+   from EmergencyContactsTab above (which verifies next-of-kin submissions)
+   -- this manages the campus OFFICE directory (security/medical/facilities/
+   transport/hostel/admin numbers) that students read via
+   src/features/emergency/EmergencyDirectory.jsx. Exported so
+   FacilitiesDashboard.jsx can reuse it, same as EmergencyContactsTab.
+========================================================= */
+
+const EMERGENCY_DIRECTORY_CATEGORIES = [
+  ["emergency_response", "Emergency Response"], ["security", "Security"], ["medical", "Medical"],
+  ["facilities", "Facilities"], ["hostel", "Hostel"], ["transport", "Transport"],
+  ["admin", "Administration"], ["campus_management", "Campus Management"],
+];
+
+function EmergencyDirectoryModal({ entry, onClose, notify, onSaved }) {
+  const isNew = !entry;
+  const [form, setForm] = useState({
+    category: entry?.category || "security", name: entry?.name || "", designation: entry?.designation || "",
+    description: entry?.description || "", phone: entry?.phone || "", altPhone: entry?.alt_phone || "",
+    email: entry?.email || "", location: entry?.location || "", priority: entry?.priority || "standard",
+    is24x7: entry?.is_24x7 ?? false, hoursNote: entry?.hours_note || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const change = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const save = async () => {
+    try {
+      setSaving(true);
+      await adminApi.upsertEmergencyDirectoryEntry({
+        id: entry?.id || null, category: form.category, name: form.name.trim(),
+        designation: form.designation.trim(), description: form.description.trim(),
+        phone: form.phone.trim(), altPhone: form.altPhone.trim(), email: form.email.trim(),
+        location: form.location.trim(), priority: form.priority, is24x7: form.is24x7,
+        hoursNote: form.hoursNote.trim(), campusId: entry?.campus_id ?? null, displayOrder: entry?.display_order ?? 0,
+      });
+      notify(isNew ? "Directory entry created — pending verification" : "Directory entry updated — verification reset");
+      onSaved();
+    } catch (err) {
+      notify(err.message || "Could not save this directory entry");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal kicker="EMERGENCY DIRECTORY" title={isNew ? "New directory entry" : `Edit ${entry.name}`} onClose={onClose}>
+      <label>Category
+        <select value={form.category} onChange={(e) => change("category", e.target.value)}>
+          {EMERGENCY_DIRECTORY_CATEGORIES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+        </select>
+      </label>
+      <label>Name<input value={form.name} onChange={(e) => change("name", e.target.value)} placeholder="Campus Security Desk" /></label>
+      <label>Designation<input value={form.designation} onChange={(e) => change("designation", e.target.value)} placeholder="Chief Security Officer" /></label>
+      <label>Description<textarea rows={2} value={form.description} onChange={(e) => change("description", e.target.value)} /></label>
+      <label>Phone<input value={form.phone} onChange={(e) => change("phone", e.target.value)} placeholder="+919876543210" /></label>
+      <label>Alt phone (optional)<input value={form.altPhone} onChange={(e) => change("altPhone", e.target.value)} /></label>
+      <label>Email (optional)<input value={form.email} onChange={(e) => change("email", e.target.value)} /></label>
+      <label>Location<input value={form.location} onChange={(e) => change("location", e.target.value)} placeholder="Main Gate, Security Cabin" /></label>
+      <label>Priority
+        <select value={form.priority} onChange={(e) => change("priority", e.target.value)}>
+          <option value="critical">Critical</option>
+          <option value="high">High</option>
+          <option value="standard">Standard</option>
+        </select>
+      </label>
+      <label>
+        <input type="checkbox" checked={form.is24x7} onChange={(e) => change("is24x7", e.target.checked)} style={{ width: "auto", marginRight: 8 }} />
+        Open 24/7
+      </label>
+      {!form.is24x7 && (
+        <label>Hours note (optional)<input value={form.hoursNote} onChange={(e) => change("hoursNote", e.target.value)} placeholder="Mon–Fri, 9am–5pm" /></label>
+      )}
+      <button className="primary wide" disabled={saving || !form.name.trim() || !form.phone.trim()} onClick={save}>
+        {saving ? "Saving…" : isNew ? "Create entry" : "Save changes"}
+      </button>
+    </Modal>
+  );
+}
+
+export function EmergencyDirectoryTab({ notify }) {
+  const [entries, setEntries] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [editing, setEditing] = useState(null); // null = closed, {} = new, entry = edit
+  const [busyId, setBusyId] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      setEntries(await adminApi.adminListEmergencyDirectory());
+    } catch (err) {
+      setError(err.message || "Could not load the emergency directory");
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const verify = async (entry, verified) => {
+    try {
+      setBusyId(entry.id);
+      await adminApi.verifyEmergencyDirectoryEntry(entry.id, verified);
+      notify(verified ? "Entry verified — visible to students" : "Entry marked unverified");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not update verification");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const toggleActive = async (entry) => {
+    try {
+      setBusyId(entry.id);
+      await adminApi.setEmergencyDirectoryActive(entry.id, !entry.active);
+      notify(entry.active ? "Entry deactivated" : "Entry reactivated");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not update this entry");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (loading) return <LoadingState label="Loading emergency directory…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  return (
+    <div>
+      <div className="section-head">
+        <div>
+          <h2>Campus Emergency Directory</h2>
+          <p>Verified office contacts students see under Services → Emergency Directory. Editing an entry resets its verification.</p>
+        </div>
+        <button className="primary" onClick={() => setEditing({})}><HiPlus /> New entry</button>
+      </div>
+
+      <div className="resource-list">
+        {entries.length === 0 && <EmptyState icon={<HiPhone />} title="No entries yet" text="Add your campus's security, medical and facilities contacts." />}
+        {entries.map((entry) => (
+          <article className="resource-row" key={entry.id}>
+            <div className="resource-icon"><HiPhone /></div>
+            <div>
+              <b>{entry.name} <span className="social-type">{entry.category.replace("_", " ").toUpperCase()}</span>{!entry.active && <span className="social-type"> INACTIVE</span>}</b>
+              <small>{entry.phone}{entry.location ? ` · ${entry.location}` : ""} · {entry.priority}</small>
+              <small>{entry.verified ? "Verified" : "Not yet verified"}</small>
+            </div>
+            <div className="chips">
+              <button disabled={busyId === entry.id} onClick={() => verify(entry, !entry.verified)} className={entry.verified ? "chip active" : "chip"}>
+                <HiShieldCheck /> {entry.verified ? "Verified" : "Verify"}
+              </button>
+              <button disabled={busyId === entry.id} onClick={() => setEditing(entry)}><HiPencilSquare /></button>
+              <button disabled={busyId === entry.id} onClick={() => toggleActive(entry)}>{entry.active ? <HiXCircle /> : <HiCheck />}</button>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      {editing && (
+        <EmergencyDirectoryModal entry={editing.id ? editing : null} notify={notify}
+          onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />
+      )}
+    </div>
+  );
+}
+
+/* =========================================================
+   RESOURCE CATALOG MANAGEMENT (module 08, booking --
+   supabase/migrations/20260819000400_resource_management.sql). resources_
+   read/bookings already existed since 0007; nothing anywhere ever created
+   or edited a `resources` row until this pass -- BookingApprovals
+   (FacilitiesDashboard.jsx) only ever approves bookings of resources that
+   already exist. This is the missing catalog-management layer.
+========================================================= */
+
+const RESOURCE_TYPES = ["room", "hall", "lab", "equipment", "sports facility", "other"];
+
+function ResourceModal({ campusId, resource, onClose, notify, onSaved }) {
+  const isNew = !resource;
+  const [form, setForm] = useState({
+    name: resource?.name || "", resourceType: resource?.resource_type || "room",
+    capacity: resource?.capacity ?? "", openTime: resource?.opening_hours?.open || "08:00",
+    closeTime: resource?.opening_hours?.close || "20:00", approvalRequired: resource?.approval_required ?? false,
+    bufferMinutes: resource?.buffer_minutes ?? 0, available: resource?.available ?? true,
+  });
+  const [saving, setSaving] = useState(false);
+  const change = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const save = async () => {
+    try {
+      setSaving(true);
+      await adminApi.upsertResourceAdmin({
+        id: resource?.id || null, campusId, name: form.name.trim(), resourceType: form.resourceType,
+        capacity: form.capacity === "" ? null : Number(form.capacity),
+        openingHours: { open: form.openTime, close: form.closeTime },
+        approvalRequired: form.approvalRequired, bufferMinutes: Number(form.bufferMinutes) || 0,
+        available: form.available,
+      });
+      notify(isNew ? "Resource created" : "Resource updated");
+      onSaved();
+    } catch (err) {
+      notify(err.message || "Could not save this resource");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal kicker="RESOURCE" title={isNew ? "New bookable resource" : `Edit ${resource.name}`} onClose={onClose}>
+      <label>Name<input value={form.name} onChange={(e) => change("name", e.target.value)} placeholder="Seminar Hall A" /></label>
+      <label>Type
+        <select value={form.resourceType} onChange={(e) => change("resourceType", e.target.value)}>
+          {RESOURCE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+      </label>
+      <label>Capacity (optional)<input type="number" min={0} value={form.capacity} onChange={(e) => change("capacity", e.target.value)} /></label>
+      <div className="form-grid">
+        <label>Opens<input type="time" value={form.openTime} onChange={(e) => change("openTime", e.target.value)} /></label>
+        <label>Closes<input type="time" value={form.closeTime} onChange={(e) => change("closeTime", e.target.value)} /></label>
+      </div>
+      <label>Buffer between bookings (minutes)<input type="number" min={0} value={form.bufferMinutes} onChange={(e) => change("bufferMinutes", e.target.value)} /></label>
+      <label>
+        <input type="checkbox" checked={form.approvalRequired} onChange={(e) => change("approvalRequired", e.target.checked)} style={{ width: "auto", marginRight: 8 }} />
+        Bookings need staff approval
+      </label>
+      <label>
+        <input type="checkbox" checked={form.available} onChange={(e) => change("available", e.target.checked)} style={{ width: "auto", marginRight: 8 }} />
+        Available for booking
+      </label>
+      <button className="primary wide" disabled={saving || !form.name.trim()} onClick={save}>
+        {saving ? "Saving…" : isNew ? "Create resource" : "Save changes"}
+      </button>
+    </Modal>
+  );
+}
+
+export function ResourcesTab({ notify, campusId }) {
+  const [resources, setResources] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [editing, setEditing] = useState(null);
+  const [busyId, setBusyId] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      setResources(await adminApi.listResourcesAdmin(campusId));
+    } catch (err) {
+      setError(err.message || "Could not load resources");
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { reload(); }, [campusId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const remove = async (resource) => {
+    if (!window.confirm(`Remove "${resource.name}"? If it has booking history it'll be marked unavailable instead of deleted.`)) return;
+    try {
+      setBusyId(resource.id);
+      await adminApi.deleteResourceAdmin(resource.id);
+      notify("Resource removed");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not remove this resource");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (loading) return <LoadingState label="Loading resources…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  return (
+    <div>
+      <div className="section-head">
+        <div>
+          <h2>Bookable Resources</h2>
+          <p>Rooms, halls, labs and equipment students can reserve under Services → Resource Booking.</p>
+        </div>
+        <button className="primary" onClick={() => setEditing({})}><HiPlus /> New resource</button>
+      </div>
+
+      <div className="resource-list">
+        {resources.length === 0 && <EmptyState icon={<HiBuildingOffice2 />} title="No resources yet" text="Add a room, lab or piece of equipment to make it bookable." />}
+        {resources.map((r) => (
+          <article className="resource-row" key={r.id}>
+            <div className="resource-icon"><HiBuildingOffice2 /></div>
+            <div>
+              <b>{r.name} <span className="social-type">{r.resource_type?.toUpperCase()}</span>{!r.available && <span className="social-type"> UNAVAILABLE</span>}</b>
+              <small>
+                {r.capacity ? `Capacity ${r.capacity} · ` : ""}
+                {r.opening_hours?.open}–{r.opening_hours?.close}
+                {r.approval_required ? " · needs approval" : ""}
+              </small>
+            </div>
+            <div className="chips">
+              <button disabled={busyId === r.id} onClick={() => setEditing(r)}><HiPencilSquare /></button>
+              <button disabled={busyId === r.id} onClick={() => remove(r)}><HiTrash /></button>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      {editing && (
+        <ResourceModal campusId={campusId} resource={editing.id ? editing : null} notify={notify}
+          onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />
+      )}
+    </div>
+  );
+}
+
+/* =========================================================
+   SUPPORT TICKETS (module 42, new -- supabase/migrations/
+   20260819000600_support_tickets.sql). Lightweight triage queue routed to
+   college_admin/super_admin per the explicit "no dedicated support-staff
+   role" decision made for this pass.
+========================================================= */
+
+const SUPPORT_STATUS_LABEL = { open: "Open", in_progress: "In progress", resolved: "Resolved", closed: "Closed" };
+
+function SupportTicketThreadModal({ ticket, authUser, onClose, notify, onChanged }) {
+  const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [reply, setReply] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const reload = async () => {
+    try { setLoading(true); setMessages(await adminApi.getSupportTicketMessages(ticket.id)); }
+    catch (err) { notify(err.message || "Could not load the message thread"); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { reload(); }, [ticket.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const send = async () => {
+    if (!reply.trim()) return;
+    try {
+      setBusy(true);
+      await adminApi.addSupportTicketMessage(ticket.id, reply.trim());
+      setReply("");
+      await reload();
+      onChanged();
+    } catch (err) { notify(err.message || "Could not send reply"); }
+    finally { setBusy(false); }
+  };
+
+  const setStatus = async (status) => {
+    try {
+      setBusy(true);
+      await adminApi.setSupportTicketStatus(ticket.id, status);
+      notify(`Ticket marked ${SUPPORT_STATUS_LABEL[status].toLowerCase()}`);
+      onChanged();
+    } catch (err) { notify(err.message || "Could not update status"); }
+    finally { setBusy(false); }
+  };
+
+  const claim = async () => {
+    try {
+      setBusy(true);
+      await adminApi.assignSupportTicket(ticket.id, authUser.id);
+      notify("Ticket assigned to you");
+      onChanged();
+    } catch (err) { notify(err.message || "Could not assign this ticket"); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Modal kicker={`SUPPORT · ${ticket.category.toUpperCase()}`} title={ticket.subject} onClose={onClose}>
+      <p style={{ color: "var(--muted)", fontSize: 13 }}>
+        From {ticket.reporter?.name || "a student"} ({ticket.reporter?.email}) · Status: {SUPPORT_STATUS_LABEL[ticket.status]}
+        {ticket.assignee ? ` · Assigned to ${ticket.assignee.name}` : ""}
+      </p>
+
+      {loading ? <LoadingState label="Loading thread…" /> : (
+        <div className="resource-list" style={{ maxHeight: 320, overflowY: "auto" }}>
+          {messages.map((m) => (
+            <article className="resource-row" key={m.id} style={{ background: m.is_staff ? "var(--card-alt, #f5f5fa)" : undefined }}>
+              <div>
+                <b>{m.is_staff ? "Staff" : (m.sender?.name || "Student")}</b>
+                <small>{m.body}</small>
+                <small>{new Date(m.created_at).toLocaleString()}</small>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+
+      <label>Reply<textarea rows={3} value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Type a reply…" /></label>
+      <button className="primary wide" disabled={busy || !reply.trim()} onClick={send}>Send reply</button>
+
+      <div className="chips" style={{ marginTop: 12 }}>
+        {!ticket.assignee && <button disabled={busy} onClick={claim}>Assign to me</button>}
+        {ticket.status !== "resolved" && <button disabled={busy} onClick={() => setStatus("resolved")}><HiShieldCheck /> Resolve</button>}
+        {ticket.status !== "closed" && <button disabled={busy} onClick={() => setStatus("closed")}><HiXCircle /> Close</button>}
+        {ticket.status !== "open" && <button disabled={busy} onClick={() => setStatus("open")}>Reopen</button>}
+      </div>
+    </Modal>
+  );
+}
+
+export function SupportTicketsTab({ notify, authUser }) {
+  const [tickets, setTickets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [openTicket, setOpenTicket] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      setTickets(await adminApi.listSupportTicketsAdmin({ status: statusFilter || null }));
+    } catch (err) {
+      setError(err.message || "Could not load support tickets");
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { reload(); }, [statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading) return <LoadingState label="Loading support tickets…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  return (
+    <div>
+      <div className="section-head">
+        <div>
+          <h2>Support Tickets</h2>
+          <p>Account, payment and technical questions that aren&rsquo;t a facilities issue.</p>
+        </div>
+      </div>
+
+      <div className="chips" style={{ marginBottom: 16 }}>
+        {["", "open", "in_progress", "resolved", "closed"].map((s) => (
+          <button key={s || "all"} className={statusFilter === s ? "chip active" : "chip"} onClick={() => setStatusFilter(s)}>
+            {s ? SUPPORT_STATUS_LABEL[s] : "All"}
+          </button>
+        ))}
+      </div>
+
+      <div className="resource-list">
+        {tickets.length === 0 && <EmptyState icon={<HiLifebuoy />} title="No tickets" text="Nothing here for this filter." />}
+        {tickets.map((t) => (
+          <article className="resource-row" key={t.id} onClick={() => setOpenTicket(t)} style={{ cursor: "pointer" }}>
+            <div className="resource-icon"><HiLifebuoy /></div>
+            <div>
+              <b>{t.subject} <span className="social-type">{t.category.toUpperCase()}</span></b>
+              <small>{t.reporter?.name || "Student"} · {new Date(t.created_at).toLocaleString()}</small>
+            </div>
+            <strong>{SUPPORT_STATUS_LABEL[t.status]}</strong>
+          </article>
+        ))}
+      </div>
+
+      {openTicket && (
+        <SupportTicketThreadModal ticket={openTicket} authUser={authUser} notify={notify}
+          onClose={() => setOpenTicket(null)} onChanged={() => { reload(); setOpenTicket(null); }} />
+      )}
     </div>
   );
 }

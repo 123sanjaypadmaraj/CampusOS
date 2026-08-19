@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { HiPlus, HiXMark, HiPencil, HiTrash, HiCheck, HiClock, HiShoppingBag, HiExclamationTriangle } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import VendorAnalytics from "../vendor/Analytics";
+import VendorManagerAccounts from "../vendor/ManagerAccounts";
 import * as storeApi from "./api";
 
 function Modal({ title, kicker, onClose, children }) {
@@ -88,11 +89,13 @@ export default function StoreDashboard({ notify, authUser }) {
         <button className={tab === "orders" ? "chip active" : "chip"} onClick={() => setTab("orders")}>Orders</button>
         <button className={tab === "items" ? "chip active" : "chip"} onClick={() => setTab("items")}>Items</button>
         <button className={tab === "analytics" ? "chip active" : "chip"} onClick={() => setTab("analytics")}>Analytics</button>
+        <button className={tab === "staff" ? "chip active" : "chip"} onClick={() => setTab("staff")}>Managers</button>
       </div>
 
       {tab === "orders" && <StoreOrderQueue store={store} notify={notify} />}
       {tab === "items" && <StoreItemManager store={store} notify={notify} />}
       {tab === "analytics" && <VendorAnalytics />}
+      {tab === "staff" && <VendorManagerAccounts vendorType="store" scopeId={store.id} notify={notify} />}
     </section>
   );
 }

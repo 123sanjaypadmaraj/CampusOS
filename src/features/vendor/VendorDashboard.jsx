@@ -37,6 +37,7 @@ import * as vendorApi from "./api";
 import VendorAnalytics from "./Analytics";
 import * as storeApi from "../store/api";
 import StoreDashboard from "../store/StoreDashboard";
+import VendorManagerAccounts from "./ManagerAccounts";
 
 /* =========================================================
    SHARED SHELL (mirrors App.jsx's ModalShell markup/classes, same
@@ -451,7 +452,7 @@ function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
 
       {tab === "inventory" && <InventoryReportPanel canteenId={canteen.id} notify={notify} />}
 
-      {tab === "staff" && <CanteenStaffManager canteenId={canteen.id} notify={notify} />}
+      {tab === "staff" && <VendorManagerAccounts vendorType="canteen" scopeId={canteen.id} notify={notify} />}
 
       {tab === "billing" && <BillingPanel canteen={canteen} notify={notify} onCanteenChanged={onCanteenChanged} />}
 
@@ -767,75 +768,6 @@ function CanteenHoursManager({ canteenId, notify }) {
 /* =========================================================
    VENDOR STAFF SUB-ACCOUNTS (doc Phase 3 "Vendor staff sub-accounts")
 ========================================================= */
-
-function CanteenStaffManager({ canteenId, notify }) {
-  const [staff, setStaff] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [email, setEmail] = useState("");
-  const [adding, setAdding] = useState(false);
-
-  const reload = async () => {
-    try { setLoading(true); setStaff(await vendorApi.listCanteenStaffAccounts(canteenId)); }
-    catch (err) { notify(err.message || "Could not load staff"); }
-    finally { setLoading(false); }
-  };
-  useEffect(() => { reload(); }, [canteenId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  if (loading) return <LoadingState label="Loading staff…" />;
-
-  return (
-    <div>
-      <div className="section-head">
-        <h2>Staff accounts</h2>
-        <p style={{ color: "var(--muted)", fontSize: 13 }}>
-          Staff can run your order queue (accept, prepare, mark ready, adjust stock) but never see pricing, menu edits, payouts or refunds.
-        </p>
-      </div>
-
-      <div className="form-grid" style={{ maxWidth: 420 }}>
-        <label>Add staff by email
-          <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="student@nhce.edu.in" />
-        </label>
-      </div>
-      <button
-        className="primary"
-        disabled={adding || !email.trim()}
-        onClick={async () => {
-          try {
-            setAdding(true);
-            await vendorApi.addCanteenStaffAccount(canteenId, email.trim());
-            notify("Staff account added");
-            setEmail("");
-            await reload();
-          } catch (err) { notify(err.message || "Could not add staff — they need an existing CampusOS account"); }
-          finally { setAdding(false); }
-        }}
-      >
-        <HiPlus /> Add staff
-      </button>
-
-      <div className="resource-list" style={{ marginTop: 16 }}>
-        {staff.length === 0 && <EmptyState title="No staff yet" text="Add someone by the email they signed up with." />}
-        {staff.map((s) => (
-          <article className="resource-row" key={s.id}>
-            <div className="resource-icon"><HiUserGroup /></div>
-            <div><b>{s.profiles?.name || "Staff member"}</b><small>{s.profiles?.email}</small></div>
-            <button
-              className="ghost"
-              onClick={async () => {
-                if (!window.confirm(`Remove ${s.profiles?.name || "this staff member"}? They'll lose access to the order queue.`)) return;
-                try { await vendorApi.removeCanteenStaffAccount(s.id); notify("Staff account removed"); reload(); }
-                catch (err) { notify(err.message || "Could not remove staff"); }
-              }}
-            >
-              <HiTrash />
-            </button>
-          </article>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 /* =========================================================
    INVENTORY REPORT + manual stock adjustments (doc Phase 3 "Stock
@@ -2256,6 +2188,7 @@ function PrintPricingManager({ rates, notify, onChanged }) {
         <button className={tab === "history" ? "chip active" : "chip"} onClick={() => setTab("history")}>Job History</button>
         <button className={tab === "pricing" ? "chip active" : "chip"} onClick={() => setTab("pricing")}>Pricing</button>
         <button className={tab === "analytics" ? "chip active" : "chip"} onClick={() => setTab("analytics")}>Analytics</button>
+        <button className={tab === "staff" ? "chip active" : "chip"} onClick={() => setTab("staff")}>Managers</button>
       </div>
 
       {tab === "dashboard" && <PrintShopOverview notify={notify} onNavigate={setTab} campusId={campusId} />}
@@ -2265,6 +2198,8 @@ function PrintPricingManager({ rates, notify, onChanged }) {
       {tab === "history" && <PrintJobHistory notify={notify} />}
 
       {tab === "analytics" && <VendorAnalytics />}
+
+      {tab === "staff" && <VendorManagerAccounts vendorType="print" scopeId={campusId} notify={notify} />}
 
       {tab === "pricing" && (
         <>

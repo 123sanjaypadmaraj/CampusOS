@@ -3511,3 +3511,253 @@ export async function getEmergencyContactsForAlert(alertId) {
   throwIfError(error);
   return data || [];
 }
+
+/* =========================================================================
+   CAMPUS EMERGENCY DIRECTORY (supabase/migrations/20260817000100_emergency_directory.sql)
+   -- verified campus office contacts (security/medical/facilities/transport/
+   hostel), distinct from the next-of-kin emergency_contacts above. Backend
+   shipped 2026-08-17; this is its first frontend consumer.
+========================================================================= */
+
+export async function listEmergencyDirectory() {
+  const { data, error } = await supabase.rpc("list_emergency_directory");
+  throwIfError(error);
+  return data || [];
+}
+
+export async function adminListEmergencyDirectory() {
+  const { data, error } = await supabase.rpc("admin_list_emergency_directory");
+  throwIfError(error);
+  return data || [];
+}
+
+export async function upsertEmergencyDirectoryEntry({
+  id = null, category, name, designation, description, phone, altPhone, email,
+  location, priority = "standard", is24x7 = false, weeklyHours = null, hoursNote,
+  campusId = null, displayOrder = 0,
+}) {
+  const { data, error } = await supabase.rpc("upsert_emergency_directory_entry", {
+    p_id: id, p_category: category, p_name: name, p_designation: designation || null,
+    p_description: description || null, p_phone: phone, p_alt_phone: altPhone || null,
+    p_email: email || null, p_location: location || null, p_priority: priority,
+    p_is_24x7: !!is24x7, p_weekly_hours: weeklyHours, p_hours_note: hoursNote || null,
+    p_campus_id: campusId, p_display_order: displayOrder,
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function verifyEmergencyDirectoryEntry(id, verified, notes = null) {
+  const { data, error } = await supabase.rpc("verify_emergency_directory_entry", { p_id: id, p_verified: verified, p_notes: notes });
+  throwIfError(error);
+  return data;
+}
+
+export async function setEmergencyDirectoryActive(id, active) {
+  const { data, error } = await supabase.rpc("set_emergency_directory_active", { p_id: id, p_active: active });
+  throwIfError(error);
+  return data;
+}
+
+// campuses.support_email/support_phone (20260818001100_campus_settings.sql)
+// existed unused until this pass -- every other "contact support" surface
+// (SOS, tickets, appeals) had nowhere campus-specific to point to.
+export async function getCampusContactInfo(campusId) {
+  if (!campusId) return null;
+  const { data, error } = await supabase.from("campuses").select("support_email, support_phone").eq("id", campusId).maybeSingle();
+  throwIfError(error);
+  return data;
+}
+
+/* =========================================================================
+   SUPPORT TICKETS (supabase/migrations/20260819000600_support_tickets.sql)
+========================================================================= */
+
+export async function createSupportTicket({ category, subject, description }) {
+  const { data, error } = await supabase.rpc("create_support_ticket", { p_category: category, p_subject: subject, p_description: description || "" });
+  throwIfError(error);
+  return data;
+}
+
+export async function getMySupportTickets(userId) {
+  const { data, error } = await supabase.from("support_tickets").select("*").eq("user_id", userId).order("created_at", { ascending: false });
+  throwIfError(error);
+  return data || [];
+}
+
+export async function listSupportTicketsAdmin({ status = null } = {}) {
+  let query = supabase.from("support_tickets")
+    .select("*, reporter:profiles!support_tickets_user_id_fkey(name,email), assignee:profiles!support_tickets_assigned_to_fkey(name)")
+    .order("created_at", { ascending: false });
+  if (status) query = query.eq("status", status);
+  const { data, error } = await query;
+  throwIfError(error);
+  return data || [];
+}
+
+export async function getSupportTicketMessages(ticketId) {
+  const { data, error } = await supabase.from("support_ticket_messages")
+    .select("*, sender:profiles!support_ticket_messages_sender_id_fkey(name)")
+    .eq("ticket_id", ticketId)
+    .order("created_at", { ascending: true });
+  throwIfError(error);
+  return data || [];
+}
+
+export async function addSupportTicketMessage(ticketId, body) {
+  const { data, error } = await supabase.rpc("add_support_ticket_message", { p_ticket_id: ticketId, p_body: body });
+  throwIfError(error);
+  return data;
+}
+
+export async function setSupportTicketStatus(ticketId, status) {
+  const { data, error } = await supabase.rpc("set_support_ticket_status", { p_ticket_id: ticketId, p_status: status });
+  throwIfError(error);
+  return data;
+}
+
+export async function assignSupportTicket(ticketId, staffId) {
+  const { data, error } = await supabase.rpc("assign_support_ticket", { p_ticket_id: ticketId, p_staff_id: staffId });
+  throwIfError(error);
+  return data;
+}
+
+/* =========================================================================
+   RESOURCE CATALOG MANAGEMENT (supabase/migrations/20260819000400_resource_management.sql)
+========================================================================= */
+
+export async function listResourcesAdmin(campusId) {
+  let query = supabase.from("resources").select("*, locations(name)").order("name");
+  if (campusId) query = query.eq("campus_id", campusId);
+  const { data, error } = await query;
+  throwIfError(error);
+  return data || [];
+}
+
+export async function upsertResourceAdmin({
+  id = null, campusId, name, resourceType, locationId = null, capacity = null,
+  openingHours = null, approvalRequired = false, bufferMinutes = 0, available = true,
+}) {
+  const { data, error } = await supabase.rpc("admin_upsert_resource", {
+    p_id: id, p_campus_id: campusId, p_name: name, p_resource_type: resourceType || null,
+    p_location_id: locationId, p_capacity: capacity, p_opening_hours: openingHours,
+    p_approval_required: !!approvalRequired, p_buffer_minutes: bufferMinutes, p_available: !!available,
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function deleteResourceAdmin(id) {
+  const { error } = await supabase.rpc("admin_delete_resource", { p_id: id });
+  throwIfError(error);
+}
+
+/* =========================================================================
+   VENDOR MANAGER ACCOUNTS -- store/print (supabase/migrations/
+   20260819000300_vendor_manager_accounts.sql). Canteen's equivalents
+   (listCanteenStaffAccounts/add/removeCanteenStaffAccount) already live in
+   src/features/vendor/api.js -- these two extend the same mechanism to
+   store and print.
+========================================================================= */
+
+export async function listStoreStaffAccounts(storeId) {
+  const { data, error } = await supabase.from("store_staff_accounts").select("*, profiles(name,email)").eq("store_id", storeId);
+  throwIfError(error);
+  return data || [];
+}
+
+export async function addStoreStaffAccount(storeId, email) {
+  const { data, error } = await supabase.rpc("add_store_staff_account", { p_store_id: storeId, p_email: email });
+  throwIfError(error);
+  return data;
+}
+
+export async function removeStoreStaffAccount(staffAccountId) {
+  const { error } = await supabase.rpc("remove_store_staff_account", { p_staff_account_id: staffAccountId });
+  throwIfError(error);
+}
+
+export async function listPrintStaffAccounts(campusId) {
+  const { data, error } = await supabase.from("print_staff_accounts").select("*, profiles(name,email)").eq("campus_id", campusId);
+  throwIfError(error);
+  return data || [];
+}
+
+export async function addPrintStaffAccount(campusId, email) {
+  const { data, error } = await supabase.rpc("add_print_staff_account", { p_campus_id: campusId, p_email: email });
+  throwIfError(error);
+  return data;
+}
+
+export async function removePrintStaffAccount(staffAccountId) {
+  const { error } = await supabase.rpc("remove_print_staff_account", { p_staff_account_id: staffAccountId });
+  throwIfError(error);
+}
+
+/* =========================================================================
+   LOST & FOUND -- photo upload + matching (supabase/migrations/
+   20260819000500_lost_found_matching.sql). Same compress-then-upload-then-
+   getPublicUrl shape as uploadMarketplaceImage/uploadFoodImage, targeting
+   the lost-found-media bucket that's existed unused since 20260814001500.
+========================================================================= */
+
+function compressLostFoundImage(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = () => {
+      img.onerror = reject;
+      img.onload = () => {
+        const maxEdge = 1280;
+        const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.8);
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+export async function uploadLostFoundImage(file, ownerId) {
+  const blob = await compressLostFoundImage(file);
+  const path = `${ownerId}/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
+  const { error } = await supabase.storage.from("lost-found-media").upload(path, blob, { contentType: "image/jpeg" });
+  throwIfError(error);
+  const { data } = supabase.storage.from("lost-found-media").getPublicUrl(path);
+  return data.publicUrl;
+}
+
+export async function createLostFoundItemWithImages({ userId, campusId, itemType, title, description, category, location, imageUrls = [] }) {
+  if (!userId) throw new Error("Please sign in first.");
+  if (!isUuid(userId)) throw new Error("Invalid user ID. Please sign in again.");
+  if (!title?.trim() || !location?.trim()) throw new Error("Add an item title and location.");
+
+  const { data, error } = await supabase
+    .from("lost_found_items")
+    .insert({
+      user_id: userId,
+      campus_id: campusId,
+      item_type: itemType || "lost",
+      title: title.trim(),
+      description: description?.trim() || "",
+      category: category?.trim() || "Other",
+      location: location.trim(),
+      image_urls: imageUrls,
+    })
+    .select()
+    .single();
+
+  throwIfError(error);
+  return data;
+}
+
+export async function listLostFoundMatches(itemId) {
+  const { data, error } = await supabase.rpc("list_lost_found_matches", { p_item_id: itemId });
+  throwIfError(error);
+  return data || [];
+}

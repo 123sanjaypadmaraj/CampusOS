@@ -346,7 +346,11 @@ describe("App button interactions", () => {
     const openSosModal = async () => {
       render(<App />);
       fireEvent.click(await screen.findByTestId("nav-services-button"));
-      fireEvent.click(await screen.findByRole("button", { name: /Emergency/i }));
+      // Matched on "Campus SOS" (the tile's subtitle), not just /Emergency/i --
+      // the Campus Emergency Directory service card (module 22) also contains
+      // "Emergency" in its name/description, which made the looser regex
+      // ambiguous between the two once both existed.
+      fireEvent.click(await screen.findByRole("button", { name: /Campus SOS/i }));
       await screen.findByText(/Hold for emergency/i);
     };
 

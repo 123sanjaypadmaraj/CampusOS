@@ -864,6 +864,15 @@ export async function removeCanteenStaffAccount(staffAccountId) {
   throwIfError(error);
 }
 
+// Same "manager" mechanism extended to store/print (supabase/migrations/
+// 20260819000300_vendor_manager_accounts.sql) -- re-exported here rather
+// than redefined, so VendorManagerAccounts below can call one consistent
+// vendorApi.* surface regardless of vendor type.
+export {
+  listStoreStaffAccounts, addStoreStaffAccount, removeStoreStaffAccount,
+  listPrintStaffAccounts, addPrintStaffAccount, removePrintStaffAccount,
+} from "../../services/mvpService";
+
 /* =========================================================================
    INVENTORY (stock audit trail + report)
    (supabase/migrations/20260817000600_food_inventory_ops.sql)

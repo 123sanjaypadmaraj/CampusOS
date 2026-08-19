@@ -72,7 +72,6 @@ import {
   toggleSavedEvent,
   cancelEventRegistration,
   getLostFoundItems,
-  createLostFoundItem,
   claimLostFoundItem,
   getMarketplaceListings,
   getMyMarketplaceListings,
@@ -93,6 +92,9 @@ import {
   listMyEmergencyContacts,
   upsertEmergencyContact,
   deleteEmergencyContact,
+  uploadLostFoundImage,
+  createLostFoundItemWithImages,
+  listLostFoundMatches,
 } from "./services/mvpService";
 import { openRazorpayCheckout } from "./features/payments/razorpay";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
@@ -106,6 +108,8 @@ import * as clubApi from "./features/clubs/api";
 import Marketplace from "./features/marketplace/Marketplace";
 import { renewMarketplaceListing } from "./features/marketplace/api";
 import AcademicHub from "./features/academics/AcademicHub";
+import EmergencyDirectory from "./features/emergency/EmergencyDirectory";
+import SupportService from "./features/support/SupportCenter";
 import TeamsBoard from "./features/teams/TeamsBoard";
 import { applyToTeam } from "./features/teams/api";
 import {
@@ -243,6 +247,7 @@ import {
   HiTrash,
   HiPhoto,
   HiNoSymbol,
+  HiLifebuoy,
   HiHandThumbUp,
   HiHandThumbDown,
   HiFlag,
@@ -290,6 +295,7 @@ const ROUTABLE_KEYS = new Set([
   "map", "legal", "people", "clubs", "food", "store", "ai", "admin", "vendor",
   "facilities", "autonomous", "calendar", "notifications", "activity",
   "print", "issues", "booking", "lost", "market", "pass", "hostel", "delivery", "academics",
+  "emergencydirectory", "support",
   "verify-email", "reset-password",
 ]);
 
@@ -941,6 +947,20 @@ const services = [
     text: "Department/faculty announcements, assignments, timetable and academic calendar",
     action: "Open",
     id: "academics",
+  },
+  {
+    icon: <HiPhone />,
+    title: "Emergency Directory",
+    text: "Verified security, medical, hostel and transport contacts",
+    action: "View",
+    id: "emergencydirectory",
+  },
+  {
+    icon: <HiLifebuoy />,
+    title: "Support",
+    text: "Account, payment or technical problems — talk to campus staff",
+    action: "Get help",
+    id: "support",
   },
 ];
 
@@ -2349,6 +2369,8 @@ function App() {
         "hostel",
         "delivery",
         "academics",
+        "emergencydirectory",
+        "support",
       ].includes(active)
     ) {
       return (
@@ -7102,6 +7124,18 @@ const serviceDetailData = {
     text: "Department/faculty announcements, assignments, timetable and academic calendar.",
     icon: <HiAcademicCap />,
   },
+  emergencydirectory: {
+    kicker: "EMERGENCY DIRECTORY",
+    title: "Campus Emergency Contacts",
+    text: "Verified security, medical, facilities, transport and hostel numbers — who to call, and whether they're open right now.",
+    icon: <HiPhone />,
+  },
+  support: {
+    kicker: "SUPPORT",
+    title: "Get Help",
+    text: "Account, payment or technical problems that aren't a facilities issue — talk to campus staff directly.",
+    icon: <HiLifebuoy />,
+  },
 };
 
 const PRINT_CANCELLABLE_STATUSES = new Set(["AWAITING_PAYMENT", "UPLOADED", "PROCESSING", "QUEUED", "FAILED"]);
@@ -7275,6 +7309,14 @@ function ServiceDetail({ serviceId, notify, go, openModal, openLogin, authUser, 
       {serviceId === "academics" && (
         <AcademicHub profile={profile} notify={notify} />
       )}
+
+      {serviceId === "emergencydirectory" && (
+        <EmergencyDirectory />
+      )}
+
+      {serviceId === "support" && (
+        <SupportService notify={notify} authUser={authUser} openLogin={openLogin} campusId={campusId} />
+      )}
     </section>
   );
 }
@@ -7365,6 +7407,78 @@ function BookingService({ notify, authUser, openLogin, resources: dbResources = 
 
 const LOST_FOUND_CATEGORIES = ["Electronics", "ID card", "Bag", "Documents", "Keys", "Clothing", "Other"];
 
+function LostFoundClaimModal({ item, authUser, notify, onClose, onClaimed }) {
+  const [proof, setProof] = useState("");
+  const [image, setImage] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    if (!proof.trim()) { notify("Describe how you can prove this item is yours"); return; }
+    try {
+      setSaving(true);
+      let proofText = proof.trim();
+      if (image) {
+        const url = await uploadLostFoundImage(image, authUser.id);
+        proofText += `\n\nProof photo: ${url}`;
+      }
+      await claimLostFoundItem({ itemId: item.id, userId: authUser.id, proof: proofText });
+      notify("Claim submitted — staff will verify and contact you");
+      onClaimed();
+    } catch (error) {
+      notify(error.message || "Could not claim item");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell kicker="CLAIM ITEM" title={`Claim "${item.title}"`} onClose={onClose}>
+      <label>How can you prove this is yours?
+        <textarea rows={3} value={proof} onChange={(e) => setProof(e.target.value)} placeholder="A unique mark, what's inside, receipt details, a matching photo…" />
+      </label>
+      <label>Proof photo (optional)
+        <input type="file" accept="image/*" onChange={(e) => setImage(e.target.files?.[0] || null)} />
+      </label>
+      <p style={{ color: "var(--muted)", fontSize: 13 }}>Staff will verify your claim before handover — this doesn&rsquo;t hand the item over automatically.</p>
+      <button className="primary wide" disabled={saving || !proof.trim()} onClick={submit}>
+        {saving ? "Submitting…" : "Submit claim"}
+      </button>
+    </ModalShell>
+  );
+}
+
+function LostFoundMatchesPanel({ itemId, notify }) {
+  const [matches, setMatches] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    listLostFoundMatches(itemId)
+      .then(setMatches)
+      .catch((err) => { notify(err.message || "Could not load possible matches"); setMatches([]); })
+      .finally(() => setLoading(false));
+  }, [itemId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading) return <LoadingState label="Looking for possible matches…" />;
+  if (!matches?.length) return <EmptyState title="No possible matches yet" text="We'll notify you if a matching report comes in." />;
+
+  return (
+    <div className="resource-list">
+      {matches.map((m) => (
+        <article className="resource-row" key={m.id}>
+          <div className="resource-icon"><HiMagnifyingGlassCircle /></div>
+          <div>
+            <b>{m.title}</b>
+            <small>{m.item_type === "found" ? "Found" : "Lost"} · {m.category} · {m.location}</small>
+            {m.description && <small>{m.description}</small>}
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+const LOST_FOUND_FILTERS = ["all", "lost", "found"];
+
 function LostService({ notify, authUser, openLogin, campusId, items: dbItems = [], loaded = true, onChange }) {
   const [reporting, setReporting] = useState(false);
   const [itemType, setItemType] = useState("lost");
@@ -7372,6 +7486,12 @@ function LostService({ notify, authUser, openLogin, campusId, items: dbItems = [
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("Other");
   const [location, setLocation] = useState("");
+  const [reportImages, setReportImages] = useState([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [claimingItem, setClaimingItem] = useState(null);
+  const [matchesFor, setMatchesFor] = useState(null);
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [search, setSearch] = useState("");
 
   const resetForm = () => {
     setItemType("lost");
@@ -7379,7 +7499,14 @@ function LostService({ notify, authUser, openLogin, campusId, items: dbItems = [
     setDescription("");
     setCategory("Other");
     setLocation("");
+    setReportImages([]);
   };
+
+  const filtered = dbItems.filter((item) => {
+    if (typeFilter !== "all" && item.item_type !== typeFilter) return false;
+    if (search.trim() && !`${item.title} ${item.description} ${item.category} ${item.location}`.toLowerCase().includes(search.trim().toLowerCase())) return false;
+    return true;
+  });
 
   if (loaded && dbItems.length === 0 && !reporting) {
     return (
@@ -7399,9 +7526,34 @@ function LostService({ notify, authUser, openLogin, campusId, items: dbItems = [
   return (
     <div className="resource-list">
       {!loaded && <LoadingState label="Loading lost & found reports…" />}
-      {loaded && dbItems.map((item) => (
+
+      {loaded && dbItems.length > 0 && (
+        <div className="socialize-filter-row">
+          {LOST_FOUND_FILTERS.map((f) => (
+            <button key={f} className={typeFilter === f ? "chip active" : "chip"} onClick={() => setTypeFilter(f)}>
+              {f === "all" ? "All" : f === "lost" ? "Lost" : "Found"}
+            </button>
+          ))}
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by keyword, category or location"
+            style={{ flex: 1, minWidth: 160, padding: "8px 12px", borderRadius: 999, border: "1px solid var(--line)" }}
+          />
+        </div>
+      )}
+
+      {loaded && dbItems.length > 0 && filtered.length === 0 && (
+        <EmptyState title="No matches" text="Try a different filter or search term." />
+      )}
+
+      {loaded && filtered.map((item) => (
         <article className="resource-row" key={item.id}>
-          <div className="resource-icon"><HiMagnifyingGlassCircle /></div>
+          {item.image_urls?.[0] ? (
+            <img src={item.image_urls[0]} alt="" className="resource-icon" style={{ objectFit: "cover" }} />
+          ) : (
+            <div className="resource-icon"><HiMagnifyingGlassCircle /></div>
+          )}
           <div>
             <b>{item.title}</b>
             <small>
@@ -7409,24 +7561,19 @@ function LostService({ notify, authUser, openLogin, campusId, items: dbItems = [
               {item.status === "claim_pending" ? " · Claim pending staff verification" : ""}
             </small>
           </div>
-          {item.status === "claim_pending" ? (
-            <strong>Pending</strong>
-          ) : (
-            <button onClick={async () => {
-              if (!authUser) { openLogin?.(); notify("Sign in to claim an item"); return; }
-              const proof = window.prompt("Describe how you can prove this item is yours (e.g. a unique mark, what's inside, receipt details). Staff will verify before handover.");
-              if (!proof?.trim()) return;
-              try {
-                await claimLostFoundItem({ itemId: item.id, userId: authUser.id, proof });
-                onChange?.((items) => items.map((i) => (i.id === item.id ? { ...i, status: "claim_pending" } : i)));
-                notify("Claim submitted — staff will verify and contact you");
-              } catch (error) {
-                notify(error.message || "Could not claim item");
-              }
-            }}>
-              Claim
-            </button>
-          )}
+          <div className="chips">
+            <button className="ghost" onClick={() => setMatchesFor(item)}>Matches</button>
+            {item.status === "claim_pending" ? (
+              <strong>Pending</strong>
+            ) : (
+              <button onClick={() => {
+                if (!authUser) { openLogin?.(); notify("Sign in to claim an item"); return; }
+                setClaimingItem(item);
+              }}>
+                Claim
+              </button>
+            )}
+          </div>
         </article>
       ))}
       <button className="primary" onClick={() => setReporting(true)}>
@@ -7446,20 +7593,50 @@ function LostService({ notify, authUser, openLogin, campusId, items: dbItems = [
           </label>
           <label>{itemType === "found" ? "Where you found it" : "Last seen location"}<input value={location} onChange={(e) => setLocation(e.target.value)} /></label>
           <label>Description (optional)<textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Distinguishing details help the other person prove ownership" /></label>
-          <button className="primary wide" onClick={async () => {
+          <label>Photos (optional)
+            <input type="file" accept="image/*" multiple onChange={(e) => setReportImages(Array.from(e.target.files || []))} />
+          </label>
+          {reportImages.length > 0 && <small>{reportImages.length} photo{reportImages.length === 1 ? "" : "s"} selected</small>}
+          <button className="primary wide" disabled={submitting} onClick={async () => {
             if (!authUser) { openLogin?.(); notify("Sign in to report an item"); return; }
             try {
-              const item = await createLostFoundItem({ userId: authUser.id, campusId, itemType, title, description, category, location });
+              setSubmitting(true);
+              const imageUrls = [];
+              for (const file of reportImages) {
+                imageUrls.push(await uploadLostFoundImage(file, authUser.id));
+              }
+              const item = await createLostFoundItemWithImages({ userId: authUser.id, campusId, itemType, title, description, category, location, imageUrls });
               onChange?.((items) => [item, ...items]);
               setReporting(false);
               resetForm();
               notify(itemType === "found" ? "Found item reported — thanks for helping out" : "Lost item reported");
             } catch (error) {
               notify(error.message || "Could not report item");
+            } finally {
+              setSubmitting(false);
             }
           }}>
-            Submit report
+            {submitting ? "Submitting…" : "Submit report"}
           </button>
+        </ModalShell>
+      )}
+
+      {claimingItem && (
+        <LostFoundClaimModal
+          item={claimingItem}
+          authUser={authUser}
+          notify={notify}
+          onClose={() => setClaimingItem(null)}
+          onClaimed={() => {
+            onChange?.((items) => items.map((i) => (i.id === claimingItem.id ? { ...i, status: "claim_pending" } : i)));
+            setClaimingItem(null);
+          }}
+        />
+      )}
+
+      {matchesFor && (
+        <ModalShell kicker="POSSIBLE MATCHES" title={`Matches for "${matchesFor.title}"`} onClose={() => setMatchesFor(null)}>
+          <LostFoundMatchesPanel itemId={matchesFor.id} notify={notify} />
         </ModalShell>
       )}
     </div>

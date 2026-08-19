@@ -4,7 +4,7 @@ import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States
 import { verifyCampusPass } from "../../services/campusPassService";
 import * as facilitiesApi from "./api";
 import SosAlertsPanel from "./SosAlerts";
-import { EmergencyContactsTab } from "../admin/AdminCMS";
+import { EmergencyContactsTab, EmergencyDirectoryTab, ResourcesTab } from "../admin/AdminCMS";
 
 export default function FacilitiesDashboard({ notify, campusId }) {
   const [tab, setTab] = useState("sos");
@@ -23,15 +23,19 @@ export default function FacilitiesDashboard({ notify, campusId }) {
         <button className={tab === "sos" ? "chip active" : "chip"} onClick={() => setTab("sos")}><HiShieldCheck /> SOS Alerts</button>
         <button className={tab === "tickets" ? "chip active" : "chip"} onClick={() => setTab("tickets")}>Tickets</button>
         <button className={tab === "bookings" ? "chip active" : "chip"} onClick={() => setTab("bookings")}>Booking Approvals</button>
+        <button className={tab === "resources" ? "chip active" : "chip"} onClick={() => setTab("resources")}>Resources</button>
         <button className={tab === "pass" ? "chip active" : "chip"} onClick={() => setTab("pass")}><HiQrCode /> Verify Pass</button>
         <button className={tab === "emergencycontacts" ? "chip active" : "chip"} onClick={() => setTab("emergencycontacts")}><HiPhone /> Emergency Contacts</button>
+        <button className={tab === "emergencydirectory" ? "chip active" : "chip"} onClick={() => setTab("emergencydirectory")}><HiPhone /> Emergency Directory</button>
       </div>
 
       {tab === "sos" && <SosAlertsPanel notify={notify} />}
       {tab === "tickets" && <TicketQueue notify={notify} campusId={campusId} />}
       {tab === "bookings" && <BookingApprovals notify={notify} />}
+      {tab === "resources" && <ResourcesTab notify={notify} campusId={campusId} />}
       {tab === "pass" && <VerifyPassPanel notify={notify} />}
       {tab === "emergencycontacts" && <EmergencyContactsTab notify={notify} />}
+      {tab === "emergencydirectory" && <EmergencyDirectoryTab notify={notify} />}
     </section>
   );
 }
