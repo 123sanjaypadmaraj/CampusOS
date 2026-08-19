@@ -1945,6 +1945,12 @@ function formatEvent(event) {
     category: event.category || "Event",
     attendees: event.attendees || 0,
     description: event.description || "",
+    coverImageUrl: event.cover_image_url || null,
+    checkedInCount: event.checked_in_count || 0,
+    avgRating: event.avg_rating || null,
+    feedbackCount: event.feedback_count || 0,
+    certificates_enabled: event.certificates_enabled || false,
+    eventDate: event.event_date,
   };
 }
 
@@ -1969,6 +1975,11 @@ export async function getCampusEvents(
         capacity,
         registration_status,
         attendees,
+        checked_in_count,
+        avg_rating,
+        feedback_count,
+        cover_image_url,
+        certificates_enabled,
         clubs (
           id,
           name,
@@ -2026,7 +2037,8 @@ export async function getMyEventRegistrations(
         title,
         category,
         event_date,
-        place
+        place,
+        certificates_enabled
       )
     `)
     .eq("status", "confirmed")
@@ -2124,6 +2136,111 @@ export async function cancelEventRegistration({ eventId }) {
   const { error } = await supabase.rpc("cancel_event_registration", { p_event_id: eventId });
   throwIfError(error);
   return true;
+}
+
+/* =========================================================================
+   EVENTS -- QR ticket, organizer roster/check-in, feedback, cover image,
+   approval (supabase/migrations/20260819002000_events_production_completion.sql)
+========================================================================= */
+
+// Ticket for the signed-in user's own confirmed registration -- shown as a
+// QR code (see App.jsx's EventTicketModal) and re-fetchable any time after
+// registration, not just at the moment of registering.
+export async function getMyEventTicket({ eventId, userId }) {
+  if (!userId || !isUuid(eventId)) return null;
+  const { data, error } = await supabase
+    .from("event_registrations")
+    .select("id, contact_name, event_tickets(token, checked_in_at)")
+    .eq("event_id", eventId)
+    .eq("user_id", userId)
+    .eq("status", "confirmed")
+    .maybeSingle();
+  throwIfError(error);
+  if (!data) return null;
+  const ticket = Array.isArray(data.event_tickets) ? data.event_tickets[0] : data.event_tickets;
+  return ticket
+    ? { registrationId: data.id, token: ticket.token, checkedInAt: ticket.checked_in_at, name: data.contact_name }
+    : null;
+}
+
+// Organizer-only: confirmed registrants + waitlist for one event, with
+// contact details, ticket token and check-in status. Powers the roster
+// list, the check-in screen and the attendance CSV export.
+export async function getEventRoster(eventId) {
+  if (!isUuid(eventId)) throw new Error("Invalid event ID.");
+  const { data, error } = await supabase.rpc("get_event_roster", { p_event_id: eventId });
+  throwIfError(error);
+  return data || [];
+}
+
+// Scans (or manually entered) a ticket token at the door. Duplicate
+// check-in is rejected server-side (TICKET_ALREADY_USED).
+export async function checkinEventTicket(token) {
+  const cleanToken = (token || "").trim();
+  if (!cleanToken) throw new Error("Enter or scan a ticket code.");
+  const { data, error } = await supabase.rpc("checkin_event_ticket", { p_token: cleanToken });
+  throwIfError(error);
+  return data; // { event_id, user_id, name }
+}
+
+export async function submitEventFeedback({ eventId, rating, comment }) {
+  if (!isUuid(eventId)) throw new Error("Invalid event ID.");
+  const { data, error } = await supabase.rpc("submit_event_feedback", {
+    p_event_id: eventId,
+    p_rating: rating,
+    p_comment: comment || null,
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function getMyEventFeedback({ eventId, userId }) {
+  if (!userId || !isUuid(eventId)) return null;
+  const { data, error } = await supabase
+    .from("event_feedback")
+    .select("*")
+    .eq("event_id", eventId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  throwIfError(error);
+  return data || null;
+}
+
+// Public 'event-covers' bucket, path `${eventId}/${filename}` -- same
+// convention as club-gallery (clubs/api.js's uploadClubGalleryImage).
+export async function uploadEventCoverImage(eventId, file) {
+  if (!file) throw new Error("Choose an image to upload.");
+  if (!isUuid(eventId)) throw new Error("Save the event first, then add a cover image.");
+  const safeName = (file.name || "cover").replace(/[^a-zA-Z0-9._-]/g, "_");
+  const path = `${eventId}/${Date.now()}-${safeName}`;
+  const { error: uploadError } = await supabase.storage
+    .from("event-covers")
+    .upload(path, file, { cacheControl: "3600", upsert: false, contentType: file.type || "image/jpeg" });
+  throwIfError(uploadError);
+
+  const { data: pub } = supabase.storage.from("event-covers").getPublicUrl(path);
+  const { data, error } = await supabase
+    .from("events")
+    .update({ cover_image_url: pub?.publicUrl })
+    .eq("id", eventId)
+    .select()
+    .single();
+  throwIfError(error);
+  return data;
+}
+
+// Admin/moderator-only: approve or reject an event pending review (see the
+// events_approval_guard trigger -- any event created by a plain club
+// officer starts 'pending' and stays invisible to students until this
+// runs).
+export async function setEventApproval(eventId, decision, reason) {
+  if (!isUuid(eventId)) throw new Error("Invalid event ID.");
+  const { error } = await supabase.rpc("set_event_approval", {
+    p_event_id: eventId,
+    p_decision: decision,
+    p_reason: reason || null,
+  });
+  throwIfError(error);
 }
 
 export async function getMyRegisteredEventIds(userId) {

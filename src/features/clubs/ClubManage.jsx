@@ -15,10 +15,14 @@ import {
   HiCheck,
   HiXCircle,
   HiArrowDownTray,
+  HiQrCode,
+  HiCamera,
+  HiStar,
 } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import { TrendChart, StatTile } from "../../components/ui/Charts";
 import * as clubApi from "./api";
+import { getEventRoster, checkinEventTicket, uploadEventCoverImage } from "../../services/mvpService";
 
 function Modal({ title, kicker, onClose, children }) {
   return (
@@ -279,6 +283,7 @@ function MembersTab({ members, canManage, authUser, notify, onChange }) {
 
 function EventsTab({ clubId, campusId, events, authUser, notify, onChange }) {
   const [modal, setModal] = useState(null);
+  const [rosterFor, setRosterFor] = useState(null);
 
   return (
     <div>
@@ -294,11 +299,25 @@ function EventsTab({ clubId, campusId, events, authUser, notify, onChange }) {
               <b>{ev.title}</b>
               <small>
                 {new Date(ev.event_date).toLocaleString()} · {ev.attendees}{ev.capacity ? `/${ev.capacity}` : ""} registered
+                {" · "}{ev.checked_in_count || 0} checked in
                 {" · "}{ev.published ? "Published" : "Draft"} · {ev.registration_status}
+                {ev.approval_status === "pending" && " · ⚠ Waiting for admin approval"}
+                {ev.approval_status === "rejected" && ` · Rejected by admin${ev.rejection_reason ? `: ${ev.rejection_reason}` : ""}`}
+                {ev.avg_rating ? ` · ★ ${ev.avg_rating} (${ev.feedback_count})` : ""}
               </small>
             </div>
-            <div style={{ display: "flex", gap: 6 }}>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <button onClick={() => setRosterFor(ev)}><HiQrCode /> Roster &amp; check-in</button>
               <button onClick={() => setModal(ev)}><HiPencilSquare /> Edit</button>
+              <button
+                className="ghost"
+                onClick={async () => {
+                  try { await clubApi.setEventCertificatesEnabled(ev.id, !ev.certificates_enabled); notify(ev.certificates_enabled ? "Certificates turned off" : "Certificates enabled -- checked-in attendees can now download theirs"); onChange(); }
+                  catch (err) { notify(err.message || "Could not update certificates"); }
+                }}
+              >
+                {ev.certificates_enabled ? "Disable certificates" : "Enable certificates"}
+              </button>
               {ev.registration_status !== "CANCELLED" && (
                 <button
                   className="ghost"
@@ -326,7 +345,175 @@ function EventsTab({ clubId, campusId, events, authUser, notify, onChange }) {
           notify={notify}
         />
       )}
+      {rosterFor && (
+        <EventRosterModal event={rosterFor} onClose={() => setRosterFor(null)} notify={notify} />
+      )}
     </div>
+  );
+}
+
+// Roster + check-in + attendance export for one event. Check-in accepts
+// either a pasted/typed ticket token or, where the browser supports it, a
+// live camera scan via the native BarcodeDetector API -- no QR-decoding
+// dependency needed for that, and manual entry always works as a fallback
+// (the same posture this app already takes for pickup codes elsewhere).
+function EventRosterModal({ event, onClose, notify }) {
+  const [roster, setRoster] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [tokenInput, setTokenInput] = useState("");
+  const [checkingIn, setCheckingIn] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const videoRef = React.useRef(null);
+  const streamRef = React.useRef(null);
+  const scanTimerRef = React.useRef(null);
+
+  const load = async () => {
+    try {
+      setLoading(true);
+      setRoster(await getEventRoster(event.id));
+    } catch (err) {
+      notify(err.message || "Could not load roster");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, [event.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const stopScan = () => {
+    if (scanTimerRef.current) clearInterval(scanTimerRef.current);
+    scanTimerRef.current = null;
+    if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    setScanning(false);
+  };
+
+  useEffect(() => () => stopScan(), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const doCheckin = async (token) => {
+    try {
+      setCheckingIn(true);
+      const result = await checkinEventTicket(token);
+      notify(`${result.name || "Attendee"} checked in`);
+      setTokenInput("");
+      await load();
+    } catch (err) {
+      const msg = err.message || "";
+      if (msg.includes("TICKET_ALREADY_USED")) notify("That ticket was already used to check in.");
+      else if (msg.includes("TICKET_INVALID")) notify("That ticket code isn't valid for this event.");
+      else notify(msg || "Could not check in this ticket");
+    } finally {
+      setCheckingIn(false);
+    }
+  };
+
+  const startScan = async () => {
+    if (!("BarcodeDetector" in window)) {
+      notify("Camera scanning isn't supported in this browser -- type or paste the ticket code instead.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+      const detector = new window.BarcodeDetector({ formats: ["qr_code"] });
+      setScanning(true);
+      scanTimerRef.current = setInterval(async () => {
+        if (!videoRef.current) return;
+        try {
+          const codes = await detector.detect(videoRef.current);
+          if (codes.length > 0) {
+            stopScan();
+            doCheckin(codes[0].rawValue);
+          }
+        } catch {
+          // transient decode failures are expected between frames -- ignore
+        }
+      }, 400);
+    } catch (err) {
+      notify("Couldn't access the camera -- type or paste the ticket code instead.");
+    }
+  };
+
+  const exportCsv = () => {
+    if (!roster || roster.length === 0) { notify("Nothing to export yet"); return; }
+    const header = ["Name", "USN", "Email", "Phone", "Status", "Checked in at", "Registered at"];
+    const rows = roster.map((r) => [
+      r.name || "", r.usn || "", r.email || "", r.phone || "", r.status,
+      r.checked_in_at ? new Date(r.checked_in_at).toLocaleString() : "",
+      r.registered_at ? new Date(r.registered_at).toLocaleString() : "",
+    ]);
+    const csv = [header, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${event.title.replace(/[^a-zA-Z0-9._-]/g, "_")}-attendance.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const confirmed = (roster || []).filter((r) => r.status === "confirmed");
+  const waitlisted = (roster || []).filter((r) => r.status === "waitlisted");
+  const checkedInCount = confirmed.filter((r) => r.checked_in_at).length;
+
+  return (
+    <Modal kicker="EVENT" title={`${event.title} — roster`} onClose={() => { stopScan(); onClose(); }}>
+      <div className="analytics-grid" style={{ marginBottom: 16 }}>
+        <StatTile label="Registered" value={confirmed.length} />
+        <StatTile label="Checked in" value={checkedInCount} />
+        <StatTile label="Waitlisted" value={waitlisted.length} />
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <input
+          placeholder="Paste or type a ticket code"
+          value={tokenInput}
+          onChange={(e) => setTokenInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && tokenInput.trim()) doCheckin(tokenInput.trim()); }}
+          style={{ flex: 1, minWidth: 180 }}
+        />
+        <button className="primary" disabled={checkingIn || !tokenInput.trim()} onClick={() => doCheckin(tokenInput.trim())}>
+          {checkingIn ? "Checking in…" : "Check in"}
+        </button>
+        {!scanning ? (
+          <button onClick={startScan}><HiCamera /> Scan with camera</button>
+        ) : (
+          <button className="ghost" onClick={stopScan}><HiXCircle /> Stop scanning</button>
+        )}
+        <button onClick={exportCsv}><HiArrowDownTray /> Export attendance CSV</button>
+      </div>
+
+      {scanning && (
+        <video ref={videoRef} muted playsInline style={{ width: "100%", maxWidth: 360, borderRadius: 10, marginBottom: 12 }} />
+      )}
+
+      {loading ? <LoadingState label="Loading roster…" /> : (
+        <div className="profile-box" style={{ maxHeight: 320, overflowY: "auto" }}>
+          {(roster || []).length === 0 && <EmptyState title="No registrations yet" />}
+          {(roster || []).map((r, i) => (
+            <div className="club-roster-row" key={r.registration_id || `wait-${i}`}>
+              <div>
+                <b>{r.name || "Unnamed"}</b>
+                <small style={{ display: "block", color: "var(--muted)" }}>
+                  {r.usn || r.phone || "—"} {r.status === "waitlisted" ? `· Waitlist #${r.waitlist_position}` : ""}
+                </small>
+              </div>
+              <span className="role-badge">
+                {r.status === "waitlisted" ? "Waitlisted" : r.checked_in_at ? `Checked in ${new Date(r.checked_in_at).toLocaleTimeString()}` : "Not checked in"}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
   );
 }
 
@@ -337,20 +524,33 @@ function ClubEventForm({ event, clubId, campusId, authUser, onClose, onSaved, no
     event_date: event.event_date ? new Date(event.event_date).toISOString().slice(0, 16) : "",
     place: event.place || "", capacity: event.capacity || "", published: event.published !== false,
   });
+  const [coverFile, setCoverFile] = useState(null);
   const [saving, setSaving] = useState(false);
   const change = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   return (
     <Modal kicker="CLUB EVENT" title={event.id ? "Edit event" : "New event"} onClose={onClose}>
+      {event.approval_status === "pending" && (
+        <p style={{ marginBottom: 12 }}>This event is waiting for a campus admin to approve it -- it won&rsquo;t be visible to students until then.</p>
+      )}
+      {event.approval_status === "rejected" && (
+        <p style={{ marginBottom: 12 }}>An admin sent this back{event.rejection_reason ? `: "${event.rejection_reason}"` : "."} Saving changes resubmits it for review.</p>
+      )}
       <label>Title<input value={form.title} onChange={(e) => change("title", e.target.value)} /></label>
       <label>Category<input value={form.category} onChange={(e) => change("category", e.target.value)} /></label>
       <label>Description<textarea rows={3} value={form.description} onChange={(e) => change("description", e.target.value)} /></label>
       <label>Date &amp; time<input type="datetime-local" value={form.event_date} onChange={(e) => change("event_date", e.target.value)} /></label>
       <label>Place<input value={form.place} onChange={(e) => change("place", e.target.value)} /></label>
       <label>Capacity (optional)<input type="number" min="1" value={form.capacity} onChange={(e) => change("capacity", e.target.value)} /></label>
+      <label>Cover image (optional)
+        <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setCoverFile(e.target.files?.[0] || null)} />
+      </label>
+      {event.cover_image_url && !coverFile && (
+        <img src={event.cover_image_url} alt="" style={{ maxWidth: 160, borderRadius: 8, marginBottom: 12 }} />
+      )}
       <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <input type="checkbox" checked={form.published} onChange={(e) => change("published", e.target.checked)} style={{ width: "auto" }} />
-        Published (visible to students)
+        Published (visible to students, once approved)
       </label>
       <button
         className="primary wide"
@@ -358,7 +558,8 @@ function ClubEventForm({ event, clubId, campusId, authUser, onClose, onSaved, no
         onClick={async () => {
           try {
             setSaving(true);
-            await clubApi.upsertClubEvent(clubId, { ...event, ...form, campus_id: campusId, event_date: new Date(form.event_date).toISOString() }, authUser?.id);
+            const saved = await clubApi.upsertClubEvent(clubId, { ...event, ...form, campus_id: campusId, event_date: new Date(form.event_date).toISOString() }, authUser?.id);
+            if (coverFile) await uploadEventCoverImage(saved.id, coverFile);
             notify("Event saved");
             onSaved();
           } catch (err) {
@@ -378,6 +579,12 @@ function AnalyticsTab({ club, events, growth, meetings, applications }) {
   const upcoming = events.filter((e) => new Date(e.event_date) > new Date() && e.registration_status !== "CANCELLED").length;
   const totalAttendance = events.reduce((sum, e) => sum + (e.attendees || 0), 0);
   const avgAttendance = events.length ? Math.round(totalAttendance / events.length) : 0;
+  const totalCheckedIn = events.reduce((sum, e) => sum + (e.checked_in_count || 0), 0);
+  const showUpRate = totalAttendance ? Math.round((totalCheckedIn / totalAttendance) * 100) : null;
+  const ratedEvents = events.filter((e) => e.avg_rating);
+  const avgRating = ratedEvents.length
+    ? (ratedEvents.reduce((sum, e) => sum + Number(e.avg_rating), 0) / ratedEvents.length).toFixed(1)
+    : null;
 
   const totalMarked = meetings.reduce((sum, m) => sum + (m.marked || 0), 0);
   const totalPresent = meetings.reduce((sum, m) => sum + (m.present || 0), 0);
@@ -390,6 +597,8 @@ function AnalyticsTab({ club, events, growth, meetings, applications }) {
         <StatTile label="Total events" value={club.events} sub={`${upcoming} upcoming`} />
         <StatTile label="Total registrations" value={totalAttendance} />
         <StatTile label="Avg. per event" value={avgAttendance} />
+        <StatTile label="Checked in at events" value={totalCheckedIn} sub={showUpRate === null ? undefined : `${showUpRate}% show-up rate`} />
+        <StatTile label="Avg. event rating" value={avgRating === null ? "—" : `★ ${avgRating}`} />
         <StatTile label="Meetings logged" value={meetings.length} />
         <StatTile label="Meeting attendance rate" value={meetingAttendanceRate === null ? "—" : `${meetingAttendanceRate}%`} />
         <StatTile label="Pending applications" value={applications.length} />

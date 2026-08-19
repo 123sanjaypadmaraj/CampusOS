@@ -84,6 +84,14 @@ export async function cancelClubEvent(eventId) {
   throwIfError(error);
 }
 
+// Once an organizer turns this on, checked-in attendees can download a
+// certificate from their own Activity tab (client-generated, see
+// EventCertificateButton in App.jsx -- nothing is rendered/stored server-side).
+export async function setEventCertificatesEnabled(eventId, enabled) {
+  const { error } = await supabase.from("events").update({ certificates_enabled: enabled }).eq("id", eventId);
+  throwIfError(error);
+}
+
 export async function setClubMemberRole(memberId, role) {
   const { data, error } = await supabase.rpc("set_club_member_role", { p_member_id: memberId, p_role: role });
   throwIfError(error);

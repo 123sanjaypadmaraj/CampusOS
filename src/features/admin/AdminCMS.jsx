@@ -31,6 +31,7 @@ import * as opportunitiesApi from "../../services/opportunitiesService";
 import * as teamsApi from "../teams/api";
 import { deleteMessage } from "../../services/messagingService";
 import { getMyPrintShopStatus, setPrintShopStatus } from "../vendor/api";
+import { setEventApproval, uploadEventCoverImage } from "../../services/mvpService";
 import AdminAnalytics from "./Analytics";
 import SosAlertsPanel from "../facilities/SosAlerts";
 
@@ -248,7 +249,7 @@ function ModerationTab({ notify, authUser }) {
 
   useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const canModerateContent = (report) => ["post", "comment", "marketplace_listing", "lost_found_item"].includes(report.target_type);
+  const canModerateContent = (report) => ["post", "comment", "marketplace_listing", "lost_found_item", "event"].includes(report.target_type);
 
   const act = async (report, action) => {
     try {
@@ -1878,6 +1879,11 @@ function EventsClubsTab({ notify, campusId }) {
             <h2>Events</h2>
             <button className="primary" onClick={() => setEventModal({})}><HiPlus /> New event</button>
           </div>
+          {events.some((ev) => ev.approval_status === "pending") && (
+            <p style={{ marginBottom: 12 }}>
+              <HiExclamationTriangle /> {events.filter((ev) => ev.approval_status === "pending").length} event(s) submitted by club leaders are waiting for approval before students can see them.
+            </p>
+          )}
           <div className="resource-list">
             {events.length === 0 && <EmptyState icon={<HiCalendarDays />} title="No events yet" />}
             {events.map((ev) => (
@@ -1887,10 +1893,30 @@ function EventsClubsTab({ notify, campusId }) {
                   <small>
                     {new Date(ev.event_date).toLocaleString()} · {ev.place} ·{" "}
                     {ev.attendees}{ev.capacity ? `/${ev.capacity}` : ""} registered ·{" "}
+                    {ev.checked_in_count || 0} checked in ·{" "}
                     {ev.published ? "Published" : "Draft"}
+                    {ev.approval_status === "pending" && " · ⚠ Pending approval"}
+                    {ev.approval_status === "rejected" && ` · Rejected${ev.rejection_reason ? `: ${ev.rejection_reason}` : ""}`}
                   </small>
                 </div>
-                <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {ev.approval_status !== "approved" && (
+                    <>
+                      <button onClick={async () => {
+                        try { await setEventApproval(ev.id, "approved"); notify("Event approved"); reload(); }
+                        catch (err) { notify(err.message || "Could not approve event"); }
+                      }}>
+                        <HiCheck /> Approve
+                      </button>
+                      <button className="ghost" onClick={async () => {
+                        const reason = window.prompt("Reason for rejecting this event (shown to the organizer)?") || "";
+                        try { await setEventApproval(ev.id, "rejected", reason); notify("Event rejected"); reload(); }
+                        catch (err) { notify(err.message || "Could not reject event"); }
+                      }}>
+                        <HiXCircle /> Reject
+                      </button>
+                    </>
+                  )}
                   <button onClick={() => setEventModal(ev)}><HiPencilSquare /> Edit</button>
                   <button onClick={async () => {
                     try { await adminApi.setEventPublished(ev.id, !ev.published); notify(ev.published ? "Unpublished" : "Published"); reload(); }
@@ -1958,6 +1984,7 @@ function EventForm({ event, clubs, campusId, onClose, onSaved, notify }) {
     club_id: event.club_id || "", capacity: event.capacity || "",
     event_date: toLocalInput(event.event_date), published: event.published !== false,
   });
+  const [coverFile, setCoverFile] = useState(null);
   const [saving, setSaving] = useState(false);
   const change = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -1977,18 +2004,25 @@ function EventForm({ event, clubs, campusId, onClose, onSaved, notify }) {
       </div>
       <label>Place<input value={form.place} onChange={(e) => change("place", e.target.value)} /></label>
       <label>Description<textarea value={form.description} onChange={(e) => change("description", e.target.value)} /></label>
+      <label>Cover image (optional)
+        <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setCoverFile(e.target.files?.[0] || null)} />
+      </label>
+      {event.cover_image_url && !coverFile && (
+        <img src={event.cover_image_url} alt="" style={{ maxWidth: 160, borderRadius: 8, marginBottom: 12 }} />
+      )}
       <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <input type="checkbox" checked={form.published} onChange={(e) => change("published", e.target.checked)} /> Published
       </label>
       <button className="primary wide" disabled={saving || !form.title.trim() || !form.event_date} onClick={async () => {
         try {
           setSaving(true);
-          await adminApi.upsertEvent(campusId, {
+          const saved = await adminApi.upsertEvent(campusId, {
             ...event, ...form,
             event_date: new Date(form.event_date).toISOString(),
             capacity: form.capacity || null,
             club_id: form.club_id || null,
           });
+          if (coverFile) await uploadEventCoverImage(saved.id, coverFile);
           notify("Event saved");
           onSaved();
         } catch (err) { notify(err.message || "Could not save event"); }
