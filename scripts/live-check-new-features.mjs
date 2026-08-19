@@ -31,6 +31,21 @@ const facilitiesCreds = JSON.parse(
   fs.readFileSync(path.join(root, "scripts/.facilities-credentials.local.json"), "utf8")
 );
 
+// e2e.alice/bob no longer have fixed literal passwords (2026-08-18
+// credential-rotation incident, see SECURITY.md) -- read from the same
+// gitignored file every other live-check script now reads from. This
+// script doesn't go through env-target.mjs's resolveTarget(), so infer
+// staging-vs-production from which SUPABASE_URL actually resolved instead.
+const e2eCredsFile = SUPABASE_URL.includes("dzjzjlylsfpmymkcavrq")
+  ? ".e2e-credentials.local.json"
+  : ".e2e-credentials.staging.local.json";
+const e2eCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts", e2eCredsFile), "utf8"));
+const e2ePassword = (email) => {
+  const password = e2eCreds.find((r) => r.email === email)?.password;
+  if (!password) throw new Error(`No password known for ${email} in ${e2eCredsFile} -- run scripts/setup-test-users.mjs first.`);
+  return password;
+};
+
 let passCount = 0;
 let failCount = 0;
 function check(label, cond, extra) {
@@ -56,8 +71,8 @@ async function signIn(email, password) {
 
 async function main() {
   console.log("=== Messaging ===");
-  const alice = await signIn("e2e.alice@nhce.edu.in", "TestPass!2026Alice");
-  const bob = await signIn("e2e.bob@nhce.edu.in", "TestPass!2026Bob");
+  const alice = await signIn("e2e.alice@nhce.edu.in", e2ePassword("e2e.alice@nhce.edu.in"));
+  const bob = await signIn("e2e.bob@nhce.edu.in", e2ePassword("e2e.bob@nhce.edu.in"));
   console.log(`alice=${alice.userId} bob=${bob.userId}`);
 
   const marker = `live-check ${new Date().toISOString()}`;

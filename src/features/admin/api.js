@@ -209,6 +209,173 @@ export async function setClubMemberRole(memberId, role) {
   throwIfError(error);
 }
 
+/* ========================================================================
+   VENDOR MANAGEMENT (2026-08-18 "AdminCMS operating system" pass, part
+   1/5) -- entity-level oversight (create/deactivate/reassign ownership) of
+   canteens/stores. Deliberately NOT menu editing -- see the note at the
+   top of this file, that stays vendor-only. Print shop status reuses
+   vendor/api.js's getMyPrintShopStatus/setPrintShopStatus directly rather
+   than duplicating (it's a single per-campus row, not a list of entities).
+======================================================================== */
+
+export async function listVendorsAdmin(campusId) {
+  const [{ data: canteens, error: cErr }, { data: stores, error: sErr }] = await Promise.all([
+    supabase.from("canteens")
+      .select("id, name, subtitle, active, owner_id, campus_id, created_at, owner:owner_id(name, email)")
+      .eq("campus_id", campusId).order("name"),
+    supabase.from("stores")
+      .select("id, name, subtitle, category, active, owner_id, campus_id, created_at, owner:owner_id(name, email)")
+      .eq("campus_id", campusId).order("name"),
+  ]);
+  throwIfError(cErr);
+  throwIfError(sErr);
+  return [
+    ...(canteens || []).map((c) => ({ ...c, type: "canteen" })),
+    ...(stores || []).map((s) => ({ ...s, type: "store" })),
+  ];
+}
+
+export async function createVendor(campusId, { type, name, ownerEmail, subtitle, category }) {
+  const { data, error } = await supabase.rpc("admin_create_vendor", {
+    p_type: type, p_campus_id: campusId, p_name: name, p_owner_email: ownerEmail,
+    p_subtitle: subtitle || null, p_category: category || null,
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function setVendorActive(type, id, active) {
+  const { error } = await supabase.rpc("admin_set_vendor_active", { p_type: type, p_id: id, p_active: active });
+  throwIfError(error);
+}
+
+export async function transferVendorOwnership(type, id, newOwnerEmail) {
+  const { error } = await supabase.rpc("admin_transfer_vendor_ownership", { p_type: type, p_id: id, p_new_owner_email: newOwnerEmail });
+  throwIfError(error);
+}
+
+/* ========================================================================
+   FACILITIES OVERSIGHT (part 2/5) -- reads were already reachable via RLS
+   (tickets.read/bookings.approve or admin); this just gives them a UI, plus
+   the new assign_ticket() RPC for the one gap that had no write path at all.
+======================================================================== */
+
+export async function listTicketsAdmin(campusId) {
+  const { data, error } = await supabase
+    .from("service_requests")
+    .select("*, submitter:user_id(name, email), assignee:assigned_to(name, email)")
+    .eq("campus_id", campusId)
+    .order("created_at", { ascending: false })
+    .limit(200);
+  throwIfError(error);
+  return data || [];
+}
+
+export async function listFacilitiesStaff(campusId) {
+  const { data, error } = await supabase
+    .from("profiles").select("id, name, email")
+    .eq("campus_id", campusId).eq("role", "facilities_staff").order("name");
+  throwIfError(error);
+  return data || [];
+}
+
+export async function assignTicket(requestId, staffId) {
+  const { data, error } = await supabase.rpc("assign_ticket", { p_request_id: requestId, p_staff_id: staffId });
+  throwIfError(error);
+  return data;
+}
+
+export async function transitionTicketStatus(requestId, toStatus, notes) {
+  const { data, error } = await supabase.rpc("transition_ticket_status", { p_request_id: requestId, p_to_status: toStatus, p_notes: notes || null });
+  throwIfError(error);
+  return data;
+}
+
+export async function listBookingsAdmin(campusId) {
+  const { data, error } = await supabase
+    .from("bookings")
+    .select("*, requester:user_id(name, email), resource:resource_id!inner(name, campus_id, resource_type)")
+    .eq("resource.campus_id", campusId)
+    .order("start_time", { ascending: false })
+    .limit(200);
+  throwIfError(error);
+  return data || [];
+}
+
+export async function setBookingStatusAdmin(bookingId, status) {
+  const { data, error } = await supabase.rpc("set_booking_status", { p_booking_id: bookingId, p_status: status });
+  throwIfError(error);
+  return data;
+}
+
+/* ========================================================================
+   SYSTEM HEALTH (part 3/5)
+======================================================================== */
+
+export async function getSystemHealth() {
+  const { data, error } = await supabase.rpc("admin_system_health");
+  throwIfError(error);
+  return data;
+}
+
+export async function getEdgeFunctionHealth() {
+  const { data, error } = await supabase.functions.invoke("system-health", { method: "GET" });
+  throwIfError(error);
+  return data;
+}
+
+/* ========================================================================
+   CAMPUS SETTINGS / CONFIGURATION (part 4/5)
+======================================================================== */
+
+export async function listCampusesAdmin() {
+  const { data, error } = await supabase.from("campuses").select("*").order("name");
+  throwIfError(error);
+  return data || [];
+}
+
+export async function updateCampusSettings(campusId, fields) {
+  const { data, error } = await supabase.rpc("admin_update_campus", {
+    p_campus_id: campusId,
+    p_name: fields.name ?? null,
+    p_domain: fields.domain ?? null,
+    p_timezone: fields.timezone ?? null,
+    p_active: fields.active ?? null,
+    p_support_email: fields.supportEmail ?? null,
+    p_support_phone: fields.supportPhone ?? null,
+    p_settings: fields.settings ?? null,
+  });
+  throwIfError(error);
+  return data;
+}
+
+/* ========================================================================
+   FEATURE FLAGS (part 5/5) -- reads go straight through feature_flags_read
+   RLS (config, not secret -- same posture as announcements/campuses), no
+   RPC needed for listing. Writes are RPC-only, matching that table having
+   no write RLS policy at all.
+======================================================================== */
+
+export async function listFeatureFlags() {
+  const { data, error } = await supabase.from("feature_flags").select("*").order("key");
+  throwIfError(error);
+  return data || [];
+}
+
+export async function upsertFeatureFlag({ key, campusId, description, enabled, rolloutPercentage }) {
+  const { data, error } = await supabase.rpc("admin_upsert_feature_flag", {
+    p_key: key, p_campus_id: campusId ?? null, p_description: description || null,
+    p_enabled: !!enabled, p_rollout_percentage: rolloutPercentage ?? 100,
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function deleteFeatureFlag(key, campusId) {
+  const { error } = await supabase.rpc("admin_delete_feature_flag", { p_key: key, p_campus_id: campusId ?? null });
+  throwIfError(error);
+}
+
 export {
   listPendingVerifications,
   reviewStudentVerification,
@@ -248,6 +415,9 @@ export {
   listBannedWords,
   addBannedWord,
   removeBannedWord,
+  listProhibitedListingTerms,
+  addProhibitedListingTerm,
+  removeProhibitedListingTerm,
   listSuspensionAppeals,
   resolveSuspensionAppeal,
 } from "../../services/mvpService";

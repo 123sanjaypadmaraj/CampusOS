@@ -104,6 +104,7 @@ import FacilitiesDashboard from "./features/facilities/FacilitiesDashboard";
 import ClubManage from "./features/clubs/ClubManage";
 import * as clubApi from "./features/clubs/api";
 import Marketplace from "./features/marketplace/Marketplace";
+import { renewMarketplaceListing } from "./features/marketplace/api";
 import AcademicHub from "./features/academics/AcademicHub";
 import TeamsBoard from "./features/teams/TeamsBoard";
 import { applyToTeam } from "./features/teams/api";
@@ -5974,7 +5975,16 @@ function YourActivity({
               {tab === "food" && <ActivityFoodOrders orders={orders} go={go} />}
               {tab === "events" && <ActivityEventRegistrations items={eventRegs} go={go} />}
               {tab === "clubs" && <ActivityClubs items={clubActivity} go={go} />}
-              {tab === "marketplace" && <ActivityMarketplace items={myListings} go={go} />}
+              {tab === "marketplace" && (
+                <ActivityMarketplace
+                  items={myListings}
+                  go={go}
+                  notify={notify}
+                  onRenewed={(updated) =>
+                    setMyListings((list) => list.map((l) => (l.id === updated.id ? { ...l, status: updated.status, expires_at: updated.expires_at } : l)))
+                  }
+                />
+              )}
               {tab === "services" && <ActivityServiceRequests items={serviceRequests} go={go} />}
               {tab === "bookings" && <ActivityBookings items={bookings} go={go} />}
               {tab === "print" && <ActivityPrintJobs items={printJobs} go={go} />}
@@ -6135,7 +6145,9 @@ function ActivityClubs({ items, go }) {
   );
 }
 
-function ActivityMarketplace({ items, go }) {
+function ActivityMarketplace({ items, go, notify, onRenewed }) {
+  const [renewingId, setRenewingId] = useState(null);
+
   if (!items.length) {
     return (
       <EmptyState
@@ -6146,19 +6158,44 @@ function ActivityMarketplace({ items, go }) {
       />
     );
   }
+
+  const renew = async (e, listing) => {
+    e.stopPropagation();
+    try {
+      setRenewingId(listing.id);
+      const updated = await renewMarketplaceListing(listing.id);
+      onRenewed?.(updated);
+      notify?.("Listing renewed for another 60 days");
+    } catch (err) {
+      notify?.(err.message || "Could not renew this listing");
+    } finally {
+      setRenewingId(null);
+    }
+  };
+
   return (
     <div className="activity-list">
-      {items.map((listing) => (
-        <ActivityRow
-          key={listing.id}
-          icon={<HiShoppingBag />}
-          title={listing.title}
-          subtitle={`${listing.category || "Other"} · ${listing.condition || "Used"}${listing.created_at ? ` · Listed ${new Date(listing.created_at).toLocaleDateString()}` : ""}`}
-          meta={activityMoney(listing.price)}
-          status={listing.status}
-          onClick={() => go("market")}
-        />
-      ))}
+      {items.map((listing) => {
+        const canRenew = listing.status === "expired" || (listing.status === "active" && listing.expires_at && new Date(listing.expires_at) - Date.now() < 7 * 24 * 60 * 60 * 1000);
+        return (
+          <ActivityRow
+            key={listing.id}
+            icon={<HiShoppingBag />}
+            title={listing.title}
+            subtitle={`${listing.category || "Other"} · ${listing.condition || "Used"}${listing.created_at ? ` · Listed ${new Date(listing.created_at).toLocaleDateString()}` : ""}`}
+            meta={activityMoney(listing.price)}
+            status={listing.status}
+            onClick={() => go("market")}
+            action={
+              canRenew ? (
+                <button className="ghost" disabled={renewingId === listing.id} onClick={(e) => renew(e, listing)}>
+                  {renewingId === listing.id ? "Renewing…" : listing.status === "expired" ? "Renew" : "Extend"}
+                </button>
+              ) : undefined
+            }
+          />
+        );
+      })}
     </div>
   );
 }

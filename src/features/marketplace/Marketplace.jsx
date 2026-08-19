@@ -1,8 +1,11 @@
-import React, { useEffect, useState } from "react";
-import { HiPlus, HiXMark, HiShoppingCart, HiStar, HiCheckCircle, HiChatBubbleLeftRight } from "react-icons/hi2";
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  HiPlus, HiXMark, HiShoppingCart, HiStar, HiCheckCircle, HiChatBubbleLeftRight,
+  HiMagnifyingGlass, HiPencilSquare, HiFlag, HiNoSymbol, HiClock, HiPhoto,
+} from "react-icons/hi2";
 import { EmptyState } from "../../components/ui/States";
-import { createMarketplaceListing, markMarketplaceListingSold } from "../../services/mvpService";
-import { startConversation } from "../../services/messagingService";
+import { createMarketplaceListing, markMarketplaceListingSold, reportContent } from "../../services/mvpService";
+import { startConversation, blockUser } from "../../services/messagingService";
 import * as marketApi from "./api";
 
 function Modal({ title, kicker, onClose, children }) {
@@ -29,15 +32,33 @@ function Stars({ value, size }) {
 
 const CATEGORIES = ["Other", "Books & Notes", "Electronics", "Furniture", "Clothing", "Sports", "Stationery", "Cycles"];
 const CONDITIONS = ["New", "Like New", "Used", "For Parts"];
+const MAX_IMAGES = 6;
 
 export default function Marketplace({ notify, authUser, openLogin, campusId, listings: dbListings = [], onChange, onOpenConversation }) {
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState(null);
   const [selected, setSelected] = useState(null);
   const [ratingSummaries, setRatingSummaries] = useState({});
   const [unrated, setUnrated] = useState([]);
   const [ratingTarget, setRatingTarget] = useState(null);
 
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("All");
+  const [conditionFilter, setConditionFilter] = useState("All");
+  const [maxPrice, setMaxPrice] = useState("");
+
   const listings = dbListings;
+
+  const filteredListings = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return listings.filter((item) => {
+      if (q && !`${item.title} ${item.description || ""}`.toLowerCase().includes(q)) return false;
+      if (categoryFilter !== "All" && item.category !== categoryFilter) return false;
+      if (conditionFilter !== "All" && item.condition !== conditionFilter) return false;
+      if (maxPrice !== "" && Number(item.price) > Number(maxPrice)) return false;
+      return true;
+    });
+  }, [listings, search, categoryFilter, conditionFilter, maxPrice]);
 
   useEffect(() => {
     const sellerIds = [...new Set(listings.map((l) => l.seller_id).filter(Boolean))];
@@ -66,7 +87,32 @@ export default function Marketplace({ notify, authUser, openLogin, campusId, lis
         </div>
       )}
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
+      <div className="marketplace-toolbar" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
+        <label style={{ flex: "1 1 200px", position: "relative", margin: 0 }}>
+          <HiMagnifyingGlass style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--muted)" }} />
+          <input
+            style={{ paddingLeft: 32, width: "100%" }}
+            placeholder="Search listings…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </label>
+        <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+          <option value="All">All categories</option>
+          {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select value={conditionFilter} onChange={(e) => setConditionFilter(e.target.value)}>
+          <option value="All">Any condition</option>
+          {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <input
+          type="number"
+          min="0"
+          placeholder="Max price ₹"
+          style={{ width: 120 }}
+          value={maxPrice}
+          onChange={(e) => setMaxPrice(e.target.value)}
+        />
         <button
           className="primary"
           onClick={() => {
@@ -78,17 +124,22 @@ export default function Marketplace({ notify, authUser, openLogin, campusId, lis
         </button>
       </div>
 
-      {listings.length === 0 && (
-        <EmptyState icon={<HiShoppingCart />} title="No listings yet" text="Be the first to list something for sale." />
+      {filteredListings.length === 0 && (
+        <EmptyState
+          icon={<HiShoppingCart />}
+          title={listings.length === 0 ? "No listings yet" : "No listings match your filters"}
+          text={listings.length === 0 ? "Be the first to list something for sale." : "Try clearing a filter or searching for something else."}
+        />
       )}
 
       <div className="marketplace-grid">
-        {listings.map((item) => {
+        {filteredListings.map((item) => {
           const summary = ratingSummaries[item.seller_id];
           return (
             <button key={item.id} className="listing-card" onClick={() => setSelected(item)}>
               <div className="listing-card-img">
                 {item.image_urls?.[0] ? <img src={item.image_urls[0]} alt={item.title} /> : <HiShoppingCart />}
+                {item.image_urls?.length > 1 && <span className="listing-image-count"><HiPhoto /> {item.image_urls.length}</span>}
               </div>
               <b>{item.title}</b>
               <span className="listing-price">₹{item.price}</span>
@@ -109,12 +160,34 @@ export default function Marketplace({ notify, authUser, openLogin, campusId, lis
       </div>
 
       {creating && (
-        <CreateListingModal
-          campusId={campusId}
+        <ListingFormModal
           authUser={authUser}
           notify={notify}
           onClose={() => setCreating(false)}
-          onCreated={(listing) => { onChange?.((items) => [listing, ...items]); setCreating(false); }}
+          onSaved={(listing) => {
+            onChange?.((items) => [{ ...listing, profiles: null }, ...items]);
+            setCreating(false);
+            notify("Listing published");
+          }}
+          submitLabel="Publish listing"
+          onSubmit={(form) => createMarketplaceListing({ userId: authUser.id, campusId, ...form })}
+        />
+      )}
+
+      {editing && (
+        <ListingFormModal
+          authUser={authUser}
+          notify={notify}
+          initial={editing}
+          onClose={() => setEditing(null)}
+          onSaved={(listing) => {
+            onChange?.((items) => items.map((i) => (i.id === listing.id ? { ...i, ...listing } : i)));
+            setSelected((s) => (s && s.id === listing.id ? { ...s, ...listing } : s));
+            setEditing(null);
+            notify("Listing updated");
+          }}
+          submitLabel="Save changes"
+          onSubmit={(form) => marketApi.updateMarketplaceListing({ listingId: editing.id, ...form })}
         />
       )}
 
@@ -127,6 +200,7 @@ export default function Marketplace({ notify, authUser, openLogin, campusId, lis
           notify={notify}
           onClose={() => setSelected(null)}
           onOpenConversation={onOpenConversation}
+          onEdit={() => { setEditing(selected); setSelected(null); }}
           onSold={(listing) => {
             onChange?.((items) => items.filter((i) => i.id !== listing.id));
             setSelected(null);
@@ -146,13 +220,48 @@ export default function Marketplace({ notify, authUser, openLogin, campusId, lis
   );
 }
 
-function CreateListingModal({ campusId, authUser, notify, onClose, onCreated }) {
-  const [form, setForm] = useState({ title: "", description: "", category: "Other", price: "", condition: "Used", location: "Campus" });
+// Shared create/edit form -- onSubmit does the actual create_marketplace_listing
+// insert or update_marketplace_listing() RPC call, this just collects the
+// fields + handles image upload, which is identical either way.
+function ListingFormModal({ authUser, notify, initial, onClose, onSaved, submitLabel, onSubmit }) {
+  const [form, setForm] = useState(() => ({
+    title: initial?.title || "",
+    description: initial?.description || "",
+    category: initial?.category || "Other",
+    price: initial?.price ?? "",
+    condition: initial?.condition || "Used",
+    location: initial?.location || "Campus",
+    imageUrls: initial?.image_urls || [],
+  }));
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [history, setHistory] = useState([]);
   const change = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
+  useEffect(() => {
+    if (!initial?.id) return;
+    marketApi.getListingEditHistory(initial.id).then(setHistory).catch(() => {});
+  }, [initial?.id]);
+
+  const addImages = async (fileList) => {
+    const files = Array.from(fileList || []).slice(0, MAX_IMAGES - form.imageUrls.length);
+    if (!files.length) return;
+    try {
+      setUploading(true);
+      const urls = [];
+      for (const file of files) {
+        urls.push(await marketApi.uploadMarketplaceImage(file, authUser.id));
+      }
+      setForm((f) => ({ ...f, imageUrls: [...f.imageUrls, ...urls].slice(0, MAX_IMAGES) }));
+    } catch (err) {
+      notify(err.message || "Could not upload image");
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
-    <Modal kicker="MARKETPLACE" title="Create listing" onClose={onClose}>
+    <Modal kicker="MARKETPLACE" title={initial ? "Edit listing" : "Create listing"} onClose={onClose}>
       <label>Title<input value={form.title} onChange={(e) => change("title", e.target.value)} /></label>
       <label>Description<textarea rows={3} value={form.description} onChange={(e) => change("description", e.target.value)} /></label>
       <label>Category
@@ -167,34 +276,89 @@ function CreateListingModal({ campusId, authUser, notify, onClose, onCreated }) 
       </label>
       <label>Price (₹)<input type="number" min="0" value={form.price} onChange={(e) => change("price", e.target.value)} /></label>
       <label>Location<input value={form.location} onChange={(e) => change("location", e.target.value)} /></label>
+
+      <label>Photos ({form.imageUrls.length}/{MAX_IMAGES})
+        <input
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          multiple
+          disabled={uploading || form.imageUrls.length >= MAX_IMAGES}
+          onChange={(e) => { addImages(e.target.files); e.target.value = ""; }}
+        />
+      </label>
+      {uploading && <p style={{ fontSize: 12, color: "var(--muted)" }}>Uploading…</p>}
+      {form.imageUrls.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+          {form.imageUrls.map((url, i) => (
+            <div key={url} style={{ position: "relative" }}>
+              <img src={url} alt={`Listing ${i + 1}`} style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8 }} />
+              <button
+                type="button"
+                className="modal-close"
+                style={{ position: "absolute", top: -6, right: -6, width: 20, height: 20, fontSize: 10 }}
+                onClick={() => setForm((f) => ({ ...f, imageUrls: f.imageUrls.filter((u) => u !== url) }))}
+              >
+                <HiXMark />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <button
         className="primary wide"
-        disabled={saving || !form.title.trim() || Number(form.price) < 0}
+        disabled={saving || uploading || !form.title.trim() || Number(form.price) < 0}
         onClick={async () => {
           try {
             setSaving(true);
-            const listing = await createMarketplaceListing({ userId: authUser.id, campusId, ...form });
-            onCreated(listing);
-            notify("Listing published");
+            const listing = await onSubmit(form);
+            onSaved(listing);
           } catch (err) {
-            notify(err.message || "Could not publish listing");
+            notify(err.message || "Could not save this listing");
           } finally {
             setSaving(false);
           }
         }}
       >
-        {saving ? "Publishing…" : "Publish listing"}
+        {saving ? "Saving…" : submitLabel}
       </button>
+
+      {history.length > 0 && (
+        <details style={{ marginTop: 14 }}>
+          <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--muted)" }}>
+            <HiClock style={{ verticalAlign: "-2px" }} /> Edit history ({history.length})
+          </summary>
+          <div style={{ marginTop: 8 }}>
+            {history.map((h) => (
+              <div key={h.id} className="review-row">
+                <div className="review-row-head">
+                  <small>{new Date(h.created_at).toLocaleString()}</small>
+                </div>
+                <p style={{ fontSize: 12 }}>
+                  {h.old_values.title !== h.new_values.title && <>Title: &ldquo;{h.old_values.title}&rdquo; → &ldquo;{h.new_values.title}&rdquo;<br /></>}
+                  {Number(h.old_values.price) !== Number(h.new_values.price) && <>Price: ₹{h.old_values.price} → ₹{h.new_values.price}<br /></>}
+                  {h.old_values.condition !== h.new_values.condition && <>Condition: {h.old_values.condition} → {h.new_values.condition}<br /></>}
+                  {h.old_values.category !== h.new_values.category && <>Category: {h.old_values.category} → {h.new_values.category}</>}
+                </p>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
     </Modal>
   );
 }
 
-function ListingDetailModal({ listing, authUser, openLogin, campusId, notify, onClose, onSold, onOpenConversation }) {
+function ListingDetailModal({ listing, authUser, openLogin, campusId, notify, onClose, onSold, onOpenConversation, onEdit }) {
   const [summary, setSummary] = useState(null);
   const [reviews, setReviews] = useState([]);
   const [markingSold, setMarkingSold] = useState(false);
   const [messaging, setMessaging] = useState(false);
+  const [blocking, setBlocking] = useState(false);
+  const [activeImage, setActiveImage] = useState(0);
   const isOwner = listing.seller_id === authUser?.id;
+  const images = listing.image_urls?.length ? listing.image_urls : [];
+  const canEdit = isOwner && ["active", "pending"].includes(listing.status);
 
   const messageSeller = async () => {
     if (!authUser) {
@@ -214,6 +378,32 @@ function ListingDetailModal({ listing, authUser, openLogin, campusId, notify, on
     }
   };
 
+  const reportListing = async () => {
+    if (!authUser) { openLogin?.(); notify("Sign in to report a listing"); return; }
+    const reason = window.prompt("Why are you reporting this listing? (prohibited item, scam, spam, etc.)");
+    if (!reason?.trim()) return;
+    try {
+      await reportContent("marketplace_listing", listing.id, reason.trim());
+      notify("Reported to campus moderators");
+    } catch (err) {
+      notify(err.message || "Could not report this listing");
+    }
+  };
+
+  const blockSeller = async () => {
+    if (!authUser) { openLogin?.(); notify("Sign in first"); return; }
+    if (!window.confirm(`Block ${listing.profiles?.name || "this seller"}? They won't be able to message you anymore.`)) return;
+    try {
+      setBlocking(true);
+      await blockUser(listing.seller_id);
+      notify(`Blocked ${listing.profiles?.name || "this seller"}`);
+    } catch (err) {
+      notify(err.message || "Could not block this seller");
+    } finally {
+      setBlocking(false);
+    }
+  };
+
   useEffect(() => {
     marketApi.getSellerRatingSummary([listing.seller_id]).then((m) => setSummary(m[listing.seller_id] || null)).catch(() => {});
     marketApi.getSellerReviews(listing.seller_id).then(setReviews).catch(() => {});
@@ -221,14 +411,33 @@ function ListingDetailModal({ listing, authUser, openLogin, campusId, notify, on
 
   return (
     <Modal kicker="LISTING" title={listing.title} onClose={onClose}>
-      <div className="listing-card-img" style={{ height: 180, marginBottom: 14 }}>
-        {listing.image_urls?.[0] ? <img src={listing.image_urls[0]} alt={listing.title} /> : <HiShoppingCart />}
+      <div className="listing-card-img" style={{ height: 180, marginBottom: 8 }}>
+        {images[activeImage] ? <img src={images[activeImage]} alt={listing.title} /> : <HiShoppingCart />}
       </div>
+      {images.length > 1 && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+          {images.map((url, i) => (
+            <button
+              key={url}
+              onClick={() => setActiveImage(i)}
+              style={{ padding: 0, border: i === activeImage ? "2px solid var(--accent)" : "2px solid transparent", borderRadius: 6 }}
+            >
+              <img src={url} alt="" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 4, display: "block" }} />
+            </button>
+          ))}
+        </div>
+      )}
+
       <p style={{ color: "var(--muted)", fontSize: 13 }}>{listing.description || "No description provided."}</p>
       <div className="listing-meta" style={{ marginBottom: 10 }}>
         <span>{listing.category} · {listing.condition} · {listing.location}</span>
         <span className="listing-price">₹{listing.price}</span>
       </div>
+      {listing.expires_at && listing.status === "active" && (
+        <p style={{ fontSize: 11, color: "var(--muted)", marginTop: -6 }}>
+          <HiClock style={{ verticalAlign: "-2px" }} /> Listed until {new Date(listing.expires_at).toLocaleDateString()}
+        </p>
+      )}
 
       <h3 style={{ fontSize: 14, margin: "16px 0 8px" }}>
         Seller: {listing.profiles?.name || "Campus seller"}
@@ -256,17 +465,36 @@ function ListingDetailModal({ listing, authUser, openLogin, campusId, notify, on
       ))}
 
       {isOwner ? (
-        <button
-          className="primary wide"
-          disabled={markingSold}
-          onClick={async () => { setMarkingSold(true); }}
-        >
-          Mark sold
-        </button>
+        <>
+          {canEdit && (
+            <button className="ghost wide" style={{ marginBottom: 8 }} onClick={onEdit}>
+              <HiPencilSquare /> Edit listing
+            </button>
+          )}
+          {listing.status === "active" && (
+            <button
+              className="primary wide"
+              disabled={markingSold}
+              onClick={async () => { setMarkingSold(true); }}
+            >
+              Mark sold
+            </button>
+          )}
+        </>
       ) : (
-        <button className="primary wide" disabled={messaging} onClick={messageSeller}>
-          <HiChatBubbleLeftRight /> {messaging ? "Starting…" : "Message seller"}
-        </button>
+        <>
+          <button className="primary wide" disabled={messaging} onClick={messageSeller}>
+            <HiChatBubbleLeftRight /> {messaging ? "Starting…" : "Message seller"}
+          </button>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button className="ghost" style={{ flex: 1 }} onClick={reportListing}>
+              <HiFlag /> Report
+            </button>
+            <button className="ghost" style={{ flex: 1 }} disabled={blocking} onClick={blockSeller}>
+              <HiNoSymbol /> Block seller
+            </button>
+          </div>
+        </>
       )}
 
       {markingSold && (

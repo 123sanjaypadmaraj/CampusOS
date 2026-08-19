@@ -73,3 +73,69 @@ export async function searchBuyers(campusId, query) {
   throwIfError(error);
   return data || [];
 }
+
+// Client-side compression before upload, same shape as vendor/api.js's
+// uploadFoodImage() -- resizes the longest edge to 1280px and re-encodes as
+// JPEG q0.8 via <canvas>, falling back to the original file untouched if
+// canvas/createImageBitmap isn't available rather than blocking the upload.
+async function compressImage(file, maxDim = 1280, quality = 0.8) {
+  if (typeof document === "undefined" || !file.type.startsWith("image/")) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+    return blob ? new File([blob], file.name.replace(/\.\w+$/, ".jpg"), { type: "image/jpeg" }) : file;
+  } catch {
+    return file;
+  }
+}
+
+// marketplace-media is a public bucket, RLS-scoped so a caller can only
+// write into their own `${auth.uid()}/...` folder (already existed, unused,
+// in 20260814001500_storage_buckets.sql).
+export async function uploadMarketplaceImage(file, ownerId) {
+  const compressed = await compressImage(file);
+  const path = `${ownerId}/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
+  const { error } = await supabase.storage.from("marketplace-media").upload(path, compressed, { contentType: "image/jpeg" });
+  throwIfError(error);
+  const { data } = supabase.storage.from("marketplace-media").getPublicUrl(path);
+  return data.publicUrl;
+}
+
+export async function updateMarketplaceListing({ listingId, title, description, category, price, condition, location, imageUrls }) {
+  const { data, error } = await supabase.rpc("update_marketplace_listing", {
+    p_listing_id: listingId,
+    p_title: title,
+    p_description: description,
+    p_category: category,
+    p_price: Number(price),
+    p_condition: condition,
+    p_location: location,
+    p_image_urls: imageUrls ?? null,
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function renewMarketplaceListing(listingId) {
+  const { data, error } = await supabase.rpc("renew_marketplace_listing", { p_listing_id: listingId });
+  throwIfError(error);
+  return data;
+}
+
+// Read-only, seller/moderator/admin-scoped by marketplace_listing_edits' own
+// RLS (20260818000700) -- no RPC needed, a plain table select is enough.
+export async function getListingEditHistory(listingId) {
+  const { data, error } = await supabase
+    .from("marketplace_listing_edits")
+    .select("id, old_values, new_values, created_at")
+    .eq("listing_id", listingId)
+    .order("created_at", { ascending: false });
+  throwIfError(error);
+  return data || [];
+}

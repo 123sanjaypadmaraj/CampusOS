@@ -1,0 +1,34 @@
+-- =============================================================================
+-- Real bug found live while building the facilities-oversight admin tab
+-- (part 2/5 of the AdminCMS pass), not by inspection: `service_requests`
+-- was originally bootstrapped by an even earlier proto-schema with
+-- `status text default 'pending'` and nullable -- 20260814000700's own
+-- `create table if not exists public.service_requests (... status text not
+-- null default 'SUBMITTED' ...)` was therefore a no-op against the column
+-- that already existed (same "if not exists is a no-op against a
+-- pre-existing table" gotcha this repo's audit_logs table hit before), and
+-- nothing since has ever run an explicit `alter column ... set default`/
+-- `set not null` to actually correct it. Confirmed live via
+-- information_schema: `column_default = 'pending'::text`, `is_nullable =
+-- 'YES'`, still true on 2026-08-18.
+--
+-- Not a live outage -- every real INSERT path in this codebase
+-- (createTicket in mvpService.js) already passes `status: "SUBMITTED"`
+-- explicitly, so the wrong default has never actually been hit by a real
+-- user. But it's a live landmine: any insert that DOES rely on the column
+-- default (as this pass's own live-check script did, and any future write
+-- path might) silently gets 'pending' -- a value the table's own
+-- `service_requests_status_check` constraint doesn't even allow, and the
+-- `service_requests_insert_own` RLS policy's `status = 'SUBMITTED'` check
+-- would reject as a confusing generic RLS-violation error with no hint
+-- about the real cause.
+--
+-- Safe to apply: checked every existing row's status first (13 'CLOSED',
+-- 1 'SUBMITTED', zero 'pending'/null -- the original 20260814000700
+-- migration's own `update ... set status = 'SUBMITTED' where status =
+-- 'pending'` already cleaned up historical rows, this only fixes the
+-- column's declared default/nullability for future inserts).
+-- =============================================================================
+
+alter table public.service_requests alter column status set default 'SUBMITTED';
+alter table public.service_requests alter column status set not null;

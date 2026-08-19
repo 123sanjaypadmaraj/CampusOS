@@ -21,10 +21,20 @@
 // Usage: node scripts/live-check-ai-action-system.mjs                 (staging)
 //        node scripts/live-check-ai-action-system.mjs --env=production --yes-production
 
+import fs from "node:fs";
+import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { resolveTarget } from "./env-target.mjs";
 
-const { SUPABASE_URL, ANON_KEY } = resolveTarget();
+const { SUPABASE_URL, ANON_KEY, root, target } = resolveTarget();
+const e2eCredsFile = target === "production" ? ".e2e-credentials.local.json" : ".e2e-credentials.staging.local.json";
+const e2eCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts", e2eCredsFile), "utf8"));
+const e2ePassword = (email) => {
+  const password = e2eCreds.find((r) => r.email === email)?.password;
+  if (!password) throw new Error(`No password known for ${email} in ${e2eCredsFile} -- run scripts/setup-test-users.mjs first.`);
+  return password;
+};
+
 
 let passCount = 0;
 let failCount = 0;
@@ -51,7 +61,7 @@ async function signIn(email, password) {
 
 async function main() {
   console.log("=== AI Action System (doc §16) ===");
-  const alice = await signIn("e2e.alice@nhce.edu.in", "TestPass!2026Alice");
+  const alice = await signIn("e2e.alice@nhce.edu.in", e2ePassword("e2e.alice@nhce.edu.in"));
 
   // -------------------------------------------------------------------
   // 1. Reminders -- brand new feature, fully independent of the assistant.
@@ -71,7 +81,7 @@ async function main() {
   const { data: reminder, error: createErr } = await alice.sb.rpc("create_reminder", { p_title: "LiveCheckReminder Pay hostel fees", p_remind_at: remindAt, p_notes: "before 5pm", p_source: "ai" });
   check("create_reminder succeeds with valid input (source='ai', as the assistant would send)", !createErr && reminder?.id && reminder.source === "ai", createErr?.message || reminder);
 
-  const bob = await signIn("e2e.bob@nhce.edu.in", "TestPass!2026Bob");
+  const bob = await signIn("e2e.bob@nhce.edu.in", e2ePassword("e2e.bob@nhce.edu.in"));
   const { data: bobsView } = await bob.sb.from("reminders").select("*").eq("id", reminder.id);
   check("RLS: another student cannot see Alice's reminder", (bobsView || []).length === 0, bobsView);
   const { error: bobDeleteErr } = await bob.sb.from("reminders").delete().eq("id", reminder.id);

@@ -11,9 +11,18 @@
 
 import { createClient } from "@supabase/supabase-js";
 import fs from "node:fs";
+import path from "node:path";
 import { resolveTarget } from "./env-target.mjs";
 
-const { SUPABASE_URL, ANON_KEY, target } = resolveTarget();
+const { SUPABASE_URL, ANON_KEY, target, root } = resolveTarget();
+const e2eCredsFile = target === "production" ? ".e2e-credentials.local.json" : ".e2e-credentials.staging.local.json";
+const e2eCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts", e2eCredsFile), "utf8"));
+const e2ePassword = (email) => {
+  const password = e2eCreds.find((r) => r.email === email)?.password;
+  if (!password) throw new Error(`No password known for ${email} in ${e2eCredsFile} -- run scripts/setup-test-users.mjs first.`);
+  return password;
+};
+
 
 let passCount = 0;
 let failCount = 0;
@@ -44,8 +53,8 @@ const facilitiesCreds = JSON.parse(
 
 async function main() {
   console.log("=== Emergency contacts directory (doc §113) ===");
-  const alice = await signIn("e2e.alice@nhce.edu.in", "TestPass!2026Alice");
-  const bob = await signIn("e2e.bob@nhce.edu.in", "TestPass!2026Bob");
+  const alice = await signIn("e2e.alice@nhce.edu.in", e2ePassword("e2e.alice@nhce.edu.in"));
+  const bob = await signIn("e2e.bob@nhce.edu.in", e2ePassword("e2e.bob@nhce.edu.in"));
   const facilities = await signIn(facilitiesCreds.email, facilitiesCreds.password);
 
   // Clean slate: remove any contacts left over from a previous run.

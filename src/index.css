@@ -5479,8 +5479,12 @@
   background: var(--surface); border: 1px solid var(--border); border-radius: 18px;
   padding: 16px; display: flex; flex-direction: column; gap: 8px; text-align: left;
 }
-.listing-card-img { width: 100%; height: 130px; border-radius: 12px; background: var(--surface-2); display: grid; place-items: center; color: var(--muted); font-size: 26px; overflow: hidden; }
+.listing-card-img { position: relative; width: 100%; height: 130px; border-radius: 12px; background: var(--surface-2); display: grid; place-items: center; color: var(--muted); font-size: 26px; overflow: hidden; }
 .listing-card-img img { width: 100%; height: 100%; object-fit: cover; }
+.listing-image-count {
+  position: absolute; bottom: 6px; right: 6px; display: flex; align-items: center; gap: 4px;
+  background: rgba(0,0,0,0.6); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 999px;
+}
 .listing-price { font: 800 18px Manrope; color: var(--text); }
 .listing-meta { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--muted); }
 
@@ -5595,6 +5599,20 @@
 .verify-pass-video { width: 100%; border-radius: 16px; background: #000; max-height: 320px; object-fit: cover; }
 .verify-pass-panel label { display: block; font-size: 11px; font-weight: 800; color: var(--muted); }
 .verify-pass-panel textarea { width: 100%; margin-top: 6px; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--surface); color: var(--text); font: inherit; resize: vertical; }
+
+/* Plain (non-modal) settings form -- AdminCMS Campus Settings tab. Bare
+   <label>Text<input/></label> markup only gets block layout inside
+   .feature-modal/.login-modal/.verify-pass-panel elsewhere in this file;
+   this is the same shape for a settings panel that isn't a modal. */
+.settings-form { max-width: 480px; display: flex; flex-direction: column; gap: 14px; }
+.settings-form label { display: block; font-size: 11px; font-weight: 800; color: var(--muted); }
+.settings-form input, .settings-form textarea, .settings-form select {
+  width: 100%; margin-top: 6px; border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; background: var(--surface); color: var(--text); font: inherit;
+}
+.settings-form textarea { resize: vertical; font-family: monospace; }
+.settings-form .checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: var(--text); }
+.settings-form .checkbox-row input { width: auto; margin-top: 0; }
 .verify-pass-result { display: flex; align-items: center; gap: 14px; padding: 16px; border-radius: 14px; border: 1px solid var(--border); }
 .verify-pass-result.valid { background: #e4f7ef22; border-color: #13845b55; }
 .verify-pass-result.invalid { background: #ef444422; border-color: #c23a3a55; color: #c23a3a; }

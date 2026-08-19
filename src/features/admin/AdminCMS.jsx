@@ -14,6 +14,11 @@ import {
   HiExclamationTriangle,
   HiPhone,
   HiQuestionMarkCircle,
+  HiBuildingStorefront,
+  HiWrenchScrewdriver,
+  HiSignal,
+  HiFlag,
+  HiArrowsRightLeft,
 } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import { StatTile } from "../../components/ui/Charts";
@@ -21,6 +26,7 @@ import * as adminApi from "./api";
 import * as opportunitiesApi from "../../services/opportunitiesService";
 import * as teamsApi from "../teams/api";
 import { deleteMessage } from "../../services/messagingService";
+import { getMyPrintShopStatus, setPrintShopStatus } from "../vendor/api";
 import AdminAnalytics from "./Analytics";
 import SosAlertsPanel from "../facilities/SosAlerts";
 
@@ -60,6 +66,11 @@ const TABS = [
   ["teams", "Teams"],
   ["ai", "AI Assistant"],
   ["errors", "Errors"],
+  ["vendors", "Vendors"],
+  ["facilities", "Facilities"],
+  ["systemhealth", "System Health"],
+  ["campussettings", "Campus Settings"],
+  ["featureflags", "Feature Flags"],
 ];
 
 export default function AdminCMS({ notify, campusId, authUser }) {
@@ -102,6 +113,11 @@ export default function AdminCMS({ notify, campusId, authUser }) {
       {tab === "teams" && <TeamsAdminTab notify={notify} campusId={campusId} />}
       {tab === "ai" && <AiAssistantTab notify={notify} campusId={campusId} />}
       {tab === "errors" && <ErrorLogsTab notify={notify} />}
+      {tab === "vendors" && <VendorManagementTab notify={notify} campusId={campusId} />}
+      {tab === "facilities" && <FacilitiesTab notify={notify} campusId={campusId} />}
+      {tab === "systemhealth" && <SystemHealthTab notify={notify} />}
+      {tab === "campussettings" && <CampusSettingsTab notify={notify} campusId={campusId} />}
+      {tab === "featureflags" && <FeatureFlagsTab notify={notify} campusId={campusId} />}
     </section>
   );
 }
@@ -222,7 +238,7 @@ function ModerationTab({ notify, authUser }) {
 
   useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const canModerateContent = (report) => ["post", "comment"].includes(report.target_type);
+  const canModerateContent = (report) => ["post", "comment", "marketplace_listing"].includes(report.target_type);
 
   const act = async (report, action) => {
     try {
@@ -314,6 +330,7 @@ function ModerationTab({ notify, authUser }) {
 
       <SuspensionAppealsPanel notify={notify} />
       <BannedWordsPanel notify={notify} />
+      <ProhibitedTermsPanel notify={notify} />
     </div>
   );
 }
@@ -449,6 +466,84 @@ function BannedWordsPanel({ notify }) {
           {words.map((row) => (
             <button key={row.word} className="chip" disabled={busyWord === row.word} onClick={() => remove(row.word)} title="Click to remove">
               {row.word} ×
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Same shape as BannedWordsPanel above, backing a separate admin-managed
+// list (supabase/migrations/20260818000700_marketplace_hardening.sql) --
+// "profanity" and "prohibited item" are different moderation reasons, kept
+// as two independent lists rather than one merged one.
+function ProhibitedTermsPanel({ notify }) {
+  const [terms, setTerms] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [newTerm, setNewTerm] = useState("");
+  const [busyTerm, setBusyTerm] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setTerms(await adminApi.listProhibitedListingTerms());
+    } catch (err) {
+      notify(err.message || "Could not load the prohibited-item list");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const add = async () => {
+    if (!newTerm.trim()) return;
+    try {
+      setBusyTerm(newTerm.trim());
+      await adminApi.addProhibitedListingTerm(newTerm.trim());
+      setNewTerm("");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not add this term");
+    } finally {
+      setBusyTerm(null);
+    }
+  };
+
+  const remove = async (term) => {
+    try {
+      setBusyTerm(term);
+      await adminApi.removeProhibitedListingTerm(term);
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not remove this term");
+    } finally {
+      setBusyTerm(null);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 32 }}>
+      <span className="section-kicker">MARKETPLACE PROHIBITED-ITEM LIST</span>
+      <p style={{ fontSize: "0.85rem", opacity: 0.8 }}>
+        A new or edited marketplace listing whose title/description contains any word below is rejected server-side before it saves.
+      </p>
+      <div style={{ display: "flex", gap: 8, margin: "12px 0" }}>
+        <input
+          value={newTerm}
+          onChange={(e) => setNewTerm(e.target.value)}
+          placeholder="Add a term…"
+          style={{ flex: 1, padding: "6px 12px", borderRadius: "6px" }}
+        />
+        <button className="primary" disabled={!newTerm.trim() || busyTerm === newTerm.trim()} onClick={add}>Add</button>
+      </div>
+      {loading && <LoadingState label="Loading…" />}
+      {!loading && (
+        <div className="chips">
+          {terms.map((row) => (
+            <button key={row.term} className="chip" disabled={busyTerm === row.term} onClick={() => remove(row.term)} title="Click to remove">
+              {row.term} ×
             </button>
           ))}
         </div>
@@ -2311,6 +2406,673 @@ function AuditLogTab() {
         <button className="ghost" style={{ marginTop: 12 }} onClick={() => setLimit((l) => l + 50)}>
           Load more
         </button>
+      )}
+    </div>
+  );
+}
+
+/* =========================================================
+   VENDOR MANAGEMENT (2026-08-18 AdminCMS operating-system pass, part 1/5)
+   Entity-level oversight of canteens/stores -- create, deactivate/
+   reactivate, transfer ownership. NOT menu editing, that's still each
+   vendor's own login (VendorDashboard.jsx).
+========================================================= */
+
+function AddVendorModal({ campusId, onClose, notify, onSaved }) {
+  const [form, setForm] = useState({ type: "canteen", name: "", subtitle: "", category: "General", ownerEmail: "" });
+  const [saving, setSaving] = useState(false);
+  const change = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const save = async () => {
+    try {
+      setSaving(true);
+      await adminApi.createVendor(campusId, {
+        type: form.type, name: form.name.trim(), ownerEmail: form.ownerEmail.trim(),
+        subtitle: form.subtitle.trim(), category: form.type === "store" ? form.category : null,
+      });
+      notify("Vendor created");
+      onSaved();
+    } catch (err) {
+      notify(err.message || "Could not create vendor");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal kicker="NEW VENDOR" title="Create a vendor" onClose={onClose}>
+      <label>Type
+        <select value={form.type} onChange={(e) => change("type", e.target.value)}>
+          <option value="canteen">Canteen</option>
+          <option value="store">Campus Store</option>
+        </select>
+      </label>
+      <label>Name<input value={form.name} onChange={(e) => change("name", e.target.value)} placeholder="Block C Canteen" /></label>
+      <label>Subtitle (optional)<input value={form.subtitle} onChange={(e) => change("subtitle", e.target.value)} /></label>
+      {form.type === "store" && (
+        <label>Category
+          <select value={form.category} onChange={(e) => change("category", e.target.value)}>
+            {["Stationery", "Books", "Electronics", "Merch", "Printing Supplies", "General"].map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </label>
+      )}
+      <label>Owner&rsquo;s email<input value={form.ownerEmail} onChange={(e) => change("ownerEmail", e.target.value)} placeholder="Must already have a CampusOS account" /></label>
+      <button className="primary wide" disabled={saving || !form.name.trim() || !form.ownerEmail.trim()} onClick={save}>
+        {saving ? "Creating…" : "Create vendor"}
+      </button>
+    </Modal>
+  );
+}
+
+function VendorManagementTab({ notify, campusId }) {
+  const [vendors, setVendors] = useState([]);
+  const [printShop, setPrintShop] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [showAdd, setShowAdd] = useState(false);
+  const [busyId, setBusyId] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      const [v, p] = await Promise.all([
+        adminApi.listVendorsAdmin(campusId),
+        getMyPrintShopStatus(campusId).catch(() => null),
+      ]);
+      setVendors(v);
+      setPrintShop(p);
+    } catch (err) {
+      setError(err.message || "Could not load vendors");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, [campusId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleActive = async (v) => {
+    try {
+      setBusyId(v.id);
+      await adminApi.setVendorActive(v.type, v.id, !v.active);
+      notify(v.active ? `${v.name} deactivated` : `${v.name} reactivated`);
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not update this vendor");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const transferOwnership = async (v) => {
+    const email = window.prompt(`Transfer "${v.name}" to which email? (must already have a CampusOS account)`);
+    if (!email) return;
+    try {
+      setBusyId(v.id);
+      await adminApi.transferVendorOwnership(v.type, v.id, email.trim());
+      notify("Ownership transferred");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not transfer ownership");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const changePrintShopStatus = async (status) => {
+    const message = window.prompt("Status message (optional)", printShop?.message || "");
+    try {
+      await setPrintShopStatus(status, message || null);
+      notify("Print shop status updated");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not update print shop status");
+    }
+  };
+
+  if (loading) return <LoadingState label="Loading vendors…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  return (
+    <div>
+      <div className="section-head">
+        <div>
+          <h2>Vendor Management</h2>
+          <p>Create, deactivate or reassign ownership of canteens and stores. Menu editing stays in each vendor&rsquo;s own login.</p>
+        </div>
+        <button className="primary" onClick={() => setShowAdd(true)}><HiPlus /> New vendor</button>
+      </div>
+
+      <article className="resource-row" style={{ marginBottom: 16 }}>
+        <div className="resource-icon"><HiWrenchScrewdriver /></div>
+        <div>
+          <b>Print Shop {printShop && <span className="social-type">{printShop.status?.toUpperCase()}</span>}</b>
+          <small>{printShop?.message || "No status message set"}</small>
+        </div>
+        <div className="chips">
+          {["online", "offline", "maintenance"].map((s) => (
+            <button key={s} className={printShop?.status === s ? "chip active" : "chip"} onClick={() => changePrintShopStatus(s)}>{s}</button>
+          ))}
+        </div>
+      </article>
+
+      <div className="resource-list">
+        {vendors.length === 0 && <EmptyState title="No vendors yet" text="Create the first canteen or store for this campus." />}
+        {vendors.map((v) => (
+          <article className="resource-row" key={`${v.type}-${v.id}`}>
+            <div className="resource-icon"><HiBuildingStorefront /></div>
+            <div>
+              <b>{v.name} {!v.active && <span className="social-type">INACTIVE</span>}</b>
+              <small>
+                {v.type === "canteen" ? "Canteen" : `Store · ${v.category}`}
+                {v.subtitle ? ` · ${v.subtitle}` : ""} · owner {v.owner?.name || v.owner?.email || "Unassigned"}
+              </small>
+            </div>
+            <div className="chips">
+              <button disabled={busyId === v.id} onClick={() => toggleActive(v)}>{v.active ? "Deactivate" : "Reactivate"}</button>
+              <button disabled={busyId === v.id} onClick={() => transferOwnership(v)}><HiArrowsRightLeft /> Transfer</button>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      {showAdd && (
+        <AddVendorModal campusId={campusId} notify={notify} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); reload(); }} />
+      )}
+    </div>
+  );
+}
+
+/* =========================================================
+   FACILITIES OVERSIGHT (part 2/5). Reads were already reachable via RLS;
+   this is the first UI over them, plus the new assign_ticket() write path.
+========================================================= */
+
+const TICKET_ACTIVE_STATUSES = ["SUBMITTED", "TRIAGED", "ASSIGNED", "IN_PROGRESS", "WAITING"];
+const TICKET_TRANSITIONS = {
+  SUBMITTED: ["TRIAGED", "CLOSED"],
+  TRIAGED: ["ASSIGNED", "CLOSED"],
+  ASSIGNED: ["IN_PROGRESS"],
+  IN_PROGRESS: ["WAITING", "RESOLVED"],
+  WAITING: ["IN_PROGRESS", "RESOLVED"],
+  RESOLVED: ["CLOSED", "IN_PROGRESS"],
+};
+
+function FacilitiesTab({ notify, campusId }) {
+  const [tickets, setTickets] = useState([]);
+  const [bookings, setBookings] = useState([]);
+  const [staff, setStaff] = useState([]);
+  const [showClosed, setShowClosed] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busyId, setBusyId] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      const [t, b, s] = await Promise.all([
+        adminApi.listTicketsAdmin(campusId),
+        adminApi.listBookingsAdmin(campusId),
+        adminApi.listFacilitiesStaff(campusId),
+      ]);
+      setTickets(t);
+      setBookings(b);
+      setStaff(s);
+    } catch (err) {
+      setError(err.message || "Could not load facilities data");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, [campusId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const assign = async (ticket, staffId) => {
+    try {
+      setBusyId(ticket.id);
+      await adminApi.assignTicket(ticket.id, staffId || null);
+      notify(staffId ? "Ticket assigned" : "Assignment cleared");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not assign this ticket");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const transition = async (ticket, toStatus) => {
+    try {
+      setBusyId(ticket.id);
+      await adminApi.transitionTicketStatus(ticket.id, toStatus);
+      notify(`Ticket moved to ${toStatus}`);
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not update this ticket");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const setBooking = async (booking, status) => {
+    try {
+      setBusyId(booking.id);
+      await adminApi.setBookingStatusAdmin(booking.id, status);
+      notify(`Booking ${status.toLowerCase()}`);
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not update this booking");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (loading) return <LoadingState label="Loading facilities…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  const visibleTickets = tickets.filter((t) => (showClosed ? true : TICKET_ACTIVE_STATUSES.includes(t.status)));
+  const pendingBookings = bookings.filter((b) => b.status === "PENDING");
+
+  return (
+    <div>
+      <div className="section-head">
+        <div>
+          <h2>Facilities</h2>
+          <p>Every open ticket and booking campus-wide, not just your own.</p>
+        </div>
+      </div>
+
+      <div className="chips" style={{ marginBottom: 16 }}>
+        <button className={!showClosed ? "chip active" : "chip"} onClick={() => setShowClosed(false)}>Open ({tickets.filter((t) => TICKET_ACTIVE_STATUSES.includes(t.status)).length})</button>
+        <button className={showClosed ? "chip active" : "chip"} onClick={() => setShowClosed(true)}>All ({tickets.length})</button>
+      </div>
+
+      <div className="resource-list">
+        {visibleTickets.length === 0 && <EmptyState title="No tickets" text="Nothing here right now." />}
+        {visibleTickets.map((t) => (
+          <article className="resource-row" key={t.id}>
+            <div className="resource-icon"><HiWrenchScrewdriver /></div>
+            <div>
+              <b>{t.title} <span className="social-type">{t.status}</span></b>
+              <small>
+                {t.category} · {t.priority} · from {t.submitter?.name || t.submitter?.email || "Unknown"} ·{" "}
+                {new Date(t.created_at).toLocaleString()}
+                {t.assignee ? ` · assigned to ${t.assignee.name || t.assignee.email}` : " · unassigned"}
+              </small>
+            </div>
+            <div className="chips">
+              <select
+                disabled={busyId === t.id}
+                value={t.assigned_to || ""}
+                onChange={(e) => assign(t, e.target.value || null)}
+              >
+                <option value="">Unassigned</option>
+                {staff.map((s) => <option key={s.id} value={s.id}>{s.name || s.email}</option>)}
+              </select>
+              {(TICKET_TRANSITIONS[t.status] || []).map((next) => (
+                <button key={next} disabled={busyId === t.id} onClick={() => transition(t, next)}>{next}</button>
+              ))}
+            </div>
+          </article>
+        ))}
+      </div>
+
+      <div className="section-head" style={{ marginTop: 32 }}>
+        <h3>Resource bookings{pendingBookings.length ? ` — ${pendingBookings.length} pending approval` : ""}</h3>
+      </div>
+      <div className="resource-list">
+        {bookings.length === 0 && <EmptyState title="No bookings yet" />}
+        {bookings.slice(0, 50).map((b) => (
+          <article className="resource-row" key={b.id}>
+            <div className="resource-icon"><HiCalendarDays /></div>
+            <div>
+              <b>{b.resource?.name || "Resource"} <span className="social-type">{b.status}</span></b>
+              <small>
+                {b.requester?.name || b.requester?.email || "Unknown"} ·{" "}
+                {new Date(b.start_time).toLocaleString()} – {new Date(b.end_time).toLocaleTimeString()}
+              </small>
+            </div>
+            {b.status === "PENDING" && (
+              <div className="chips">
+                <button disabled={busyId === b.id} onClick={() => setBooking(b, "APPROVED")}>Approve</button>
+                <button disabled={busyId === b.id} onClick={() => setBooking(b, "REJECTED")}>Reject</button>
+              </div>
+            )}
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   SYSTEM HEALTH (part 3/5) -- pg_cron job status + edge-function
+   reachability + which secret groups are actually configured on this
+   deployment (booleans only, never values).
+========================================================= */
+
+const SECRET_GROUP_LABELS = {
+  ai_assistant: "AI Assistant",
+  email: "Email",
+  sms: "SMS",
+  push: "Push notifications",
+  payments: "Payments (Razorpay)",
+};
+
+function SystemHealthTab({ notify }) {
+  const [dbHealth, setDbHealth] = useState(null);
+  const [fnHealth, setFnHealth] = useState(null);
+  const [fnError, setFnError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [checkedAt, setCheckedAt] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setFnError("");
+      const [db, fn] = await Promise.allSettled([adminApi.getSystemHealth(), adminApi.getEdgeFunctionHealth()]);
+      if (db.status === "fulfilled") setDbHealth(db.value);
+      else notify(db.reason?.message || "Could not read cron/job health");
+      if (fn.status === "fulfilled") setFnHealth(fn.value);
+      else setFnError(fn.reason?.message || "Edge function unreachable");
+      setCheckedAt(new Date());
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading) return <LoadingState label="Checking system health…" />;
+
+  return (
+    <div>
+      <div className="section-head">
+        <div>
+          <h2>System Health</h2>
+          <p>{checkedAt ? `Last checked ${checkedAt.toLocaleTimeString()}` : ""}</p>
+        </div>
+        <button className="ghost" onClick={reload}>Refresh</button>
+      </div>
+
+      <div className="analytics-grid" style={{ marginBottom: 24 }}>
+        <StatTile label="Edge functions" value={fnHealth ? "Reachable" : "Unreachable"} sub={fnError || (fnHealth?.deno_deployment_id ? `deployment ${fnHealth.deno_deployment_id}` : "")} />
+        <StatTile label="Database (via edge)" value={fnHealth?.db_ok ? "OK" : "—"} sub={fnHealth?.db_latency_ms != null ? `${fnHealth.db_latency_ms}ms` : ""} />
+        <StatTile label="Scheduled jobs" value={dbHealth?.jobs?.length ?? 0} sub="pg_cron" />
+        <StatTile label="Jobs failing" value={(dbHealth?.jobs || []).filter((j) => j.last_status && j.last_status !== "succeeded").length} />
+      </div>
+
+      <h3>Scheduled jobs</h3>
+      <div className="resource-list" style={{ marginBottom: 24 }}>
+        {(dbHealth?.jobs || []).length === 0 && <EmptyState title="No cron jobs visible" text="Either none are scheduled, or this environment's cron-schema grants don't allow introspection." />}
+        {(dbHealth?.jobs || []).map((j) => (
+          <article className="resource-row" key={j.jobname}>
+            <div className="resource-icon"><HiSignal /></div>
+            <div>
+              <b>{j.jobname} {!j.active && <span className="social-type">PAUSED</span>}</b>
+              <small>
+                schedule {j.schedule} · last run {j.last_start ? new Date(j.last_start).toLocaleString() : "never"} ·{" "}
+                <span className="social-type">{j.last_status || "no runs yet"}</span>
+              </small>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      <h3>Configuration (secrets present, values never shown)</h3>
+      <div className="chips">
+        {Object.entries(SECRET_GROUP_LABELS).map(([key, label]) => (
+          <span key={key} className={fnHealth?.secret_groups?.[key] ? "chip active" : "chip"}>
+            {label}: {fnHealth?.secret_groups?.[key] ? "configured" : "missing"}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   CAMPUS SETTINGS / CONFIGURATION (part 4/5)
+========================================================= */
+
+function CampusSettingsTab({ notify, campusId }) {
+  const [campuses, setCampuses] = useState([]);
+  const [selectedId, setSelectedId] = useState(campusId);
+  const [form, setForm] = useState(null);
+  const [settingsText, setSettingsText] = useState("{}");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      const rows = await adminApi.listCampusesAdmin();
+      setCampuses(rows);
+      const current = rows.find((c) => c.id === selectedId) || rows[0];
+      if (current) {
+        setSelectedId(current.id);
+        setForm(current);
+        setSettingsText(JSON.stringify(current.settings || {}, null, 2));
+      }
+    } catch (err) {
+      setError(err.message || "Could not load campuses");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const change = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const save = async () => {
+    let settings;
+    try {
+      settings = JSON.parse(settingsText || "{}");
+    } catch {
+      notify("Settings must be valid JSON");
+      return;
+    }
+    try {
+      setSaving(true);
+      await adminApi.updateCampusSettings(selectedId, {
+        name: form.name, domain: form.domain, timezone: form.timezone, active: form.active,
+        supportEmail: form.support_email || "", supportPhone: form.support_phone || "", settings,
+      });
+      notify("Campus settings saved");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not save campus settings");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading || !form) return <LoadingState label="Loading campus settings…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  return (
+    <div>
+      <div className="section-head">
+        <div>
+          <h2>Campus Settings</h2>
+          <p>Name, domain, timezone, support contact and free-form per-campus configuration.</p>
+        </div>
+      </div>
+
+      {campuses.length > 1 && (
+        <div className="chips" style={{ marginBottom: 16 }}>
+          {campuses.map((c) => (
+            <button key={c.id} className={selectedId === c.id ? "chip active" : "chip"}
+              onClick={() => { setSelectedId(c.id); setForm(c); setSettingsText(JSON.stringify(c.settings || {}, null, 2)); }}>
+              {c.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="settings-form">
+        <label>Name<input value={form.name || ""} onChange={(e) => change("name", e.target.value)} /></label>
+        <label>Email domain<input value={form.domain || ""} onChange={(e) => change("domain", e.target.value)} placeholder="nhce.edu.in" /></label>
+        <label>Timezone<input value={form.timezone || ""} onChange={(e) => change("timezone", e.target.value)} /></label>
+        <label>Support email<input value={form.support_email || ""} onChange={(e) => change("support_email", e.target.value)} /></label>
+        <label>Support phone<input value={form.support_phone || ""} onChange={(e) => change("support_phone", e.target.value)} /></label>
+        <label className="checkbox-row">
+          <input type="checkbox" checked={form.active !== false} onChange={(e) => change("active", e.target.checked)} />
+          Campus active
+        </label>
+        <label>Advanced settings (JSON)
+          <textarea rows={5} value={settingsText} onChange={(e) => setSettingsText(e.target.value)} />
+        </label>
+        <button className="primary wide" disabled={saving} onClick={save}>{saving ? "Saving…" : "Save campus settings"}</button>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   FEATURE FLAGS (part 5/5). New capability end to end -- nothing in this
+   pass wires an existing feature to a flag yet, this is the infrastructure.
+========================================================= */
+
+function FeatureFlagModal({ campusId, flag, onClose, notify, onSaved }) {
+  const isNew = !flag;
+  const [form, setForm] = useState({
+    key: flag?.key || "", scope: flag?.campus_id ? "campus" : "global",
+    description: flag?.description || "", enabled: flag?.enabled ?? false, rolloutPercentage: flag?.rollout_percentage ?? 100,
+  });
+  const [saving, setSaving] = useState(false);
+  const change = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const save = async () => {
+    try {
+      setSaving(true);
+      await adminApi.upsertFeatureFlag({
+        key: form.key.trim(), campusId: form.scope === "campus" ? campusId : null,
+        description: form.description.trim(), enabled: form.enabled, rolloutPercentage: Number(form.rolloutPercentage),
+      });
+      notify(isNew ? "Feature flag created" : "Feature flag updated");
+      onSaved();
+    } catch (err) {
+      notify(err.message || "Could not save this feature flag");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal kicker="FEATURE FLAG" title={isNew ? "New feature flag" : `Edit ${flag.key}`} onClose={onClose}>
+      <label>Key<input value={form.key} onChange={(e) => change("key", e.target.value)} disabled={!isNew} placeholder="new_checkout_flow" /></label>
+      <label>Scope
+        <select value={form.scope} onChange={(e) => change("scope", e.target.value)} disabled={!isNew}>
+          <option value="global">Global (all campuses)</option>
+          <option value="campus">This campus only</option>
+        </select>
+      </label>
+      <label>Description<textarea rows={2} value={form.description} onChange={(e) => change("description", e.target.value)} /></label>
+      <label>Rollout percentage<input type="number" min={0} max={100} value={form.rolloutPercentage} onChange={(e) => change("rolloutPercentage", e.target.value)} /></label>
+      <label>
+        <input type="checkbox" checked={form.enabled} onChange={(e) => change("enabled", e.target.checked)} style={{ width: "auto", marginRight: 8 }} />
+        Enabled
+      </label>
+      <button className="primary wide" disabled={saving || !form.key.trim()} onClick={save}>
+        {saving ? "Saving…" : isNew ? "Create flag" : "Save changes"}
+      </button>
+    </Modal>
+  );
+}
+
+function FeatureFlagsTab({ notify, campusId }) {
+  const [flags, setFlags] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [editing, setEditing] = useState(null); // null = closed, {} = new, flag = edit
+  const [busyKey, setBusyKey] = useState(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      setFlags(await adminApi.listFeatureFlags());
+    } catch (err) {
+      setError(err.message || "Could not load feature flags");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleEnabled = async (flag) => {
+    try {
+      setBusyKey(flag.id);
+      await adminApi.upsertFeatureFlag({
+        key: flag.key, campusId: flag.campus_id, description: flag.description,
+        enabled: !flag.enabled, rolloutPercentage: flag.rollout_percentage,
+      });
+      notify(flag.enabled ? "Flag disabled" : "Flag enabled");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not toggle this flag");
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const remove = async (flag) => {
+    if (!window.confirm(`Delete feature flag "${flag.key}"${flag.campus_id ? " (campus override)" : " (global)"}?`)) return;
+    try {
+      setBusyKey(flag.id);
+      await adminApi.deleteFeatureFlag(flag.key, flag.campus_id);
+      notify("Feature flag deleted");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not delete this flag");
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  if (loading) return <LoadingState label="Loading feature flags…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  return (
+    <div>
+      <div className="section-head">
+        <div>
+          <h2>Feature Flags</h2>
+          <p>Global defaults with optional per-campus overrides. Nothing in the app reads these yet — this is the control plane.</p>
+        </div>
+        <button className="primary" onClick={() => setEditing({})}><HiPlus /> New flag</button>
+      </div>
+
+      <div className="resource-list">
+        {flags.length === 0 && <EmptyState title="No feature flags yet" text="Create one to start gating a feature behind a flag." />}
+        {flags.map((f) => (
+          <article className="resource-row" key={f.id}>
+            <div className="resource-icon"><HiFlag /></div>
+            <div>
+              <b>{f.key} <span className="social-type">{f.campus_id ? "CAMPUS" : "GLOBAL"}</span></b>
+              <small>{f.description || "No description"} · {f.rollout_percentage}% rollout</small>
+            </div>
+            <div className="chips">
+              <button disabled={busyKey === f.id} onClick={() => toggleEnabled(f)} className={f.enabled ? "chip active" : "chip"}>
+                {f.enabled ? "Enabled" : "Disabled"}
+              </button>
+              <button disabled={busyKey === f.id} onClick={() => setEditing(f)}><HiPencilSquare /></button>
+              <button disabled={busyKey === f.id} onClick={() => remove(f)}><HiTrash /></button>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      {editing && (
+        <FeatureFlagModal campusId={campusId} flag={editing.id ? editing : null} notify={notify}
+          onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />
       )}
     </div>
   );

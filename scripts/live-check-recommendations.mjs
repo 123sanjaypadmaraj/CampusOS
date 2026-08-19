@@ -8,10 +8,20 @@
 // Usage: node scripts/live-check-recommendations.mjs                 (staging)
 //        node scripts/live-check-recommendations.mjs --env=production --yes-production
 
+import fs from "node:fs";
+import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { resolveTarget } from "./env-target.mjs";
 
-const { SUPABASE_URL, ANON_KEY } = resolveTarget();
+const { SUPABASE_URL, ANON_KEY, root, target } = resolveTarget();
+const e2eCredsFile = target === "production" ? ".e2e-credentials.local.json" : ".e2e-credentials.staging.local.json";
+const e2eCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts", e2eCredsFile), "utf8"));
+const e2ePassword = (email) => {
+  const password = e2eCreds.find((r) => r.email === email)?.password;
+  if (!password) throw new Error(`No password known for ${email} in ${e2eCredsFile} -- run scripts/setup-test-users.mjs first.`);
+  return password;
+};
+
 
 let passCount = 0;
 let failCount = 0;
@@ -39,7 +49,7 @@ async function signIn(email, password) {
 async function main() {
   console.log("=== Recommendation engine (doc §108) ===");
   const admin = await signIn("1nh25cs265@usn.campusos.internal", "Sanjay@123");
-  const alice = await signIn("e2e.alice@nhce.edu.in", "TestPass!2026Alice");
+  const alice = await signIn("e2e.alice@nhce.edu.in", e2ePassword("e2e.alice@nhce.edu.in"));
 
   // Anonymous call is rejected -- every recommend_*() RPC requires auth.uid().
   const anon = client();
@@ -124,7 +134,7 @@ async function main() {
   check("dismiss_recommendation rejects an unknown entity_type", !!badDismissErr, badDismissErr?.message);
 
   // A different student cannot read Alice's dismissals (RLS, self-only select).
-  const bob = await signIn("e2e.bob@nhce.edu.in", "TestPass!2026Bob");
+  const bob = await signIn("e2e.bob@nhce.edu.in", e2ePassword("e2e.bob@nhce.edu.in"));
   const { data: bobReadsAliceDismissals } = await bob.sb.from("recommendation_dismissals").select("*").eq("user_id", alice.userId);
   check("A different student cannot read Alice's dismissals (RLS)", (bobReadsAliceDismissals || []).length === 0, bobReadsAliceDismissals);
 

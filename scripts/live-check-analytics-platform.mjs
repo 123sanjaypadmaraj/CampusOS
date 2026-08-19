@@ -12,6 +12,14 @@ import { createClient } from "@supabase/supabase-js";
 import { resolveTarget } from "./env-target.mjs";
 
 const { SUPABASE_URL, ANON_KEY, root, target } = resolveTarget();
+const e2eCredsFile = target === "production" ? ".e2e-credentials.local.json" : ".e2e-credentials.staging.local.json";
+const e2eCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts", e2eCredsFile), "utf8"));
+const e2ePassword = (email) => {
+  const password = e2eCreds.find((r) => r.email === email)?.password;
+  if (!password) throw new Error(`No password known for ${email} in ${e2eCredsFile} -- run scripts/setup-test-users.mjs first.`);
+  return password;
+};
+
 const storeCredsFile = target === "production" ? ".store-credentials.local.json" : ".store-credentials.staging.local.json";
 const vendorCredsFile = target === "production" ? ".vendor-credentials.local.json" : ".vendor-credentials.staging.local.json";
 const storeCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts", storeCredsFile), "utf8"));
@@ -19,7 +27,7 @@ const vendorCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts", vendor
 const udupi = vendorCreds.find((v) => v.vendor === "Udupi Canteen");
 const printShop = vendorCreds.find((v) => v.vendor === "Print Shop");
 const aliceEmail = "e2e.alice@nhce.edu.in";
-const alicePassword = "TestPass!2026Alice";
+const alicePassword = e2ePassword("e2e.alice@nhce.edu.in");
 const adminEmail = "1nh25cs265@usn.campusos.internal";
 const adminPassword = "Sanjay@123";
 

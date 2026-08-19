@@ -11,6 +11,14 @@ import { createClient } from "@supabase/supabase-js";
 import { resolveTarget } from "./env-target.mjs";
 
 const { SUPABASE_URL, ANON_KEY, root, target } = resolveTarget();
+const e2eCredsFile = target === "production" ? ".e2e-credentials.local.json" : ".e2e-credentials.staging.local.json";
+const e2eCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts", e2eCredsFile), "utf8"));
+const e2ePassword = (email) => {
+  const password = e2eCreds.find((r) => r.email === email)?.password;
+  if (!password) throw new Error(`No password known for ${email} in ${e2eCredsFile} -- run scripts/setup-test-users.mjs first.`);
+  return password;
+};
+
 // Bug fix: this used to hardcode the PRODUCTION credential filenames
 // regardless of target, so a default (staging) run signed in with prod
 // passwords against the staging project and failed with "Invalid login
@@ -47,7 +55,7 @@ async function signIn(email, password) {
 
 async function main() {
   console.log("=== Campus Store ===");
-  const alice = await signIn("e2e.alice@nhce.edu.in", "TestPass!2026Alice");
+  const alice = await signIn("e2e.alice@nhce.edu.in", e2ePassword("e2e.alice@nhce.edu.in"));
   const storeVendor = await signIn(storeCreds.email, storeCreds.password);
   const udupiVendor = await signIn(udupi.email, udupi.password);
 

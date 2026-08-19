@@ -947,6 +947,26 @@ export async function removeBannedWord(word) {
   throwIfError(error);
 }
 
+// Marketplace prohibited-item term list (supabase/migrations/
+// 20260818000700_marketplace_hardening.sql) -- separate list from
+// banned_words above since "profanity" and "prohibited item" are different
+// moderation reasons, same admin-managed-list shape either way.
+export async function listProhibitedListingTerms() {
+  const { data, error } = await supabase.from("prohibited_listing_terms").select("term, added_by, created_at").order("term");
+  throwIfError(error);
+  return data || [];
+}
+
+export async function addProhibitedListingTerm(term) {
+  const { error } = await supabase.rpc("admin_add_prohibited_term", { p_term: term });
+  throwIfError(error);
+}
+
+export async function removeProhibitedListingTerm(term) {
+  const { error } = await supabase.rpc("admin_remove_prohibited_term", { p_term: term });
+  throwIfError(error);
+}
+
 export async function listSuspensionAppeals(status = "pending") {
   const { data, error } = await supabase.rpc("admin_list_suspension_appeals", { p_status: status });
   throwIfError(error);
@@ -1211,6 +1231,14 @@ export async function deleteLostFoundItemAdmin(itemId) {
 
 export async function getMarketplaceListings(campusId, search = "", { limit = 30, cursor = null } = {}) {
   try {
+    // Fire-and-forget housekeeping: flips any listing whose expires_at has
+    // passed from 'active' to 'expired' (supabase/migrations/
+    // 20260818000700_marketplace_hardening.sql). Best-effort, not a hard
+    // SLA -- deliberately not awaited so a slow/failed call here never
+    // delays the actual feed load, same "swallow and move on" posture as
+    // touchActivity().
+    Promise.resolve(supabase.rpc("expire_stale_listings")).catch(() => {});
+
     let query = supabase.from("marketplace_listings").select("*").eq("status", "active").order("created_at", { ascending: false }).limit(limit);
     if (campusId) query = query.eq("campus_id", campusId);
     if (search.trim()) query = query.ilike("title", `%${search.trim()}%`);
@@ -1235,7 +1263,7 @@ export async function getMarketplaceListings(campusId, search = "", { limit = 30
   }
 }
 
-export async function createMarketplaceListing({ userId, campusId, title, description, category, price, condition, location }) {
+export async function createMarketplaceListing({ userId, campusId, title, description, category, price, condition, location, imageUrls = [] }) {
   if (!userId) throw new Error("Please sign in first.");
   if (!isUuid(userId)) throw new Error("Invalid user ID. Please sign in again.");
   if (!title?.trim() || Number(price) < 0) throw new Error("Add a valid listing title and price.");
@@ -1251,6 +1279,7 @@ export async function createMarketplaceListing({ userId, campusId, title, descri
       price: Number(price),
       condition: condition?.trim() || "Used",
       location: location?.trim() || "Campus",
+      image_urls: imageUrls,
     })
     .select()
     .single();
@@ -1274,7 +1303,7 @@ export async function getMyMarketplaceListings(userId) {
 
   const { data, error } = await supabase
     .from("marketplace_listings")
-    .select("id, title, price, category, condition, status, created_at, updated_at")
+    .select("id, title, price, category, condition, status, created_at, updated_at, expires_at")
     .eq("seller_id", userId)
     .order("created_at", { ascending: false });
 

@@ -9,10 +9,20 @@
 // Usage: node scripts/live-check-emergency-directory.mjs                 (staging)
 //        node scripts/live-check-emergency-directory.mjs --env=production --yes-production
 
+import fs from "node:fs";
+import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { resolveTarget } from "./env-target.mjs";
 
-const { SUPABASE_URL, ANON_KEY, SERVICE_ROLE_KEY } = resolveTarget();
+const { SUPABASE_URL, ANON_KEY, SERVICE_ROLE_KEY, root, target } = resolveTarget();
+const e2eCredsFile = target === "production" ? ".e2e-credentials.local.json" : ".e2e-credentials.staging.local.json";
+const e2eCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts", e2eCredsFile), "utf8"));
+const e2ePassword = (email) => {
+  const password = e2eCreds.find((r) => r.email === email)?.password;
+  if (!password) throw new Error(`No password known for ${email} in ${e2eCredsFile} -- run scripts/setup-test-users.mjs first.`);
+  return password;
+};
+
 
 let passCount = 0;
 let failCount = 0;
@@ -40,7 +50,7 @@ async function signIn(email, password) {
 async function main() {
   console.log("=== Campus Emergency Directory (doc §113) ===");
   const admin = await signIn("1nh25cs265@usn.campusos.internal", "Sanjay@123");
-  const bob = await signIn("e2e.bob@nhce.edu.in", "TestPass!2026Bob");
+  const bob = await signIn("e2e.bob@nhce.edu.in", e2ePassword("e2e.bob@nhce.edu.in"));
   const marker = `LiveCheckDirectory ${Date.now()}`;
 
   const anon = client();

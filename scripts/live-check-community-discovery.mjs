@@ -17,6 +17,14 @@ import path from "node:path";
 import { resolveTarget } from "./env-target.mjs";
 
 const { SUPABASE_URL, ANON_KEY, SERVICE_ROLE_KEY, root, target } = resolveTarget();
+const e2eCredsFile = target === "production" ? ".e2e-credentials.local.json" : ".e2e-credentials.staging.local.json";
+const e2eCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts", e2eCredsFile), "utf8"));
+const e2ePassword = (email) => {
+  const password = e2eCreds.find((r) => r.email === email)?.password;
+  if (!password) throw new Error(`No password known for ${email} in ${e2eCredsFile} -- run scripts/setup-test-users.mjs first.`);
+  return password;
+};
+
 
 // Udupi's password isn't a fixed constant -- see the identical comment in
 // live-check-food-hardening.mjs. Read it from the shared credentials file
@@ -29,9 +37,9 @@ if (!VENDOR_PASSWORD || VENDOR_PASSWORD.startsWith("(")) {
   throw new Error(`This script's Udupi vendor password isn't known in ${vendorCredsFile} for ${target} runs.`);
 }
 
-const ALICE = { email: "e2e.alice@nhce.edu.in", password: "TestPass!2026Alice" };
-const BOB = { email: "e2e.bob@nhce.edu.in", password: "TestPass!2026Bob" };
-const CAROL = { email: "e2e.carol@nhce.edu.in", password: "TestPass!2026Carol" };
+const ALICE = { email: "e2e.alice@nhce.edu.in", password: e2ePassword("e2e.alice@nhce.edu.in") };
+const BOB = { email: "e2e.bob@nhce.edu.in", password: e2ePassword("e2e.bob@nhce.edu.in") };
+const CAROL = { email: "e2e.carol@nhce.edu.in", password: e2ePassword("e2e.carol@nhce.edu.in") };
 const ADMIN = { email: "1nh25cs265@usn.campusos.internal", password: "Sanjay@123" };
 const UDUPI_VENDOR = { email: "udupi.canteen@nhce.edu.in", password: VENDOR_PASSWORD };
 
