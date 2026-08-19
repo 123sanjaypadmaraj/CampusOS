@@ -7573,6 +7573,19 @@ function LostService({ notify, authUser, openLogin, campusId, items: dbItems = [
                 Claim
               </button>
             )}
+            <button className="ghost" onClick={async () => {
+              if (!authUser) { openLogin?.(); notify("Sign in to report an item"); return; }
+              const reason = window.prompt("Why are you reporting this item? (scam, bogus, spam, etc.)");
+              if (!reason?.trim()) return;
+              try {
+                await reportContent("lost_found_item", item.id, reason.trim());
+                notify("Reported to campus moderators");
+              } catch (error) {
+                notify(error.message || "Could not report this item");
+              }
+            }}>
+              Report
+            </button>
           </div>
         </article>
       ))}

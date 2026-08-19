@@ -248,7 +248,7 @@ function ModerationTab({ notify, authUser }) {
 
   useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const canModerateContent = (report) => ["post", "comment", "marketplace_listing"].includes(report.target_type);
+  const canModerateContent = (report) => ["post", "comment", "marketplace_listing", "lost_found_item"].includes(report.target_type);
 
   const act = async (report, action) => {
     try {
@@ -2142,6 +2142,35 @@ function LostFoundTab({ notify, campusId, authUser }) {
     }
   };
 
+  // Archived = expired past its 21-day window (expire_stale_lost_found_items,
+  // 20260819001600) or manually archived via a moderation action -- either
+  // way it's a soft, reversible state, distinct from the hard "Delete" above.
+  const archive = async (item) => {
+    try {
+      setBusyId(item.id);
+      await adminApi.setLostFoundItemStatusAdmin(item.id, "archived");
+      notify("Archived");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not archive this report");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const restore = async (item) => {
+    try {
+      setBusyId(item.id);
+      await adminApi.setLostFoundItemStatusAdmin(item.id, "open");
+      notify("Restored to open");
+      await reload();
+    } catch (err) {
+      notify(err.message || "Could not restore this report");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
     <div className="admin-panel">
       <div className="section-head">
@@ -2154,6 +2183,7 @@ function LostFoundTab({ notify, campusId, authUser }) {
         <button className={statusFilter === "open" ? "chip active" : "chip"} onClick={() => setStatusFilter("open")}>Open</button>
         <button className={statusFilter === "claim_pending" ? "chip active" : "chip"} onClick={() => setStatusFilter("claim_pending")}>Pending verification</button>
         <button className={statusFilter === "resolved" ? "chip active" : "chip"} onClick={() => setStatusFilter("resolved")}>Resolved</button>
+        <button className={statusFilter === "archived" ? "chip active" : "chip"} onClick={() => setStatusFilter("archived")}>Archived</button>
       </div>
 
       {loading && <LoadingState label="Loading lost & found reports…" />}
@@ -2173,6 +2203,7 @@ function LostFoundTab({ notify, campusId, authUser }) {
                   <small>Claimed by <b>{item.claimant?.name || "unknown"}</b>: &ldquo;{item.claim_proof}&rdquo;</small>
                 )}
                 {item.status === "resolved" && <small>Resolved</small>}
+                {item.status === "archived" && <small>Archived (expired or removed from the public feed)</small>}
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {item.status === "claim_pending" && (
@@ -2182,7 +2213,13 @@ function LostFoundTab({ notify, campusId, authUser }) {
                   </>
                 )}
                 {item.status === "open" && (
-                  <button disabled={busyId === item.id} onClick={() => markResolved(item)}>Mark resolved</button>
+                  <>
+                    <button disabled={busyId === item.id} onClick={() => markResolved(item)}>Mark resolved</button>
+                    <button disabled={busyId === item.id} onClick={() => archive(item)}>Archive</button>
+                  </>
+                )}
+                {item.status === "archived" && (
+                  <button disabled={busyId === item.id} onClick={() => restore(item)}>Restore to open</button>
                 )}
                 <button disabled={busyId === item.id} onClick={() => remove(item)}><HiTrash /> Delete</button>
               </div>

@@ -1152,6 +1152,12 @@ export async function reviewStudentVerification(id, status, reason, reviewerId) 
 
 export async function getLostFoundItems(campusId, { limit = 30, cursor = null } = {}) {
   try {
+    // Fire-and-forget housekeeping: flips any report whose expires_at has
+    // passed from 'open' to 'archived' (supabase/migrations/
+    // 20260819001600_lost_found_hardening.sql) -- same "best-effort, never
+    // block the feed load" posture as getMarketplaceListings' equivalent call.
+    Promise.resolve(supabase.rpc("expire_stale_lost_found_items")).catch(() => {});
+
     let query = supabase.from("lost_found_items").select("*").eq("status", "open").order("created_at", { ascending: false }).limit(limit);
     if (campusId) query = query.eq("campus_id", campusId);
     if (cursor) query = query.lt("created_at", cursor);
@@ -1230,11 +1236,16 @@ export async function verifyLostFoundHandover(itemId, approve) {
   return data;
 }
 
-// Direct admin overrides (mark resolved without a claim, or remove a
-// bogus/spam report) -- covered by the lost_found_admin_manage/_delete RLS
-// policies (20260815000200), not by either RPC above.
+// Direct admin overrides (mark resolved without a claim, archive/restore, or
+// remove a bogus/spam report) -- covered by the lost_found_admin_manage/
+// _delete RLS policies (20260815000200), not by either RPC above. Restoring
+// to 'open' also resets expires_at (20260819001600) -- otherwise a report
+// restored from 'archived' would already be past its old expiry and get
+// re-archived by the very next expire_stale_lost_found_items() housekeeping
+// call.
 export async function setLostFoundItemStatusAdmin(itemId, status) {
-  const { data, error } = await supabase.from("lost_found_items").update({ status }).eq("id", itemId).select().single();
+  const patch = status === "open" ? { status, expires_at: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString() } : { status };
+  const { data, error } = await supabase.from("lost_found_items").update(patch).eq("id", itemId).select().single();
   throwIfError(error);
   return data;
 }

@@ -190,8 +190,9 @@ export interface LostFoundItem {
   description: string;
   category: string;
   location: string;
-  status: "open" | "claim_pending" | "resolved";
+  status: "open" | "claim_pending" | "resolved" | "archived";
   image_urls: string[];
+  expires_at: string;
   created_at: string;
 }
 
