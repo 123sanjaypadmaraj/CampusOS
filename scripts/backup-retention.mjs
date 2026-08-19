@@ -1,39 +1,65 @@
 // scripts/backup-retention.mjs
 //
 // Prunes the `backups` storage bucket down to a fixed retention policy
-// (see docs/DISASTER_RECOVERY.md): the last 14 daily snapshots, plus the
-// newest snapshot in each of the last 8 ISO weeks, plus the newest in each
-// of the last 12 calendar months -- so a mistake discovered a month later
-// still has *something* to restore from, without keeping 365+ full dumps
-// forever. Run by .github/workflows/backup.yml right after a new backup
-// uploads; safe to run standalone too (idempotent).
+// (see docs/DISASTER_RECOVERY.md), separately per --kind:
+//
+//   db      (daily cadence, .github/workflows/backup.yml): last 14 daily
+//           snapshots, plus the newest in each of the last 8 ISO weeks,
+//           plus the newest in each of the last 12 calendar months.
+//   storage (weekly cadence, .github/workflows/storage-backup.yml): last
+//           8 snapshots (~2 months), plus the newest in each of the last
+//           6 calendar months. No separate weekly tier -- redundant when
+//           the source cadence is already weekly.
+//
+// Either way: a mistake discovered a month later still has *something* to
+// restore from, without keeping every dump/archive ever taken forever.
+// Run right after a new backup uploads; safe to run standalone too
+// (idempotent).
 //
 // Uses the Storage HTTP API directly with the service_role key, not
 // `supabase storage rm` -- that CLI subcommand silently no-ops (confirmed
 // live against a real object: reports {"deleted":[]} and makes no HTTP
 // call at all) on Supabase CLI 2.114.0's --experimental storage commands.
-// `supabase storage cp` (the upload half, in the backup workflow) works
+// `supabase storage cp` (the upload half, in the backup workflows) works
 // fine and needs no service_role key -- only listing/deleting for
 // retention does.
 //
-// Usage: SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/backup-retention.mjs [--dry-run]
+// Usage: SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/backup-retention.mjs [--kind=db|storage] [--dry-run]
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const dryRun = process.argv.includes("--dry-run");
+const kindFlag = process.argv.find((a) => a.startsWith("--kind="))?.split("=")[1] || "db";
 
 if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
-  console.error("Usage: SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/backup-retention.mjs [--dry-run]");
+  console.error("Usage: SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/backup-retention.mjs [--kind=db|storage] [--dry-run]");
   process.exit(1);
 }
 
-const KEEP_DAILY = 14;
-const KEEP_WEEKLY = 8;
-const KEEP_MONTHLY = 12;
-const BUCKET = "backups";
-const PREFIX = "db/";
+const KINDS = {
+  db: {
+    prefix: "db/",
+    re: /^db-(\d{4})-(\d{2})-(\d{2})\.sql\.gz$/,
+    keepDaily: 14,
+    keepWeekly: 8,
+    keepMonthly: 12,
+  },
+  storage: {
+    prefix: "storage/",
+    re: /^storage-(\d{4})-(\d{2})-(\d{2})\.tar\.gz$/,
+    keepDaily: 8, // "daily" tier == "last N snapshots" regardless of cadence
+    keepWeekly: 0, // skip -- redundant, the source cadence is already weekly
+    keepMonthly: 6,
+  },
+};
 
-const FILENAME_RE = /^db-(\d{4})-(\d{2})-(\d{2})\.sql\.gz$/;
+if (!KINDS[kindFlag]) {
+  console.error(`Unknown --kind=${kindFlag}. Use "db" or "storage".`);
+  process.exit(1);
+}
+
+const { prefix: PREFIX, re: FILENAME_RE, keepDaily: KEEP_DAILY, keepWeekly: KEEP_WEEKLY, keepMonthly: KEEP_MONTHLY } = KINDS[kindFlag];
+const BUCKET = "backups";
 
 function isoWeekKey(date) {
   const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
@@ -109,14 +135,14 @@ function computeKeepSet(backups) {
 async function main() {
   const backups = await listBackups();
   if (backups.length === 0) {
-    console.log(`No backups found under ${BUCKET}/${PREFIX} -- nothing to prune.`);
+    console.log(`No ${kindFlag} backups found under ${BUCKET}/${PREFIX} -- nothing to prune.`);
     return;
   }
 
   const keep = computeKeepSet(backups);
   const toDelete = backups.filter((b) => !keep.has(b.name));
 
-  console.log(`${backups.length} backups found, keeping ${keep.size}, deleting ${toDelete.length}.`);
+  console.log(`[${kindFlag}] ${backups.length} backups found, keeping ${keep.size}, deleting ${toDelete.length}.`);
 
   if (toDelete.length === 0) return;
 

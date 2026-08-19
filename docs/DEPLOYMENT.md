@@ -86,7 +86,8 @@ one-click custom domain flows once you own the domain). Doc §78 suggests
 apps that don't exist yet (§76-78) — irrelevant until those apps exist;
 a single domain is fine for now.
 
-## 6. Monitoring, backups, disaster recovery -- done (2026-08-15)
+## 6. Monitoring, backups, disaster recovery -- done (2026-08-15, storage
+   file-bytes backup added 2026-08-19)
 
 In-house error tracking (no third-party account/DSN needed): a global
 `ErrorBoundary` + `window.onerror`/`unhandledrejection` handlers
@@ -97,23 +98,26 @@ check (`.github/workflows/uptime.yml`) pings the deployed frontend + the
 Supabase REST API; a failed scheduled run triggers GitHub's own automatic
 failure-notification email, no separate alerting service.
 
-Daily automated backups (`.github/workflows/backup.yml` + retention
-pruning) and a written restore procedure -- full detail in
-`docs/DISASTER_RECOVERY.md` and `docs/DATA_RETENTION.md`. **Needs 2
-GitHub repo secrets this session couldn't set itself** (no `gh` CLI
-available):
+Daily automated DB backups (`.github/workflows/backup.yml`) plus weekly
+automated storage-bucket-file-bytes backups
+(`.github/workflows/storage-backup.yml`), both with retention pruning, and
+a written restore procedure -- full detail in `docs/DISASTER_RECOVERY.md`
+and `docs/DATA_RETENTION.md`. **Needs 2 GitHub repo secrets this session
+couldn't set itself** (no `gh` CLI available), shared by both workflows:
 - `SUPABASE_ACCESS_TOKEN` -- a personal access token
   (Supabase Dashboard -> Account -> Access Tokens). Also usable for the
-  `SUPABASE_ACCESS_TOKEN` the `uptime`/`backup` workflows need.
+  `SUPABASE_ACCESS_TOKEN` the `uptime`/`backup`/`storage-backup` workflows
+  need.
 - `PROD_SUPABASE_SERVICE_ROLE_KEY` -- production's service_role key
-  (Dashboard -> Project Settings -> API), used only by the backup
-  workflow's retention-pruning step.
+  (Dashboard -> Project Settings -> API), used only by each workflow's
+  retention-pruning step.
 
 Add both via GitHub -> repo -> Settings -> Secrets and variables ->
 Actions -> New repository secret, then run the "Database backup
-(production)" workflow once manually (Actions tab -> Run workflow) to
-confirm it completes -- see the workflow file's own comments for why that
-verification step matters (it was built and tested manually, not inside an
+(production)" **and** "Storage backup (production)" workflows once
+manually (Actions tab -> Run workflow) to confirm each completes -- see
+each workflow file's own comments for why that verification step matters
+(both were built and tested manually against real projects, not inside an
 actual GitHub Actions run).
 
 Not done: PostHog or any product-analytics account (doc §96-98 also

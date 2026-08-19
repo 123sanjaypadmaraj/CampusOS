@@ -10,9 +10,11 @@ real legal/product decision, not just an engineering default.
 
 ## Backups
 
-Covered in full in `docs/DISASTER_RECOVERY.md`: 14 daily + 8 weekly + 12
-monthly snapshots, auto-pruned by `scripts/backup-retention.mjs`. Oldest
-possible retained backup: ~12 months.
+Covered in full in `docs/DISASTER_RECOVERY.md`. Database: 14 daily + 8
+weekly + 12 monthly snapshots (oldest possible retained: ~12 months).
+Storage bucket file bytes (weekly cadence): 8 recent + 6 monthly archives
+(oldest possible retained: ~6 months). Both auto-pruned by
+`scripts/backup-retention.mjs`.
 
 ## Error logs (`error_logs`, monitoring)
 

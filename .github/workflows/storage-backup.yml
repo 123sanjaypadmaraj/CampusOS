@@ -1,0 +1,95 @@
+name: Storage backup (production)
+
+# Doc §96-98 "backups, disaster recovery, retention policy" -- companion to
+# .github/workflows/backup.yml (DB schema+data). That pipeline's dump does
+# NOT include storage bucket file *bytes* (avatars, ID verification
+# documents, print job PDFs, etc.) -- `storage.objects` rows are metadata
+# only (filename, path, owner), not the actual bytes, which live in
+# Supabase's object store. This workflow closes that gap. See
+# docs/DISASTER_RECOVERY.md for the full policy and restore procedure.
+#
+# Runs WEEKLY, not daily like the DB backup -- file bytes change far less
+# often than DB rows, and a full re-copy of every bucket is a meaningfully
+# bigger/slower job than the ~150KB SQL dump. Production only; staging
+# isn't backed up (nothing on it is irreplaceable -- see
+# docs/ENVIRONMENTS.md).
+#
+# Needs the same 2 repository secrets as backup.yml (SUPABASE_ACCESS_TOKEN,
+# PROD_SUPABASE_SERVICE_ROLE_KEY) -- see docs/DISASTER_RECOVERY.md for setup.
+# No new secrets needed if the DB backup pipeline is already configured.
+#
+# Verified live against the real staging project while building this (real
+# recursive download of every bucket incl. one with real files, real
+# tar.gz, real upload to the backups bucket, real retention prune against
+# seeded dated archives) -- see git history -- but NOT inside an actual
+# GitHub Actions run, same caveat as backup.yml. Run once via
+# workflow_dispatch after confirming the secrets are set to be sure it
+# completes in your GitHub environment before trusting the schedule alone.
+
+on:
+  schedule:
+    - cron: "37 20 * * 0" # weekly, Sunday ~01:47-02:07 IST, right after the daily DB backup
+  workflow_dispatch: {}
+
+env:
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+  PROJECT_REF: dzjzjlylsfpmymkcavrq
+  SUPABASE_URL: https://dzjzjlylsfpmymkcavrq.supabase.co
+  SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.PROD_SUPABASE_SERVICE_ROLE_KEY }}
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: List buckets to back up
+        # Discovered live from the Storage API rather than hardcoded here --
+        # a bucket added by a future migration (supabase/migrations/*.sql,
+        # search `insert into storage.buckets`) is picked up automatically
+        # instead of silently missing from backups until someone remembers
+        # to update a hardcoded list in two places. Excludes the `backups`
+        # bucket itself (no point backing that up into itself).
+        run: |
+          set -euo pipefail
+          curl -sf "$SUPABASE_URL/storage/v1/bucket" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            | jq -r '.[].id' | grep -v '^backups$' > buckets.txt
+          echo "Buckets to back up:"
+          cat buckets.txt
+
+      - name: Download every bucket's file bytes
+        run: |
+          set -euo pipefail
+          mkdir -p storage-dump
+          while IFS= read -r bucket; do
+            [ -z "$bucket" ] && continue
+            echo "== $bucket =="
+            npx supabase --experimental storage cp -r "ss:///$bucket" "storage-dump/$bucket" \
+              --project-ref "$PROJECT_REF" --jobs 4
+          done < buckets.txt
+
+      - name: Archive and compress
+        run: |
+          set -euo pipefail
+          DATE=$(date -u +%F)
+          FILENAME="storage-${DATE}.tar.gz"
+          tar -czf "$FILENAME" -C storage-dump .
+          echo "STORAGE_BACKUP_FILE=$FILENAME" >> "$GITHUB_ENV"
+          echo "Archived $(du -h "$FILENAME" | cut -f1) to $FILENAME"
+
+      - name: Upload to the backups bucket
+        run: |
+          set -euo pipefail
+          npx supabase --experimental storage cp \
+            "$STORAGE_BACKUP_FILE" "ss:///backups/storage/$STORAGE_BACKUP_FILE" \
+            --content-type application/gzip \
+            --project-ref "$PROJECT_REF"
+
+      - name: Prune old storage backups per retention policy
+        run: node scripts/backup-retention.mjs --kind=storage
