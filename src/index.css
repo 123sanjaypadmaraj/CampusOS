@@ -4773,6 +4773,7 @@
 .status-pill.out-of-stock { background: #fdeeea; color: #d0562f; }
 .status-pill.priority-high { background: #fff4e0; color: #b9770e; }
 .status-pill.priority-urgent { background: #fdeeea; color: #d0562f; }
+.status-pill.priority-low { background: #eef1fb; color: #4a5aa8; }
 
 /* ---- order ops row (priority / assign / internal note, vendor order queue) ---- */
 
@@ -5279,6 +5280,7 @@
 .app-shell.dark-mode .status-pill.out-of-stock { background: #3a2018; color: #f2916a; }
 .app-shell.dark-mode .status-pill.priority-high { background: #3a2a08; color: #f2c168; }
 .app-shell.dark-mode .status-pill.priority-urgent { background: #3a2018; color: #f2916a; }
+.app-shell.dark-mode .status-pill.priority-low { background: #1c2440; color: #9db0f2; }
 .app-shell.dark-mode .stock-alert-banner { background: #3a2a08; color: #f2c168; border-color: #5c470f; }
 .app-shell.dark-mode .stock-alert-banner button { background: var(--surface); color: #f2c168; border-color: #5c470f; }
 .app-shell.dark-mode .file-drop { border-color: var(--border); color: var(--muted); }

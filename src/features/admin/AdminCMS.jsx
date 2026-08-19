@@ -22,6 +22,7 @@ import {
   HiCheck,
   HiBuildingOffice2,
   HiLifebuoy,
+  HiPaperClip,
 } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import { StatTile } from "../../components/ui/Charts";
@@ -1420,26 +1421,39 @@ export function ResourcesTab({ notify, campusId }) {
 ========================================================= */
 
 const SUPPORT_STATUS_LABEL = { open: "Open", in_progress: "In progress", resolved: "Resolved", closed: "Closed" };
+const SUPPORT_PRIORITIES = ["low", "normal", "high", "urgent"];
+const SUPPORT_PRIORITY_LABEL = { low: "Low", normal: "Normal", high: "High", urgent: "Urgent" };
 
 function SupportTicketThreadModal({ ticket, authUser, onClose, notify, onChanged }) {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [reply, setReply] = useState("");
+  const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [priority, setPriority] = useState(ticket.priority || "normal");
 
   const reload = async () => {
-    try { setLoading(true); setMessages(await adminApi.getSupportTicketMessages(ticket.id)); }
-    catch (err) { notify(err.message || "Could not load the message thread"); }
+    try {
+      setLoading(true);
+      const msgs = await adminApi.getSupportTicketMessages(ticket.id);
+      const withUrls = await Promise.all(msgs.map(async (m) => (
+        m.attachment_url ? { ...m, attachmentSignedUrl: await adminApi.getSupportAttachmentUrl(m.attachment_url).catch(() => null) } : m
+      )));
+      setMessages(withUrls);
+    } catch (err) { notify(err.message || "Could not load the message thread"); }
     finally { setLoading(false); }
   };
   useEffect(() => { reload(); }, [ticket.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const send = async () => {
-    if (!reply.trim()) return;
+    if (!reply.trim() && !file) return;
     try {
       setBusy(true);
-      await adminApi.addSupportTicketMessage(ticket.id, reply.trim());
+      let attachmentUrl = null;
+      if (file) attachmentUrl = await adminApi.uploadSupportAttachment(file, authUser.id);
+      await adminApi.addSupportTicketMessage(ticket.id, reply.trim(), attachmentUrl);
       setReply("");
+      setFile(null);
       await reload();
       onChanged();
     } catch (err) { notify(err.message || "Could not send reply"); }
@@ -1453,6 +1467,16 @@ function SupportTicketThreadModal({ ticket, authUser, onClose, notify, onChanged
       notify(`Ticket marked ${SUPPORT_STATUS_LABEL[status].toLowerCase()}`);
       onChanged();
     } catch (err) { notify(err.message || "Could not update status"); }
+    finally { setBusy(false); }
+  };
+
+  const changePriority = async (p) => {
+    try {
+      setBusy(true);
+      await adminApi.setSupportTicketPriority(ticket.id, p);
+      setPriority(p);
+      notify(`Priority set to ${SUPPORT_PRIORITY_LABEL[p].toLowerCase()}`);
+    } catch (err) { notify(err.message || "Could not update priority"); }
     finally { setBusy(false); }
   };
 
@@ -1473,13 +1497,26 @@ function SupportTicketThreadModal({ ticket, authUser, onClose, notify, onChanged
         {ticket.assignee ? ` · Assigned to ${ticket.assignee.name}` : ""}
       </p>
 
+      <div className="chips" style={{ marginBottom: 12 }}>
+        {SUPPORT_PRIORITIES.map((p) => (
+          <button key={p} className={priority === p ? "chip active" : "chip"} disabled={busy} onClick={() => changePriority(p)}>
+            <span className={`status-pill priority-${p}`} style={{ marginRight: 4 }}>{SUPPORT_PRIORITY_LABEL[p]}</span>
+          </button>
+        ))}
+      </div>
+
       {loading ? <LoadingState label="Loading thread…" /> : (
         <div className="resource-list" style={{ maxHeight: 320, overflowY: "auto" }}>
           {messages.map((m) => (
             <article className="resource-row" key={m.id} style={{ background: m.is_staff ? "var(--card-alt, #f5f5fa)" : undefined }}>
               <div>
                 <b>{m.is_staff ? "Staff" : (m.sender?.name || "Student")}</b>
-                <small>{m.body}</small>
+                {m.body && <small>{m.body}</small>}
+                {m.attachmentSignedUrl && (
+                  <a href={m.attachmentSignedUrl} target="_blank" rel="noreferrer">
+                    <img src={m.attachmentSignedUrl} alt="Attachment" style={{ maxWidth: 160, borderRadius: 8, marginTop: 4, display: "block" }} />
+                  </a>
+                )}
                 <small>{new Date(m.created_at).toLocaleString()}</small>
               </div>
             </article>
@@ -1488,7 +1525,11 @@ function SupportTicketThreadModal({ ticket, authUser, onClose, notify, onChanged
       )}
 
       <label>Reply<textarea rows={3} value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Type a reply…" /></label>
-      <button className="primary wide" disabled={busy || !reply.trim()} onClick={send}>Send reply</button>
+      <label>Attach a screenshot (optional)
+        <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+        {file && <small><HiPaperClip /> {file.name}</small>}
+      </label>
+      <button className="primary wide" disabled={busy || (!reply.trim() && !file)} onClick={send}>Send reply</button>
 
       <div className="chips" style={{ marginTop: 12 }}>
         {!ticket.assignee && <button disabled={busy} onClick={claim}>Assign to me</button>}
@@ -1500,11 +1541,104 @@ function SupportTicketThreadModal({ ticket, authUser, onClose, notify, onChanged
   );
 }
 
+// FAQ / Help Centre editor, module 42 (20260819001200_support_faq.sql).
+// Nested inside the Support tab as a segmented view rather than its own
+// top-level AdminCMS tab -- same content pool (support.manage), avoids
+// growing the already-long TABS list for what's a sub-concern of Support.
+function SupportFaqEditModal({ faq, onClose, notify, onSaved }) {
+  const [category, setCategory] = useState(faq?.category || "general");
+  const [question, setQuestion] = useState(faq?.question || "");
+  const [answer, setAnswer] = useState(faq?.answer || "");
+  const [sortOrder, setSortOrder] = useState(faq?.sort_order ?? 0);
+  const [isActive, setIsActive] = useState(faq?.is_active ?? true);
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    if (!question.trim() || !answer.trim()) { notify("A question and answer are both required"); return; }
+    try {
+      setSaving(true);
+      const row = await adminApi.adminUpsertSupportFaq({
+        id: faq?.id || null, campusId: faq?.campus_id ?? null, category, question: question.trim(),
+        answer: answer.trim(), sortOrder: Number(sortOrder) || 0, isActive,
+      });
+      notify(faq ? "FAQ entry updated" : "FAQ entry added");
+      onSaved(row);
+    } catch (err) { notify(err.message || "Could not save this FAQ entry"); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <Modal kicker="HELP CENTRE" title={faq ? "Edit FAQ entry" : "New FAQ entry"} onClose={onClose}>
+      <label>Category
+        <select value={category} onChange={(e) => setCategory(e.target.value)}>
+          {["general", "account", "payment", "technical", "other"].map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </label>
+      <label>Question<input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="How do I reset my password?" /></label>
+      <label>Answer<textarea rows={5} value={answer} onChange={(e) => setAnswer(e.target.value)} /></label>
+      <label>Sort order<input type="number" value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} /></label>
+      <label className="toggle-row"><input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} /> Visible to students</label>
+      <button className="primary wide" disabled={saving} onClick={save}>{saving ? "Saving…" : "Save"}</button>
+    </Modal>
+  );
+}
+
+function SupportFaqAdmin({ notify }) {
+  const [faqs, setFaqs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(null);
+  const [creating, setCreating] = useState(false);
+
+  const reload = async () => {
+    try { setLoading(true); setFaqs(await adminApi.adminListSupportFaqs()); }
+    catch (err) { notify(err.message || "Could not load FAQ entries"); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const remove = async (id) => {
+    try { await adminApi.adminDeleteSupportFaq(id); notify("FAQ entry deleted"); setFaqs((cur) => cur.filter((f) => f.id !== id)); }
+    catch (err) { notify(err.message || "Could not delete this entry"); }
+  };
+
+  if (loading) return <LoadingState label="Loading FAQ entries…" />;
+
+  return (
+    <div>
+      <button className="primary" onClick={() => setCreating(true)}><HiPlus /> New FAQ entry</button>
+      <div className="resource-list" style={{ marginTop: 12 }}>
+        {faqs.length === 0 && <EmptyState icon={<HiQuestionMarkCircle />} title="No FAQ entries yet" text="Add answers to the questions students ask support most." />}
+        {faqs.map((f) => (
+          <article className="resource-row" key={f.id}>
+            <div className="resource-icon"><HiQuestionMarkCircle /></div>
+            <div>
+              <b>{f.question} {!f.is_active && <span className="status-pill unavailable">Hidden</span>}</b>
+              <small>{f.category} · {f.campus_id ? "This campus" : "All campuses"}</small>
+            </div>
+            <div className="chips">
+              <button onClick={() => setEditing(f)}><HiPencilSquare /></button>
+              <button onClick={() => remove(f.id)}><HiTrash /></button>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      {(creating || editing) && (
+        <SupportFaqEditModal faq={editing} notify={notify}
+          onClose={() => { setCreating(false); setEditing(null); }}
+          onSaved={() => { setCreating(false); setEditing(null); reload(); }} />
+      )}
+    </div>
+  );
+}
+
 export function SupportTicketsTab({ notify, authUser }) {
+  const [view, setView] = useState("tickets");
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [priorityFilter, setPriorityFilter] = useState("");
   const [openTicket, setOpenTicket] = useState(null);
 
   const reload = async () => {
@@ -1520,8 +1654,7 @@ export function SupportTicketsTab({ notify, authUser }) {
   };
   useEffect(() => { reload(); }, [statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (loading) return <LoadingState label="Loading support tickets…" />;
-  if (error) return <ErrorState text={error} onRetry={reload} />;
+  const shown = priorityFilter ? tickets.filter((t) => t.priority === priorityFilter) : tickets;
 
   return (
     <div>
@@ -1533,26 +1666,44 @@ export function SupportTicketsTab({ notify, authUser }) {
       </div>
 
       <div className="chips" style={{ marginBottom: 16 }}>
-        {["", "open", "in_progress", "resolved", "closed"].map((s) => (
-          <button key={s || "all"} className={statusFilter === s ? "chip active" : "chip"} onClick={() => setStatusFilter(s)}>
-            {s ? SUPPORT_STATUS_LABEL[s] : "All"}
-          </button>
-        ))}
+        <button className={view === "tickets" ? "chip active" : "chip"} onClick={() => setView("tickets")}><HiLifebuoy /> Tickets</button>
+        <button className={view === "faq" ? "chip active" : "chip"} onClick={() => setView("faq")}><HiQuestionMarkCircle /> Help Centre</button>
       </div>
 
-      <div className="resource-list">
-        {tickets.length === 0 && <EmptyState icon={<HiLifebuoy />} title="No tickets" text="Nothing here for this filter." />}
-        {tickets.map((t) => (
-          <article className="resource-row" key={t.id} onClick={() => setOpenTicket(t)} style={{ cursor: "pointer" }}>
-            <div className="resource-icon"><HiLifebuoy /></div>
-            <div>
-              <b>{t.subject} <span className="social-type">{t.category.toUpperCase()}</span></b>
-              <small>{t.reporter?.name || "Student"} · {new Date(t.created_at).toLocaleString()}</small>
+      {view === "faq" ? <SupportFaqAdmin notify={notify} /> : (
+        loading ? <LoadingState label="Loading support tickets…" /> : error ? <ErrorState text={error} onRetry={reload} /> : (
+          <>
+            <div className="chips" style={{ marginBottom: 8 }}>
+              {["", "open", "in_progress", "resolved", "closed"].map((s) => (
+                <button key={s || "all"} className={statusFilter === s ? "chip active" : "chip"} onClick={() => setStatusFilter(s)}>
+                  {s ? SUPPORT_STATUS_LABEL[s] : "All"}
+                </button>
+              ))}
             </div>
-            <strong>{SUPPORT_STATUS_LABEL[t.status]}</strong>
-          </article>
-        ))}
-      </div>
+            <div className="chips" style={{ marginBottom: 16 }}>
+              {["", ...SUPPORT_PRIORITIES].map((p) => (
+                <button key={p || "all-priority"} className={priorityFilter === p ? "chip active" : "chip"} onClick={() => setPriorityFilter(p)}>
+                  {p ? SUPPORT_PRIORITY_LABEL[p] : "Any priority"}
+                </button>
+              ))}
+            </div>
+
+            <div className="resource-list">
+              {shown.length === 0 && <EmptyState icon={<HiLifebuoy />} title="No tickets" text="Nothing here for this filter." />}
+              {shown.map((t) => (
+                <article className="resource-row" key={t.id} onClick={() => setOpenTicket(t)} style={{ cursor: "pointer" }}>
+                  <div className="resource-icon"><HiLifebuoy /></div>
+                  <div>
+                    <b>{t.subject} <span className="social-type">{t.category.toUpperCase()}</span> {t.priority !== "normal" && <span className={`status-pill priority-${t.priority}`}>{SUPPORT_PRIORITY_LABEL[t.priority]}</span>}</b>
+                    <small>{t.reporter?.name || "Student"} · {new Date(t.created_at).toLocaleString()}</small>
+                  </div>
+                  <strong>{SUPPORT_STATUS_LABEL[t.status]}</strong>
+                </article>
+              ))}
+            </div>
+          </>
+        )
+      )}
 
       {openTicket && (
         <SupportTicketThreadModal ticket={openTicket} authUser={authUser} notify={notify}

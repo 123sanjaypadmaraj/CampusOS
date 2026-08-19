@@ -8,4 +8,8 @@ export {
   getSupportTicketMessages,
   addSupportTicketMessage,
   getCampusContactInfo,
+  uploadSupportAttachment,
+  getSupportAttachmentUrl,
+  escalateSupportTicket,
+  getSupportFaqs,
 } from "../../services/mvpService";

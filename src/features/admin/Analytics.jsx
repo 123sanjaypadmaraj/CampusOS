@@ -10,6 +10,7 @@ const RANGES = [
 ];
 
 const VENDOR_TYPE_LABEL = { canteen: "Canteen", print_shop: "Print Shop", store: "Store" };
+const SUPPORT_PRIORITY_LABEL = { low: "Low", normal: "Normal", high: "High", urgent: "Urgent" };
 
 async function rpc(name, args) {
   const { data, error } = await supabase.rpc(name, args);
@@ -38,6 +39,10 @@ export default function AdminAnalytics({ campusId }) {
   const [notificationsSummary, setNotificationsSummary] = useState(null);
   const [platformHealth, setPlatformHealth] = useState(null);
   const [errorTrend, setErrorTrend] = useState([]);
+  const [supportSummary, setSupportSummary] = useState(null);
+  const [supportByCategory, setSupportByCategory] = useState([]);
+  const [supportByPriority, setSupportByPriority] = useState([]);
+  const [supportSeries, setSupportSeries] = useState([]);
 
   const reload = async () => {
     try {
@@ -47,6 +52,7 @@ export default function AdminAnalytics({ campusId }) {
         dauSeries, gmvSeries, canteens, slaSummary, wauCount, mauCount,
         vendorPerf, evSummary, evTop, facSummary, ticketsCat,
         mktSummary, notifSummary, health, errTrend,
+        supSummary, supCat, supPriority, supSeries,
       ] = await Promise.all([
         rpc("admin_dau_series", { p_campus_id: campusId, p_days: days }),
         rpc("admin_gmv_series", { p_campus_id: campusId, p_days: days }),
@@ -63,6 +69,10 @@ export default function AdminAnalytics({ campusId }) {
         rpc("admin_notifications_summary", { p_campus_id: campusId, p_days: days }),
         rpc("admin_platform_health", { p_campus_id: campusId, p_days: days }),
         rpc("admin_error_trend", { p_campus_id: campusId, p_days: days }),
+        rpc("admin_support_summary", { p_campus_id: campusId, p_days: days }),
+        rpc("admin_support_tickets_by_category", { p_campus_id: campusId, p_days: days }),
+        rpc("admin_support_tickets_by_priority", { p_campus_id: campusId, p_days: days }),
+        rpc("admin_support_tickets_series", { p_campus_id: campusId, p_days: days }),
       ]);
       setDau(dauSeries || []);
       setGmv(gmvSeries || []);
@@ -79,6 +89,10 @@ export default function AdminAnalytics({ campusId }) {
       setNotificationsSummary((notifSummary && notifSummary[0]) || null);
       setPlatformHealth((health && health[0]) || null);
       setErrorTrend(errTrend || []);
+      setSupportSummary((supSummary && supSummary[0]) || null);
+      setSupportByCategory(supCat || []);
+      setSupportByPriority(supPriority || []);
+      setSupportSeries(supSeries || []);
     } catch (err) {
       setError(err.message || "Could not load analytics");
     } finally {
@@ -165,6 +179,22 @@ export default function AdminAnalytics({ campusId }) {
       <BarChart
         title="Tickets by category"
         bars={ticketsByCategory.map((t) => ({ label: t.category, value: t.ticket_count }))}
+        emptyText="No tickets in this range"
+      />
+
+      <h3 style={{ marginTop: 28 }}>Support (general help desk)</h3>
+      <div className="analytics-grid">
+        <StatTile label="Tickets" value={supportSummary?.ticket_count ?? 0} sub={supportSummary?.resolved_pct != null ? `${supportSummary.resolved_pct}% resolved` : "No tickets in range"} />
+        <StatTile label="Urgent" value={supportSummary?.urgent_count ?? 0} sub={supportSummary?.escalated_open_count ? `${supportSummary.escalated_open_count} still open` : "None currently urgent"} />
+        <StatTile label="Avg. resolution time" value={supportSummary?.avg_resolution_hours != null ? `${supportSummary.avg_resolution_hours}h` : "—"} sub="Resolved/closed tickets only" />
+      </div>
+      <div className="analytics-charts-grid">
+        <TrendChart title="Support tickets per day" points={supportSeries.map((d) => ({ x: d.day, y: d.ticket_count }))} valueFormatter={(v) => `${v} tickets`} />
+        <BarChart title="Support tickets by priority" bars={supportByPriority.map((p) => ({ label: SUPPORT_PRIORITY_LABEL[p.priority] || p.priority, value: p.ticket_count }))} emptyText="No tickets in this range" />
+      </div>
+      <BarChart
+        title="Support tickets by category"
+        bars={supportByCategory.map((t) => ({ label: t.category, value: t.ticket_count }))}
         emptyText="No tickets in this range"
       />
 

@@ -431,5 +431,12 @@ export {
   getSupportTicketMessages,
   addSupportTicketMessage,
   setSupportTicketStatus,
+  setSupportTicketPriority,
+  escalateSupportTicket,
   assignSupportTicket,
+  uploadSupportAttachment,
+  getSupportAttachmentUrl,
+  adminListSupportFaqs,
+  adminUpsertSupportFaq,
+  adminDeleteSupportFaq,
 } from "../../services/mvpService";
