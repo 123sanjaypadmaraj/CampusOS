@@ -1,4 +1,5 @@
 import { supabase } from "../lib/supabase";
+import { logClientError } from "./mvpService";
 
 
 export async function createOrder({
@@ -63,6 +64,7 @@ export async function createOrder({
     .single();
 
   if (orderError) {
+    logClientError(`Order creation failed: ${orderError.message}`, { severity: "error", category: "order_creation", context: { canteenId } });
     throw orderError;
   }
 
@@ -86,6 +88,7 @@ export async function createOrder({
     .insert(orderItems);
 
   if (itemError) {
+    logClientError(`Order item creation failed: ${itemError.message}`, { severity: "error", category: "order_creation", context: { orderId: order.id } });
     await supabase
       .from("orders")
       .delete()

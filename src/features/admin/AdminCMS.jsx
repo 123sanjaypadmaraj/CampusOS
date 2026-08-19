@@ -3390,6 +3390,7 @@ function SystemHealthTab({ notify }) {
   const [dbHealth, setDbHealth] = useState(null);
   const [fnHealth, setFnHealth] = useState(null);
   const [fnError, setFnError] = useState("");
+  const [obs, setObs] = useState(null);
   const [loading, setLoading] = useState(true);
   const [checkedAt, setCheckedAt] = useState(null);
 
@@ -3397,11 +3398,17 @@ function SystemHealthTab({ notify }) {
     try {
       setLoading(true);
       setFnError("");
-      const [db, fn] = await Promise.allSettled([adminApi.getSystemHealth(), adminApi.getEdgeFunctionHealth()]);
+      const [db, fn, observability] = await Promise.allSettled([
+        adminApi.getSystemHealth(),
+        adminApi.getEdgeFunctionHealth(),
+        adminApi.getObservabilitySummary(),
+      ]);
       if (db.status === "fulfilled") setDbHealth(db.value);
       else notify(db.reason?.message || "Could not read cron/job health");
       if (fn.status === "fulfilled") setFnHealth(fn.value);
       else setFnError(fn.reason?.message || "Edge function unreachable");
+      if (observability.status === "fulfilled") setObs(observability.value);
+      else notify(observability.reason?.message || "Could not read observability summary");
       setCheckedAt(new Date());
     } finally {
       setLoading(false);
@@ -3452,6 +3459,55 @@ function SystemHealthTab({ notify }) {
           <span key={key} className={fnHealth?.secret_groups?.[key] ? "chip active" : "chip"}>
             {label}: {fnHealth?.secret_groups?.[key] ? "configured" : "missing"}
           </span>
+        ))}
+      </div>
+
+      <h3 style={{ marginTop: 24 }}>Observability (last 24h)</h3>
+      <div className="analytics-grid" style={{ marginBottom: 24 }}>
+        <StatTile
+          label="Errors"
+          value={(obs?.errors_by_severity_24h?.error || 0) + (obs?.errors_by_severity_24h?.fatal || 0)}
+          sub={`${obs?.errors_by_severity_24h?.fatal || 0} fatal`}
+        />
+        <StatTile
+          label="Payment failures"
+          value={obs?.payment_24h?.failed_24h ?? 0}
+          sub={`of ${obs?.payment_24h?.total_24h ?? 0} orders`}
+        />
+        <StatTile
+          label="Notification failures"
+          value={Object.values(obs?.notifications_24h || {}).reduce((sum, c) => sum + (c.failed || 0), 0)}
+          sub={`of ${Object.values(obs?.notifications_24h || {}).reduce((sum, c) => sum + (c.total || 0), 0)} sent`}
+        />
+        <StatTile label="Cron jobs failing" value={obs?.cron_jobs_failing ?? 0} />
+      </div>
+
+      {Object.keys(obs?.errors_by_category_24h || {}).length > 0 && (
+        <>
+          <h3>Errors by category (24h)</h3>
+          <div className="chips" style={{ marginBottom: 24 }}>
+            {Object.entries(obs.errors_by_category_24h).map(([cat, count]) => (
+              <span key={cat} className="chip">{cat}: {count}</span>
+            ))}
+          </div>
+        </>
+      )}
+
+      <h3>Top errors (24h)</h3>
+      <div className="resource-list">
+        {(obs?.top_error_fingerprints_24h || []).length === 0 && (
+          <EmptyState title="No errors logged" text="Nothing in error_logs in the last 24 hours." />
+        )}
+        {(obs?.top_error_fingerprints_24h || []).map((f) => (
+          <article className="resource-row" key={f.fingerprint}>
+            <div className="resource-icon"><HiExclamationTriangle /></div>
+            <div>
+              <b>{f.sample_message}</b>
+              <small>
+                {f.occurrences}× · <span className="social-type">{f.severity}</span>{f.category ? ` · ${f.category}` : ""} · last seen {new Date(f.last_seen).toLocaleString()}
+              </small>
+            </div>
+          </article>
         ))}
       </div>
     </div>

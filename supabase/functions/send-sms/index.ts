@@ -24,6 +24,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
+import { logServerError } from "../_shared/logServerError.ts";
 
 async function sendViaFast2Sms(apiKey: string, phone: string, message: string): Promise<{ ok: boolean; error?: string }> {
   // Quick SMS route: numeric_only route="q", no DLT template/sender-id
@@ -102,6 +103,9 @@ Deno.serve(async (req: Request) => {
 
   const apiKey = Deno.env.get("FAST2SMS_API_KEY");
   if (!apiKey) {
+    // Deliberately NOT logged to error_logs -- FAST2SMS_API_KEY is unset by
+    // design (SMS is plumbing-only, always reports 'skipped'; see this
+    // repo's notification-dispatch migration header comment), not an outage.
     console.error("FAST2SMS_API_KEY is not configured -- SMS cannot be delivered.");
     await reportResult("failed", "FAST2SMS_API_KEY not configured");
     return jsonResponse({ code: "GATEWAY_NOT_CONFIGURED" }, 503);
@@ -113,6 +117,7 @@ Deno.serve(async (req: Request) => {
   if (!result.ok) {
     console.error("send-sms: delivery failed", result.error);
     await reportResult("failed", result.error);
+    await logServerError(admin, `send-sms delivery failed: ${result.error}`, { category: "notification", severity: "error", context: { notification_id: notificationId } });
     return jsonResponse({ code: "SEND_FAILED", message: result.error }, 502);
   }
 

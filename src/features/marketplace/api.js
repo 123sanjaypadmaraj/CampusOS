@@ -4,6 +4,7 @@
 // in 20260814004900_marketplace_seller_ratings.sql.
 
 import { supabase } from "../../lib/supabase";
+import { logStorageErrorIfAny } from "../../services/mvpService";
 
 function throwIfError(error) {
   if (error) throw error;
@@ -102,6 +103,7 @@ export async function uploadMarketplaceImage(file, ownerId) {
   const compressed = await compressImage(file);
   const path = `${ownerId}/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
   const { error } = await supabase.storage.from("marketplace-media").upload(path, compressed, { contentType: "image/jpeg" });
+  logStorageErrorIfAny("marketplace-media", error);
   throwIfError(error);
   const { data } = supabase.storage.from("marketplace-media").getPublicUrl(path);
   return data.publicUrl;

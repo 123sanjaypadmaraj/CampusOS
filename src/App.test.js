@@ -78,6 +78,9 @@ jest.mock("./services/mvpService", () => ({
   triggerSosAlert: jest.fn(() => Promise.resolve({ id: "alert-1", status: "active", responders_notified: 0 })),
   cancelMySosAlert: jest.fn(() => Promise.resolve(null)),
   getBestEffortLocation: jest.fn(() => Promise.resolve(null)),
+  logClientError: jest.fn(() => Promise.resolve()),
+  logStorageErrorIfAny: jest.fn(),
+  realtimeStatusLogger: jest.fn(() => () => {}),
 }));
 
 describe("App button interactions", () => {

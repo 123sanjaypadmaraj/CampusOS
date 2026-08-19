@@ -17,6 +17,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
+import { logServerError } from "../_shared/logServerError.ts";
 
 // Every real, non-synthetic auth.users.email in this app is a genuine inbox
 // (magic-link / Google / vendor accounts). USN+password accounts get one
@@ -99,6 +100,7 @@ Deno.serve(async (req: Request) => {
     const result = await sendViaResend(resendKey, resendFrom, body.to as string, body.subject as string, body.html as string);
     if (!result.ok) {
       console.error("send-email: direct send failed", result.error);
+      await logServerError(admin, `send-email direct mode failed: ${result.error}`, { category: "notification", severity: "error" });
       return jsonResponse({ code: "SEND_FAILED", message: result.error }, 502);
     }
     return jsonResponse({ code: "OK" }, 200);
@@ -145,6 +147,7 @@ Deno.serve(async (req: Request) => {
   if (!resendKey) {
     console.error("RESEND_API_KEY is not configured -- email cannot be delivered.");
     await reportResult("failed", "RESEND_API_KEY not configured");
+    await logServerError(admin, "send-email: RESEND_API_KEY not configured", { category: "notification", severity: "fatal" });
     return jsonResponse({ code: "GATEWAY_NOT_CONFIGURED" }, 503);
   }
 
@@ -154,6 +157,7 @@ Deno.serve(async (req: Request) => {
   if (!result.ok) {
     console.error("send-email: delivery failed", result.error);
     await reportResult("failed", result.error);
+    await logServerError(admin, `send-email delivery failed: ${result.error}`, { category: "notification", severity: "error", context: { notification_id: notificationId } });
     return jsonResponse({ code: "SEND_FAILED", message: result.error }, 502);
   }
 

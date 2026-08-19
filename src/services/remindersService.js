@@ -1,4 +1,5 @@
 import { supabase } from "../lib/supabase";
+import { realtimeStatusLogger } from "./mvpService";
 
 /*
 |--------------------------------------------------------------------------
@@ -48,7 +49,7 @@ export function subscribeToReminders(callback) {
   const channel = supabase
     .channel(`reminders:${Date.now()}:${Math.random().toString(36).slice(2)}`)
     .on("postgres_changes", { event: "*", schema: "public", table: "reminders" }, callback)
-    .subscribe();
+    .subscribe(realtimeStatusLogger("reminders"));
 
   return () => {
     supabase.removeChannel(channel);

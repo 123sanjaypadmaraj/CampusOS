@@ -26,10 +26,10 @@ import { cacheRead, cacheWrite, withOfflineCache } from "../utils/offlineCache";
 // same message before rl_error_logs (60/hour) even kicks in.
 const _loggedErrorFingerprints = new Set();
 
-export async function logClientError(message, { stack, severity = "error", context = {} } = {}) {
+export async function logClientError(message, { stack, severity = "error", context = {}, category = null } = {}) {
   try {
     if (!message) return;
-    const fingerprint = `${severity}:${String(message).slice(0, 200)}`;
+    const fingerprint = `${severity}:${category || ""}:${String(message).slice(0, 200)}`;
     if (_loggedErrorFingerprints.has(fingerprint)) return;
     _loggedErrorFingerprints.add(fingerprint);
 
@@ -41,10 +41,25 @@ export async function logClientError(message, { stack, severity = "error", conte
       p_severity: severity,
       p_context: context || {},
       p_source: "client",
+      p_category: category,
     });
   } catch {
     // Never let error logging itself throw -- there is nowhere further to
     // report that failure to.
+  }
+}
+
+// Shared by every supabase.storage upload call site in this app (here and
+// in the other services that upload media): logs a failed upload to
+// error_logs (category 'storage') before the caller's own throwIfError()
+// raises it. No-ops silently when there's no error.
+export function logStorageErrorIfAny(bucket, error) {
+  if (error) {
+    logClientError(`Storage upload failed: ${bucket}`, {
+      severity: "error",
+      category: "storage",
+      context: { bucket, error: error.message },
+    });
   }
 }
 
@@ -1459,6 +1474,7 @@ export async function uploadPostImage(file, ownerId) {
   const compressed = await compressImage(file);
   const path = `${ownerId}/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
   const { error } = await supabase.storage.from("post-media").upload(path, compressed, { contentType: "image/jpeg" });
+  logStorageErrorIfAny("post-media", error);
   throwIfError(error);
   const { data } = supabase.storage.from("post-media").getPublicUrl(path);
   return data.publicUrl;
@@ -2379,6 +2395,7 @@ export async function createFoodOrder({
     // Surface the {code, message}-style errors raised by the RPC
     // (ORDER_ITEM_UNAVAILABLE, ORDER_SINGLE_CANTEEN, ...) as friendly text.
     const message = (error.message || "").replace(/^[A-Z_]+:\s*/, "");
+    logClientError(`create_food_order failed: ${error.message}`, { severity: "error", category: "order_creation", context: { canteenId } });
     throw new Error(message || "Unable to place order");
   }
 
@@ -3194,7 +3211,25 @@ export async function markAllNotificationsRead(
 
 /* =========================================================================
    REALTIME
+   Every .subscribe() in this app used to pass no status callback at all --
+   a CHANNEL_ERROR or TIMED_OUT (dropped websocket, RLS misconfig, etc.) was
+   silently invisible. realtimeStatusLogger() is the shared callback: pass
+   its return value into .subscribe(...) at every channel call site (here
+   and in the other services that open channels) to report those into
+   error_logs (category 'realtime') without changing any channel's own
+   postgres_changes wiring.
 ========================================================================= */
+export function realtimeStatusLogger(label) {
+  return (status, err) => {
+    if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+      logClientError(`Realtime channel error: ${label} (${status})`, {
+        severity: "warning",
+        category: "realtime",
+        context: { channel: label, error: err?.message },
+      });
+    }
+  };
+}
 
 export function subscribeToUserNotifications(
   userId,
@@ -3218,7 +3253,7 @@ export function subscribeToUserNotifications(
         },
         callback
       )
-      .subscribe();
+      .subscribe(realtimeStatusLogger("notifications"));
 
   return () => {
     supabase.removeChannel(channel);
@@ -3246,7 +3281,7 @@ export function subscribeToOrders(
         },
         callback
       )
-      .subscribe();
+      .subscribe(realtimeStatusLogger("orders"));
 
   return () => {
     supabase.removeChannel(channel);
@@ -3260,7 +3295,7 @@ export function subscribeToPosts(callback) {
     .on("postgres_changes", { event: "*", schema: "public", table: "posts" }, callback)
     .on("postgres_changes", { event: "*", schema: "public", table: "post_likes" }, callback)
     .on("postgres_changes", { event: "*", schema: "public", table: "comments" }, callback)
-    .subscribe();
+    .subscribe(realtimeStatusLogger("posts"));
 
   return () => {
     supabase.removeChannel(channel);
@@ -3272,7 +3307,7 @@ export function subscribeToEvents(callback) {
     .channel("public:events_realtime")
     .on("postgres_changes", { event: "*", schema: "public", table: "events" }, callback)
     .on("postgres_changes", { event: "*", schema: "public", table: "event_registrations" }, callback)
-    .subscribe();
+    .subscribe(realtimeStatusLogger("events"));
 
   return () => {
     supabase.removeChannel(channel);
@@ -3284,7 +3319,7 @@ export function subscribeToFood(callback) {
     .channel("public:food_realtime")
     .on("postgres_changes", { event: "*", schema: "public", table: "canteens" }, callback)
     .on("postgres_changes", { event: "*", schema: "public", table: "food_items" }, callback)
-    .subscribe();
+    .subscribe(realtimeStatusLogger("food"));
 
   return () => {
     supabase.removeChannel(channel);
@@ -3296,7 +3331,7 @@ export function subscribeToClubs(callback) {
     .channel("public:clubs_realtime")
     .on("postgres_changes", { event: "*", schema: "public", table: "clubs" }, callback)
     .on("postgres_changes", { event: "*", schema: "public", table: "club_members" }, callback)
-    .subscribe();
+    .subscribe(realtimeStatusLogger("clubs"));
 
   return () => {
     supabase.removeChannel(channel);
@@ -3307,7 +3342,7 @@ export function subscribeToMarketplace(callback) {
   const channel = supabase
     .channel("public:marketplace_realtime")
     .on("postgres_changes", { event: "*", schema: "public", table: "marketplace_listings" }, callback)
-    .subscribe();
+    .subscribe(realtimeStatusLogger("marketplace"));
 
   return () => {
     supabase.removeChannel(channel);
@@ -3318,7 +3353,7 @@ export function subscribeToLostFound(callback) {
   const channel = supabase
     .channel("public:lost_found_realtime")
     .on("postgres_changes", { event: "*", schema: "public", table: "lost_found_items" }, callback)
-    .subscribe();
+    .subscribe(realtimeStatusLogger("lost_found"));
 
   return () => {
     supabase.removeChannel(channel);
@@ -3429,7 +3464,7 @@ export function subscribeToSosAlerts(callback) {
   const channel = supabase
     .channel("sos-alerts-realtime")
     .on("postgres_changes", { event: "*", schema: "public", table: "sos_alerts" }, callback)
-    .subscribe();
+    .subscribe(realtimeStatusLogger("sos_alerts"));
 
   return () => {
     supabase.removeChannel(channel);
@@ -3592,6 +3627,7 @@ export async function uploadSupportAttachment(file, ownerId) {
   const compressed = await compressImage(file);
   const path = `${ownerId}/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
   const { error } = await supabase.storage.from("support-media").upload(path, compressed, { contentType: "image/jpeg" });
+  logStorageErrorIfAny("support-media", error);
   throwIfError(error);
   return path;
 }
@@ -3802,6 +3838,7 @@ export async function uploadLostFoundImage(file, ownerId) {
   const blob = await compressLostFoundImage(file);
   const path = `${ownerId}/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
   const { error } = await supabase.storage.from("lost-found-media").upload(path, blob, { contentType: "image/jpeg" });
+  logStorageErrorIfAny("lost-found-media", error);
   throwIfError(error);
   const { data } = supabase.storage.from("lost-found-media").getPublicUrl(path);
   return data.publicUrl;

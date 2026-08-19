@@ -17,11 +17,18 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
+import { logServerError } from "../_shared/logServerError.ts";
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
+
+  // Constructed up front (needs no external call) so it's available to log
+  // an error from any failure branch below, including the outer catch.
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const serviceClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
   try {
     const authHeader = req.headers.get("Authorization");
@@ -39,8 +46,6 @@ Deno.serve(async (req: Request) => {
 
     // Client scoped to the caller's JWT -- RLS/ownership is enforced by the
     // create_payment_order()/create_print_payment_order() RPC itself.
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
     });
@@ -49,12 +54,14 @@ Deno.serve(async (req: Request) => {
       ? await userClient.rpc("create_payment_order", { p_order_id: order_id })
       : await userClient.rpc("create_print_payment_order", { p_print_job_id: print_job_id });
     if (error) {
+      await logServerError(serviceClient, `create_payment_order/create_print_payment_order failed: ${error.message}`, { category: "payment", severity: "error", context: { order_id, print_job_id } });
       return jsonResponse({ code: "PAYMENT_ORDER_FAILED", message: error.message }, 400);
     }
 
     const keyId = Deno.env.get("RAZORPAY_KEY_ID");
     const keySecret = Deno.env.get("RAZORPAY_KEY_SECRET");
     if (!keyId || !keySecret) {
+      await logServerError(serviceClient, "create-razorpay-order: Razorpay keys not configured", { category: "payment", severity: "fatal" });
       return jsonResponse(
         { code: "GATEWAY_NOT_CONFIGURED", message: "Razorpay test keys are not configured on this deployment yet." },
         503
@@ -90,15 +97,15 @@ Deno.serve(async (req: Request) => {
     if (!razorpayRes.ok) {
       const errBody = await razorpayRes.text();
       console.error("Razorpay order creation failed:", errBody);
+      await logServerError(serviceClient, `Razorpay order creation failed: ${errBody.slice(0, 500)}`, { category: "payment", severity: "error", context: { order_id, print_job_id } });
       return jsonResponse({ code: "GATEWAY_ERROR", message: "Payment gateway could not create the order." }, 502);
     }
 
     const razorpayOrder = await razorpayRes.json();
 
-    // Service-role client to attach the gateway order id -- this table has
-    // no client-facing update policy, only the service role may write it.
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const serviceClient = createClient(supabaseUrl, serviceKey);
+    // Service-role client (constructed up top) to attach the gateway order
+    // id -- this table has no client-facing update policy, only the
+    // service role may write it.
     await serviceClient
       .from("payments")
       .update({ gateway_order_id: razorpayOrder.id, gateway: "razorpay" })
@@ -113,6 +120,11 @@ Deno.serve(async (req: Request) => {
     });
   } catch (err) {
     console.error("create-razorpay-order error:", err);
+    await logServerError(serviceClient, `create-razorpay-order error: ${err instanceof Error ? err.message : String(err)}`, {
+      stack: err instanceof Error ? err.stack : undefined,
+      category: "payment",
+      severity: "error",
+    });
     return jsonResponse({ code: "INTERNAL_ERROR", message: "Unable to start payment." }, 500);
   }
 });

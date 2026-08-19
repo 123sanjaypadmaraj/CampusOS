@@ -4,6 +4,30 @@ import {
 } from "react";
 
 import { supabase } from "../lib/supabase";
+import { logClientError } from "../services/mvpService";
+
+// Auth error codes a normal user hits routinely (wrong password, unverified
+// email, signing up with an email already in use, ...) -- not a system
+// health signal, so these are excluded from error_logs to avoid flooding it
+// with expected user mistakes. Everything else (network errors, 5xx from
+// GoTrue, rate limiting) gets logged with category 'auth'.
+const EXPECTED_AUTH_ERROR_CODES = new Set([
+  "invalid_credentials",
+  "email_not_confirmed",
+  "user_already_exists",
+  "weak_password",
+  "same_password",
+]);
+
+function logAuthErrorIfUnexpected(action, error) {
+  if (error && !EXPECTED_AUTH_ERROR_CODES.has(error.code)) {
+    logClientError(`Auth ${action} failed: ${error.message}`, {
+      severity: "warning",
+      category: "auth",
+      context: { action, code: error.code || null },
+    });
+  }
+}
 
 export function useAuth() {
   const [user, setUser] = useState(null);
@@ -92,7 +116,10 @@ export function useAuth() {
       password
     });
 
-    if (error) throw error;
+    if (error) {
+      logAuthErrorIfUnexpected("signIn", error);
+      throw error;
+    }
 
     return data;
   }
@@ -115,7 +142,10 @@ export function useAuth() {
       }
     });
 
-    if (error) throw error;
+    if (error) {
+      logAuthErrorIfUnexpected("signUp", error);
+      throw error;
+    }
 
     return data;
   }
@@ -125,7 +155,10 @@ export function useAuth() {
       error
     } = await supabase.auth.signOut();
 
-    if (error) throw error;
+    if (error) {
+      logAuthErrorIfUnexpected("signOut", error);
+      throw error;
+    }
 
     setUser(null);
     setProfile(null);

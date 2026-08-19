@@ -324,6 +324,15 @@ export async function getEdgeFunctionHealth() {
   return data;
 }
 
+// Observability pass (doc §97): error trends/grouping, payment/notification
+// failure rates, failing-cron-job count -- see admin_observability_summary()
+// in 20260819001400_observability.sql.
+export async function getObservabilitySummary() {
+  const { data, error } = await supabase.rpc("admin_observability_summary");
+  throwIfError(error);
+  return data;
+}
+
 /* ========================================================================
    CAMPUS SETTINGS / CONFIGURATION (part 4/5)
 ======================================================================== */

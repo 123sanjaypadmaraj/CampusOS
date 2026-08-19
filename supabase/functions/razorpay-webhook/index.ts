@@ -11,6 +11,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { jsonResponse } from "../_shared/cors.ts";
+import { logServerError } from "../_shared/logServerError.ts";
 
 async function verifySignature(rawBody: string, signature: string, secret: string): Promise<boolean> {
   const key = await crypto.subtle.importKey(
@@ -39,8 +40,13 @@ Deno.serve(async (req: Request) => {
   const signature = req.headers.get("x-razorpay-signature") || "";
   const rawBody = await req.text();
 
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const serviceClient = createClient(supabaseUrl, serviceKey);
+
   if (!secret) {
     console.error("RAZORPAY_WEBHOOK_SECRET is not configured -- rejecting webhook.");
+    await logServerError(serviceClient, "razorpay-webhook: RAZORPAY_WEBHOOK_SECRET not configured", { category: "payment", severity: "fatal" });
     return jsonResponse({ code: "GATEWAY_NOT_CONFIGURED" }, 503);
   }
 
@@ -49,6 +55,7 @@ Deno.serve(async (req: Request) => {
     // Deliberately vague response; the signature mismatch is logged for
     // investigation but we don't help an attacker iterate.
     console.warn("razorpay-webhook: signature verification failed");
+    await logServerError(serviceClient, "razorpay-webhook: signature verification failed", { category: "payment", severity: "warning" });
     return jsonResponse({ code: "INVALID_SIGNATURE" }, 400);
   }
 
@@ -58,10 +65,6 @@ Deno.serve(async (req: Request) => {
   if (!entity) {
     return jsonResponse({ code: "IGNORED", message: "No payment entity in payload" }, 200);
   }
-
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const serviceClient = createClient(supabaseUrl, serviceKey);
 
   const statusMap: Record<string, string> = {
     "payment.captured": "captured",
@@ -83,6 +86,7 @@ Deno.serve(async (req: Request) => {
 
   if (error) {
     console.error("record_payment_event failed:", error);
+    await logServerError(serviceClient, `record_payment_event failed: ${error.message}`, { category: "payment", severity: "error", context: { event, order_id: entity.order_id } });
     return jsonResponse({ code: "RECORD_FAILED", message: error.message }, 500);
   }
 

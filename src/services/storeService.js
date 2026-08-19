@@ -1,4 +1,5 @@
 import { supabase } from "../lib/supabase";
+import { realtimeStatusLogger, logClientError } from "./mvpService";
 
 /*
 |--------------------------------------------------------------------------
@@ -49,6 +50,9 @@ export async function createStoreOrder({ storeId, cart, notes = "", idempotencyK
     p_idempotency_key: idempotencyKey || null,
   });
 
+  if (error) {
+    logClientError(`create_store_order failed: ${error.message}`, { severity: "error", category: "order_creation", context: { storeId } });
+  }
   throwIfError(error);
   return data;
 }
@@ -79,7 +83,7 @@ export function subscribeToStores(callback) {
     .channel("public:store_realtime")
     .on("postgres_changes", { event: "*", schema: "public", table: "stores" }, callback)
     .on("postgres_changes", { event: "*", schema: "public", table: "store_items" }, callback)
-    .subscribe();
+    .subscribe(realtimeStatusLogger("store"));
 
   return () => {
     supabase.removeChannel(channel);
@@ -96,7 +100,7 @@ export function subscribeToStoreOrders(userId, callback) {
       { event: "*", schema: "public", table: "store_orders", filter: `user_id=eq.${userId}` },
       callback
     )
-    .subscribe();
+    .subscribe(realtimeStatusLogger("store_orders"));
 
   return () => {
     supabase.removeChannel(channel);

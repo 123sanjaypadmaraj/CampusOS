@@ -9,7 +9,7 @@
 
 import { supabase } from "../../lib/supabase";
 import { listFoodCategories, upsertCanteen, upsertFoodItem } from "../admin/api";
-import { transitionOrderStatus, redeemPickupToken, getOrderPickupToken } from "../../services/mvpService";
+import { transitionOrderStatus, redeemPickupToken, getOrderPickupToken, realtimeStatusLogger, logStorageErrorIfAny } from "../../services/mvpService";
 
 export { listFoodCategories, upsertCanteen, upsertFoodItem, transitionOrderStatus, redeemPickupToken, getOrderPickupToken };
 
@@ -428,7 +428,7 @@ export function subscribeToCanteenOrders(canteenId, callback) {
       { event: "*", schema: "public", table: "orders", filter: `canteen_id=eq.${canteenId}` },
       callback
     )
-    .subscribe();
+    .subscribe(realtimeStatusLogger("vendor_orders"));
   return () => supabase.removeChannel(channel);
 }
 
@@ -504,7 +504,7 @@ export function subscribeToPrintJobs(callback) {
   const channel = supabase
     .channel("vendor-print-jobs")
     .on("postgres_changes", { event: "*", schema: "public", table: "print_jobs" }, callback)
-    .subscribe();
+    .subscribe(realtimeStatusLogger("vendor_print_jobs"));
   return () => supabase.removeChannel(channel);
 }
 
@@ -779,6 +779,7 @@ export async function uploadFoodImage(file, ownerId) {
   const compressed = await compressImage(file);
   const path = `${ownerId}/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
   const { error } = await supabase.storage.from("food-images").upload(path, compressed, { contentType: "image/jpeg" });
+  logStorageErrorIfAny("food-images", error);
   throwIfError(error);
   const { data } = supabase.storage.from("food-images").getPublicUrl(path);
   return data.publicUrl;

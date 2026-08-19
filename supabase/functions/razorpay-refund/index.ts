@@ -15,11 +15,19 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
+import { logServerError } from "../_shared/logServerError.ts";
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
+
+  // Constructed up front (needs no external call) so it's available to log
+  // an error from any failure branch below, including the outer catch.
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const serviceClient = createClient(supabaseUrl, serviceKey);
 
   try {
     const authHeader = req.headers.get("Authorization");
@@ -31,10 +39,6 @@ Deno.serve(async (req: Request) => {
     if (!refund_id) {
       return jsonResponse({ code: "BAD_REQUEST", message: "refund_id is required" }, 400);
     }
-
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
     // Scoped to the caller's own JWT -- refunds_read RLS (fixed in the same
     // migration as request_refund()) is what actually proves this caller is
@@ -59,7 +63,6 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ code: "REFUND_NOT_PENDING", message: `Refund is already ${refund.status}` }, 409);
     }
 
-    const serviceClient = createClient(supabaseUrl, serviceKey);
     const { data: payment, error: paymentError } = await serviceClient
       .from("payments")
       .select("*")
@@ -72,6 +75,7 @@ Deno.serve(async (req: Request) => {
     const keyId = Deno.env.get("RAZORPAY_KEY_ID");
     const keySecret = Deno.env.get("RAZORPAY_KEY_SECRET");
     if (!keyId || !keySecret) {
+      await logServerError(serviceClient, "razorpay-refund: Razorpay keys not configured", { category: "payment", severity: "fatal" });
       return jsonResponse(
         { code: "GATEWAY_NOT_CONFIGURED", message: "Razorpay test keys are not configured on this deployment yet." },
         503
@@ -97,6 +101,7 @@ Deno.serve(async (req: Request) => {
     if (!razorpayRes.ok) {
       const errBody = await razorpayRes.text();
       console.error("Razorpay refund failed:", errBody);
+      await logServerError(serviceClient, `Razorpay refund failed: ${errBody.slice(0, 500)}`, { category: "payment", severity: "error", context: { refund_id } });
       await serviceClient.from("refunds").update({ status: "failed" }).eq("id", refund_id);
       return jsonResponse({ code: "GATEWAY_ERROR", message: "Payment gateway could not process the refund." }, 502);
     }
@@ -109,12 +114,18 @@ Deno.serve(async (req: Request) => {
     });
     if (completeError) {
       console.error("mark_refund_completed failed:", completeError);
+      await logServerError(serviceClient, `mark_refund_completed failed: ${completeError.message}`, { category: "payment", severity: "error", context: { refund_id } });
       return jsonResponse({ code: "RECORD_FAILED", message: completeError.message }, 500);
     }
 
     return jsonResponse({ ok: true, refund: completed });
   } catch (err) {
     console.error("razorpay-refund error:", err);
+    await logServerError(serviceClient, `razorpay-refund error: ${err instanceof Error ? err.message : String(err)}`, {
+      stack: err instanceof Error ? err.stack : undefined,
+      category: "payment",
+      severity: "error",
+    });
     return jsonResponse({ code: "INTERNAL_ERROR", message: "Unable to process refund." }, 500);
   }
 });

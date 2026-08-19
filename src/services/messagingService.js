@@ -1,4 +1,5 @@
 import { supabase } from "../lib/supabase";
+import { realtimeStatusLogger } from "./mvpService";
 
 /*
 |--------------------------------------------------------------------------
@@ -168,7 +169,7 @@ export function subscribeToConversationMessages(conversationId, callback) {
       },
       callback
     )
-    .subscribe();
+    .subscribe(realtimeStatusLogger("messages"));
 
   return () => {
     supabase.removeChannel(channel);
@@ -197,7 +198,7 @@ export function subscribeToConversationList(callback) {
     .channel(`public:conversations_realtime:${++conversationListSubscriberCount}`)
     .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, callback)
     .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, callback)
-    .subscribe();
+    .subscribe(realtimeStatusLogger("conversations"));
 
   return () => {
     supabase.removeChannel(channel);
