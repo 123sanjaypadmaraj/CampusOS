@@ -57,10 +57,19 @@ const TABS = [
   ["calendar", "Academic Calendar", <HiCalendarDays key="i" />],
 ];
 
-export default function AcademicHub({ profile, notify }) {
+export default function AcademicHub({ profile, notify, can = () => false, isAdmin = false }) {
   const [tab, setTab] = useState("announcements");
-  const canFacultyCompose = profile?.role === "faculty" || profile?.role === "college_admin" || profile?.role === "super_admin";
-  const isAdmin = profile?.role === "college_admin" || profile?.role === "super_admin";
+  // academics.publish is granted to the 'faculty' role and inherited by
+  // college_admin/super_admin's permission wildcard (20260817000300_
+  // academic_module.sql) -- the same predicate create_academic_announcement/
+  // create_academic_deadline/upsert_class_timetable check server-side.
+  // Previously this was profile.role === "faculty" || "college_admin" ||
+  // "super_admin" spelled out by hand three times, and the announcements
+  // composer's own copy of that check (below) had drifted to *just*
+  // "faculty" -- a college_admin/super_admin could publish deadlines and
+  // timetables but not announcements, even though the backend accepted it
+  // from them all along. can() reads the one real permission instead.
+  const canFacultyCompose = can("academics.publish");
 
   return (
     <section className="admin-panel">
@@ -73,7 +82,7 @@ export default function AcademicHub({ profile, notify }) {
       </div>
 
       {tab === "announcements" && (
-        <AnnouncementsPanel profile={profile} notify={notify} canCompose={profile?.role === "faculty"} />
+        <AnnouncementsPanel profile={profile} notify={notify} canCompose={canFacultyCompose} />
       )}
       {tab === "deadlines" && (
         <DeadlinesPanel profile={profile} notify={notify} canCompose={canFacultyCompose} />

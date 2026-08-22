@@ -84,6 +84,11 @@ jest.mock("./services/mvpService", () => ({
   logClientError: jest.fn(() => Promise.resolve()),
   logStorageErrorIfAny: jest.fn(),
   realtimeStatusLogger: jest.fn(() => () => {}),
+  // RBAC frontend permission layer (usePermissions) -- defaults to "no
+  // special access", same as a plain signed-in student had before this
+  // existed. Tests that need admin/vendor/facilities access override this
+  // per-call (see signInAsVendor below).
+  getMyAccess: jest.fn(() => Promise.resolve({ permissions: [], roles: [], is_admin: false })),
 }));
 
 describe("App button interactions", () => {
@@ -452,7 +457,7 @@ describe("App button interactions", () => {
     });
 
     const signInAsVendor = () => {
-      const { getCurrentUser, getOrCreateProfile } = require("./services/mvpService");
+      const { getCurrentUser, getOrCreateProfile, getMyAccess } = require("./services/mvpService");
       getCurrentUser.mockResolvedValueOnce({
         id: "vendor-1",
         email: "udupi.canteen@nhce.edu.in",
@@ -463,6 +468,15 @@ describe("App button interactions", () => {
         name: "Udupi Canteen",
         role: "vendor",
         email: "udupi.canteen@nhce.edu.in",
+      });
+      // Mirrors what get_my_access() actually returns for the 'vendor' role
+      // (20260814000200_rbac.sql's seed) -- the nav/route gates below are
+      // driven by usePermissions()'s hasRole("vendor"), not profile.role
+      // directly, so this has to be here for those gates to open.
+      getMyAccess.mockResolvedValueOnce({
+        permissions: ["food.menu.read", "food.menu.write", "food.orders.read", "food.orders.update", "food.refunds.create", "print.manage", "analytics.read"],
+        roles: ["vendor"],
+        is_admin: false,
       });
     };
 

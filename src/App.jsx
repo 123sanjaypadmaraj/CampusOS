@@ -101,6 +101,7 @@ import {
 } from "./services/mvpService";
 import { openRazorpayCheckout } from "./features/payments/razorpay";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
+import { usePermissions } from "./hooks/usePermissions";
 import { LoadingState, EmptyState, ErrorState, OfflineBanner } from "./components/ui/States";
 import { TrendChart, StatTile } from "./components/ui/Charts";
 import AdminCMS from "./features/admin/AdminCMS";
@@ -1140,6 +1141,18 @@ function App() {
   const [profile, setProfile] =
     useState(null);
 
+  // RBAC frontend permission layer (readiness-audit phase 2): the single
+  // source of truth for "can this account do X" -- see src/hooks/
+  // usePermissions.js. access.hasRole/access.can/access.isAdmin replace the
+  // profile.role === "<string>" comparisons scattered through this file,
+  // each of which drifts from the real role_permissions model the moment a
+  // new role or permission is added anywhere else (vendor_staff manager
+  // accounts were shut out of the Vendor Dashboard nav gate for exactly this
+  // reason until this pass).
+  const access = usePermissions(profile?.id, profile?.role);
+  const isVendorAccount = access.hasRole("vendor") || access.hasRole("vendor_staff");
+  const isFacilitiesAccount = access.hasRole("facilities_staff");
+
   const [backendLoading, setBackendLoading] =
     useState(true);
 
@@ -2076,33 +2089,31 @@ function App() {
     // "restricted" screen forever -- bounce back to Home and fix the URL
     // once we actually know the signed-in role (renderPage() below is
     // still the real gate; this just keeps the address bar honest once
-    // that gate says no). Waits for backendLoading to clear so a
-    // still-loading profile doesn't get misread as "no access" and
-    // bounce a legitimate admin/vendor/facilities user before their
-    // role has even loaded.
+    // that gate says no). Waits for backendLoading AND access.loading to
+    // clear so a still-loading profile/permission set doesn't get misread
+    // as "no access" and bounce a legitimate admin/vendor/facilities user
+    // before their access has even loaded.
     useEffect(() => {
-      if (backendLoading) return;
+      if (backendLoading || access.loading) return;
 
-      // Vendor accounts are further restricted to their own dashboard --
-      // "home" isn't a safe fallback for them the way it is for everyone
-      // else (their whole nav is the dashboard + profile), so this branch
-      // bounces to "vendor" instead of falling through to the shared check
-      // below, which would otherwise send a vendor to a Home page they
-      // don't have a nav button to get back out of.
-      if (profile?.role === "vendor") {
+      // Vendor accounts (owner or manager -- isVendorAccount covers both
+      // 'vendor' and 'vendor_staff') are further restricted to their own
+      // dashboard -- "home" isn't a safe fallback for them the way it is
+      // for everyone else (their whole nav is the dashboard + profile), so
+      // this branch bounces to "vendor" instead of falling through to the
+      // shared check below, which would otherwise send them to a Home page
+      // they don't have a nav button to get back out of.
+      if (isVendorAccount) {
         if (!VENDOR_ALLOWED_KEYS.has(active)) go("vendor");
         return;
       }
 
       const roleGatedButAllowed =
-        (active !== "admin" || profile?.role === "college_admin" || profile?.role === "super_admin") &&
-        (active !== "vendor" || profile?.role === "vendor") &&
-        (active !== "facilities" ||
-          profile?.role === "facilities_staff" ||
-          profile?.role === "college_admin" ||
-          profile?.role === "super_admin");
+        (active !== "admin" || access.isAdmin) &&
+        (active !== "vendor" || isVendorAccount) &&
+        (active !== "facilities" || isFacilitiesAccount || access.isAdmin);
       if (!roleGatedButAllowed) go("home");
-    }, [active, backendLoading, profile?.role]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [active, backendLoading, access.loading, access.isAdmin, isVendorAccount, isFacilitiesAccount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const renderPage = () => {
     if (active === "home") {
@@ -2306,7 +2317,7 @@ function App() {
     }
 
     if (active === "admin") {
-      if (!(profile?.role === "college_admin" || profile?.role === "super_admin")) {
+      if (!access.isAdmin) {
         return (
           <ErrorState
             title="Admin access only"
@@ -2314,11 +2325,11 @@ function App() {
           />
         );
       }
-      return <AdminCMS notify={notify} campusId={campusId} authUser={authUser} />;
+      return <AdminCMS notify={notify} campusId={campusId} authUser={authUser} can={access.can} />;
     }
 
     if (active === "vendor") {
-      if (profile?.role !== "vendor") {
+      if (!isVendorAccount) {
         return (
           <ErrorState
             title="Vendor access only"
@@ -2330,7 +2341,7 @@ function App() {
     }
 
     if (active === "facilities") {
-      if (profile?.role !== "facilities_staff" && !(profile?.role === "college_admin" || profile?.role === "super_admin")) {
+      if (!isFacilitiesAccount && !access.isAdmin) {
         return (
           <ErrorState
             title="Facilities staff access only"
@@ -2413,7 +2424,7 @@ function App() {
       <header className="topbar">
         <button
           className="brand"
-          onClick={() => go(profile?.role === "vendor" ? "vendor" : "home")}
+          onClick={() => go(isVendorAccount ? "vendor" : "home")}
           aria-label="Campus OS home"
         >
           <span className="brand-mark">C</span>
@@ -2434,7 +2445,7 @@ function App() {
         </div>
 
         <div className="top-actions">
-          {authUser && profile?.role !== "vendor" && (
+          {authUser && !isVendorAccount && (
             <button
               className="icon-btn"
               onClick={() => setGlobalSearchOpen(true)}
@@ -2503,7 +2514,7 @@ function App() {
             full student nav plus an extra tab -- swap the whole bar for
             just Dashboard + Profile rather than filtering navItems down to
             one real entry and bolting a second button on after it. */}
-        {(profile?.role === "vendor" ? [["vendor", <HiShoppingBag key="vendor-icon" />, "Dashboard"], ["profile", <HiUserCircle key="profile-icon" />, "Profile"]] : navItems).map(([key, icon, label]) => (
+        {(isVendorAccount ? [["vendor", <HiShoppingBag key="vendor-icon" />, "Dashboard"], ["profile", <HiUserCircle key="profile-icon" />, "Profile"]] : navItems).map(([key, icon, label]) => (
           <button
             key={key}
             className={active === key ? "active" : ""}
@@ -2521,7 +2532,7 @@ function App() {
             <small>{label}</small>
           </button>
         ))}
-        {(profile?.role === "college_admin" || profile?.role === "super_admin") && (
+        {access.isAdmin && (
           <button
             className={active === "admin" ? "active" : ""}
             onClick={() => go("admin")}
@@ -2531,7 +2542,7 @@ function App() {
             <small>Admin</small>
           </button>
         )}
-        {profile?.role === "facilities_staff" && (
+        {isFacilitiesAccount && (
           <button
             className={active === "facilities" ? "active" : ""}
             onClick={() => go("facilities")}
@@ -7533,7 +7544,7 @@ function ServiceDetail({ serviceId, notify, go, openModal, openLogin, authUser, 
       )}
 
       {serviceId === "academics" && (
-        <AcademicHub profile={profile} notify={notify} />
+        <AcademicHub profile={profile} notify={notify} can={access.can} isAdmin={access.isAdmin} />
       )}
 
       {serviceId === "emergencydirectory" && (

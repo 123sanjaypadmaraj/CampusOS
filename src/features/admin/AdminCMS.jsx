@@ -81,7 +81,7 @@ const TABS = [
   ["support", "Support"],
 ];
 
-export default function AdminCMS({ notify, campusId, authUser }) {
+export default function AdminCMS({ notify, campusId, authUser, can = () => false }) {
   const [tab, setTab] = useState("announcements");
 
   return (
@@ -112,7 +112,7 @@ export default function AdminCMS({ notify, campusId, authUser }) {
       {tab === "events" && <EventsClubsTab notify={notify} campusId={campusId} authUser={authUser} />}
       {tab === "verifications" && <VerificationsTab notify={notify} campusId={campusId} authUser={authUser} />}
       {tab === "emergencycontacts" && <EmergencyContactsTab notify={notify} />}
-      {tab === "users" && <UsersTab notify={notify} campusId={campusId} authUser={authUser} />}
+      {tab === "users" && <UsersTab notify={notify} campusId={campusId} authUser={authUser} can={can} />}
       {tab === "auditlog" && <AuditLogTab />}
       {tab === "moderation" && <ModerationTab notify={notify} authUser={authUser} />}
       {tab === "requests" && <RequestsTab notify={notify} campusId={campusId} />}
@@ -624,7 +624,7 @@ function ConversationModerationPanel({ conversationId, notify }) {
 
 const ROLE_OPTIONS = ["student", "club_admin", "vendor", "facilities_staff", "faculty", "college_admin", "super_admin"];
 
-function UsersTab({ notify, campusId, authUser }) {
+function UsersTab({ notify, campusId, authUser, can = () => false }) {
   const [q, setQ] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
   const [users, setUsers] = useState([]);
@@ -651,7 +651,17 @@ function UsersTab({ notify, campusId, authUser }) {
   // (only super_admin holds 'users.roles.manage'). A college_admin can no
   // longer change a role instantly -- they propose it, and a DIFFERENT admin
   // has to approve via the "Pending role requests" list below.
-  const isSuperAdmin = authUser?.role === "super_admin";
+  //
+  // Found live while wiring the RBAC frontend permission layer: this used
+  // to read `authUser?.role === "super_admin"` -- authUser is the raw
+  // supabase.auth.getUser() object, whose .role is GoTrue's fixed
+  // "authenticated" string, never a profiles.role value. That check could
+  // never be true, so the instant-change path above was unreachable for
+  // every super_admin in production; everyone fell through to the
+  // dual-admin propose/approve flow regardless of role. can() is backed by
+  // the real permissions table (get_my_access(), the same source
+  // admin_set_user_role() itself checks).
+  const isSuperAdmin = can("users.roles.manage");
 
   const changeRole = async (user, newRole) => {
     if (newRole === user.role) return;

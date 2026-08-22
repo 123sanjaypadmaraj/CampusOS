@@ -548,6 +548,28 @@ export async function getOrCreateProfile(
 }
 
 
+// RBAC frontend permission layer (readiness-audit phase 2,
+// 20260822000100_rbac_frontend_permission_layer.sql): the real permission
+// keys, role keys and admin flag for the signed-in user, straight from the
+// role_permissions/user_roles tables that already back every RLS policy --
+// src/hooks/usePermissions.js is the only caller. Returns the all-empty
+// shape rather than throwing when signed out or on a transient error, since
+// permission checks should fail closed (hide the gated UI) instead of
+// crashing the app shell.
+export async function getMyAccess() {
+  const { data, error } = await supabase.rpc("get_my_access");
+  if (error) {
+    console.error("getMyAccess failed:", error);
+    return { permissions: [], roles: [], is_admin: false };
+  }
+  return {
+    permissions: data?.permissions || [],
+    roles: data?.roles || [],
+    is_admin: !!data?.is_admin,
+  };
+}
+
+
 export async function updateProfile(
   userId,
   updates

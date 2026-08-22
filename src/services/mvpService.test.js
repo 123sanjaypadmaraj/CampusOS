@@ -34,6 +34,7 @@ import {
   markMarketplaceListingSold,
   touchActivity,
   getResources,
+  getMyAccess,
   logClientError,
   listErrorLogs,
   setErrorLogResolved,
@@ -421,6 +422,40 @@ describe("touchActivity", () => {
     supabase.rpc.mockResolvedValue({ data: null, error: { message: "network error" } });
 
     await expect(touchActivity()).resolves.not.toThrow();
+  });
+});
+
+describe("getMyAccess", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("calls get_my_access and normalizes the jsonb result", async () => {
+    supabase.rpc.mockResolvedValue({
+      data: { permissions: ["food.menu.write"], roles: ["vendor_staff"], is_admin: false },
+      error: null,
+    });
+
+    const access = await getMyAccess();
+
+    expect(supabase.rpc).toHaveBeenCalledWith("get_my_access");
+    expect(access).toEqual({ permissions: ["food.menu.write"], roles: ["vendor_staff"], is_admin: false });
+  });
+
+  it("fails closed (empty access, not a throw) on an RPC error -- a permission gate should hide UI, not crash it", async () => {
+    supabase.rpc.mockResolvedValue({ data: null, error: { message: "network error" } });
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+    const access = await getMyAccess();
+
+    expect(access).toEqual({ permissions: [], roles: [], is_admin: false });
+    errorSpy.mockRestore();
+  });
+
+  it("defaults missing fields on a malformed response instead of throwing", async () => {
+    supabase.rpc.mockResolvedValue({ data: {}, error: null });
+
+    const access = await getMyAccess();
+
+    expect(access).toEqual({ permissions: [], roles: [], is_admin: false });
   });
 });
 

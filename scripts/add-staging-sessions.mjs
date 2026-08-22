@@ -1,9 +1,12 @@
-// One-off helper: adds admin/facilities sessions to scripts/.sessions.staging.json
-// (setup-test-users.mjs only ever seeds the 3 base e2e.alice/bob/carol
-// accounts; tests/live/*.spec.js also needs admin + facilities-staff
-// sessions, which production's .sessions.json had accumulated over time but
-// staging's never did). Uses the already-known staging credentials from
-// scripts/setup-admin-account.mjs and scripts/.facilities-credentials.staging.local.json.
+// One-off helper: adds admin/facilities/vendor sessions to
+// scripts/.sessions.staging.json (setup-test-users.mjs only ever seeds the 3
+// base e2e.alice/bob/carol accounts; tests/live/*.spec.js also needs admin,
+// facilities-staff, store and canteen-vendor sessions, which production's
+// .sessions.json had accumulated over time but staging's never did). Uses
+// the already-known staging credentials from scripts/setup-admin-account.mjs,
+// scripts/.facilities-credentials.staging.local.json and
+// scripts/.vendor-credentials.staging.local.json (run
+// scripts/setup-vendor-accounts.mjs first if that file doesn't exist yet).
 import fs from "node:fs";
 import { resolveTarget } from "./env-target.mjs";
 
@@ -13,11 +16,21 @@ const facilities = JSON.parse(fs.readFileSync("scripts/.facilities-credentials.s
 const store = fs.existsSync("scripts/.store-credentials.staging.local.json")
   ? JSON.parse(fs.readFileSync("scripts/.store-credentials.staging.local.json", "utf8"))
   : null;
+// setup-vendor-accounts.mjs writes an array of {canteenName, email, password,
+// label, vendor, isPrintShop} -- covers Udupi/Tango/Munch/Nescafe + the
+// print shop, all needed by the vendor-facing live specs
+// (05/13/17/20/24/26-*.spec.js).
+const vendors = fs.existsSync("scripts/.vendor-credentials.staging.local.json")
+  ? JSON.parse(fs.readFileSync("scripts/.vendor-credentials.staging.local.json", "utf8"))
+  : [];
 
 const ACCOUNTS = [
   { email: "1nh25cs265@usn.campusos.internal", password: "Sanjay@123", label: "Admin (Sanjay Padmaraj)" },
   { email: facilities.email, password: facilities.password, label: facilities.label },
   ...(store && !store.password.startsWith("(") ? [{ email: store.email, password: store.password, label: store.vendor }] : []),
+  ...vendors
+    .filter((v) => v.password && !v.password.startsWith("("))
+    .map((v) => ({ email: v.email, password: v.password, label: v.vendor || v.label })),
 ];
 
 async function signIn({ email, password }) {
