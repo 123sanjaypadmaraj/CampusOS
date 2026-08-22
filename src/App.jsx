@@ -2412,6 +2412,8 @@ function App() {
           onMarketListingsChange={setMarketListings}
           onPrintJobsChange={setPrintJobs}
           onOpenConversation={goToConversation}
+          can={access.can}
+          isAdmin={access.isAdmin}
         />
       );
     }
@@ -7455,7 +7457,7 @@ function PrintJobsPanel({ jobs, notify, onChange }) {
   );
 }
 
-function ServiceDetail({ serviceId, notify, go, openModal, openLogin, authUser, user, profile, campusId, resources, bookings, serviceRequests, printJobs, lostItems, lostItemsLoaded, marketListings, onBookingsChange, onRequestsChange, onLostItemsChange, onMarketListingsChange, onPrintJobsChange, onOpenConversation }) {
+function ServiceDetail({ serviceId, notify, go, openModal, openLogin, authUser, user, profile, campusId, resources, bookings, serviceRequests, printJobs, lostItems, lostItemsLoaded, marketListings, onBookingsChange, onRequestsChange, onLostItemsChange, onMarketListingsChange, onPrintJobsChange, onOpenConversation, can, isAdmin }) {
   const data = serviceDetailData[serviceId];
 
   return (
@@ -7544,7 +7546,7 @@ function ServiceDetail({ serviceId, notify, go, openModal, openLogin, authUser, 
       )}
 
       {serviceId === "academics" && (
-        <AcademicHub profile={profile} notify={notify} can={access.can} isAdmin={access.isAdmin} />
+        <AcademicHub profile={profile} notify={notify} can={can} isAdmin={isAdmin} />
       )}
 
       {serviceId === "emergencydirectory" && (

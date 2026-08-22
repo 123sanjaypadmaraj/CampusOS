@@ -127,21 +127,58 @@ first-party `analytics`/`user_activity_daily` table already exists
 (`supabase/migrations/20260814005000_analytics.sql`) and covers basic
 usage numbers without needing a third-party account, if that's enough.
 
-## 7. CI deploy step
+## 7. CI/CD deploy automation -- done (2026-08-22, readiness-audit phase 3)
 
-`.github/workflows/ci.yml` currently stops at build + E2E, deliberately —
-there was nothing to deploy to yet. Once step 4 is done, add a job like:
+`.github/workflows/ci.yml` stays PR/push checks only (lint, typecheck,
+tests, build, mocked E2E) on purpose. A separate workflow,
+`.github/workflows/deploy.yml`, picks up after CI goes green on a push to
+`master`: it pushes migrations + edge functions to **staging**, deploys the
+frontend there and re-aliases `campusos-staging.vercel.app`, runs the real
+`tests/live/**` Playwright suite against that freshly-deployed staging
+build as a gate, and only if that passes repeats the same three steps
+against **production**, finishing with a bundle-hash check against the
+live URL (the same check the RBAC pass did by hand — curl the deployed
+page, confirm it's serving the content-hashed JS filename that was just
+built, not a stale cached one).
 
-```yaml
-  deploy:
-    needs: [lint-typecheck-test-build, e2e]
-    if: github.ref == 'refs/heads/master'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: npx vercel deploy --prod --token=${{ secrets.VERCEL_TOKEN }} --yes
-```
+Like `backup.yml`/`storage-backup.yml`, every individual CLI call in it
+(`supabase db push`, `supabase functions deploy`, `vercel build`/`vercel
+deploy --prebuilt`) was exercised manually against the real projects while
+writing it, but the workflow as a whole has not run inside an actual
+GitHub Actions job yet — trigger it once via the Actions tab's "Run
+workflow" button after setting every secret below, before trusting the
+on-merge trigger alone.
 
-(or the equivalent `wrangler pages deploy` for Cloudflare), gated behind
-whatever manual-approval GitHub Environment you want per doc §95's
-"Approval → Production" step.
+### CI/CD secrets
+
+None of these could be set by the session that wrote `deploy.yml` (no `gh`
+CLI available) — add them under repo → Settings → Secrets and variables →
+Actions:
+
+| Secret | What it is |
+|---|---|
+| `SUPABASE_ACCESS_TOKEN` | Same personal access token `backup.yml` already needs (Dashboard → Account → Access Tokens) — reuse it, don't mint a second one. |
+| `VERCEL_TOKEN` | Vercel → Account Settings → Tokens. Needs deploy access to the `campus-os2/campusos` project. |
+| `VERCEL_ORG_ID` | From `.vercel/project.json` after running `vercel link` locally once against the real project, or Vercel project Settings → General. |
+| `VERCEL_PROJECT_ID` | Same source as `VERCEL_ORG_ID`. |
+| `STAGING_SUPABASE_ANON_KEY` | Staging project's anon/publishable key (Supabase Dashboard → staging project → Project Settings → API). Not sensitive on its own (it's the same key the deployed frontend ships to every browser), but the live-check job needs it directly rather than reading it from Vercel's pulled env vars. |
+| `STAGING_E2E_ACCOUNTS` | JSON array of `{email, password, label}` for every staging test account the live suite signs in as. Generate it **yourself, locally** — never through an agent session, it contains real (if synthetic) passwords — with `node scripts/print-ci-staging-accounts-secret.mjs`, piped straight into `gh secret set STAGING_E2E_ACCOUNTS` or pasted into the GitHub secret UI. See that script's header comment for what it needs already set up locally. |
+
+Production's Supabase URL/anon key aren't needed as separate secrets —
+`vercel pull --environment=production` already reads them from the
+Vercel project's own Production environment variables (see
+`docs/ENVIRONMENTS.md` § Vercel environments), and the migrations/functions
+steps use `--project-ref` directly, not a locally-linked project.
+
+### What still isn't automated
+
+- **Staging's edge function secrets** (`RAZORPAY_KEY_ID` etc.) — `supabase
+  secrets set` is a one-time-per-project setup step, not a per-deploy one;
+  `deploy.yml` deploys function *code*, not function *config*. Run it by
+  hand once per project per §2 above if it hasn't been.
+- **A manual-approval gate on the production job** — right now the staging
+  live-check passing is the only gate; there's no "someone clicks Approve"
+  step before production. Add a GitHub `environment` protection rule on the
+  `production` environment (repo → Settings → Environments → production →
+  Required reviewers) if you want a human in the loop before every deploy,
+  not just before the first one.

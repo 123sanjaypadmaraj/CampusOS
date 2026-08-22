@@ -92,9 +92,14 @@ cp .env.staging.local .env   # switch back when done
 
 ## Applying migrations to both projects
 
-New migrations go in `supabase/migrations/` as always and get applied to
-**both** projects — staging first (to catch problems like the two migration
-bugs found while first setting staging up), then production once verified:
+**As of 2026-08-22 this is automated** — `.github/workflows/deploy.yml`
+pushes every merge to `master` to staging, gates on the live Playwright
+suite passing there, then pushes the same migrations + edge functions +
+frontend build to production. See `docs/DEPLOYMENT.md` § 7 for the required
+secrets and what it does not yet cover (per-project function *secrets*,
+still manual; no required-reviewer approval gate by default). The manual
+sequence below is still correct for local testing or a one-off out-of-band
+push:
 
 ```bash
 npx supabase link --project-ref qmfmziilgkktwnqoxakk   # staging
