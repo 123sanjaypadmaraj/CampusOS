@@ -790,6 +790,15 @@ export async function cancelAccountDeletionRequest(requestId) {
   throwIfError(error);
 }
 
+// Self-service data export (20260824000100_export_my_data.sql, readiness-audit
+// phase 06). Computed on read, nothing stored -- returns everything scoped
+// to auth.uid() as one jsonb object; the caller downloads it directly.
+export async function exportMyData() {
+  const { data, error } = await supabase.rpc("export_my_data");
+  throwIfError(error);
+  return data;
+}
+
 // Suspension appeal (supabase/migrations/20260818000600_community_hardening.sql)
 // -- the one path a suspended account has left, since reject_if_suspended()
 // blocks nearly everything else. Self-scoped server-side (no userId param).

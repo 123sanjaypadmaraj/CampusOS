@@ -5,8 +5,10 @@
 // deletion.sql): the admin_set_user_role() privilege-escalation fix, the
 // role-change maker-checker approval flow, the student_verifications
 // self-verify RLS lockdown, the profiles.status self-write bypass fix, the
-// account-deletion-request workflow, and server-side email-domain
-// enforcement. Prints PASS/FAIL per assertion.
+// account-deletion-request workflow, server-side email-domain enforcement,
+// and (added 2026-08-24, readiness-audit phase 06) the self-service data
+// export RPC from 20260824000100_export_my_data.sql. Prints PASS/FAIL per
+// assertion.
 //
 // Uses throwaway service-role-created accounts for everything it mutates
 // (proposer/target/student), NOT the shared e2e.alice/bob/carol accounts
@@ -274,6 +276,27 @@ async function main() {
         p_target_user: users.student.userId, p_status: "active",
       });
       check("admin can restore a deleted account back to active", !restoreErr, restoreErr);
+    }
+
+    // --- 6b. Self-service data export (export_my_data(), 20260824000100) ---
+    console.log("\n-- Self-service data export --");
+    {
+      const { data: exportData, error: exportErr } = await users.student.sb.rpc("export_my_data");
+      check("student can export their own data", !exportErr, exportErr);
+      check("export includes exported_at + own profile", !!exportData?.exported_at && exportData?.profile?.id === users.student.userId, exportData);
+      check("export's per-table fields are arrays (even when empty)", Array.isArray(exportData?.orders) && Array.isArray(exportData?.event_registrations) && Array.isArray(exportData?.support_tickets), exportData);
+
+      const { error: anonExportErr } = await client().rpc("export_my_data");
+      check("an unauthenticated caller cannot export data", !!anonExportErr, anonExportErr);
+
+      const { data: exportAudit } = await svc
+        .from("audit_logs")
+        .select("id")
+        .eq("actor_id", users.student.userId)
+        .eq("action", "account.export_data")
+        .order("created_at", { ascending: false })
+        .limit(1);
+      check("the export was recorded in audit_logs", (exportAudit?.length || 0) > 0, exportAudit);
     }
 
     // --- 7. Server-side email-domain enforcement ---

@@ -83,6 +83,7 @@ import {
   getMyAccountDeletionRequest,
   requestAccountDeletion,
   cancelAccountDeletionRequest,
+  exportMyData,
   submitOrgRequest,
   touchActivity,
   triggerSosAlert,
@@ -5459,6 +5460,32 @@ function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfil
     }
   };
 
+  // Self-service data export (export_my_data() RPC, 20260824000100). Same
+  // client-side-download pattern as the CSV exports in VendorDashboard/
+  // ClubManage -- nothing is stored server-side, this just downloads the
+  // jsonb the RPC computed on the spot.
+  const [exportingData, setExportingData] = useState(false);
+  const handleExportData = async () => {
+    setExportingData(true);
+    try {
+      const data = await exportMyData();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `campusos-my-data-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      notify("Your data export has downloaded");
+    } catch (error) {
+      notify(error.message || "Could not export your data");
+    } finally {
+      setExportingData(false);
+    }
+  };
+
   if (!user) {
     return (
       <section className="page-section profile-page">
@@ -5596,6 +5623,9 @@ function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfil
             Privacy Policy &amp; Terms of Service
           </button>
         )}
+        <button className="link-btn" style={{ marginTop: 10 }} onClick={handleExportData} disabled={exportingData}>
+          {exportingData ? "Preparing…" : "Download my data"}
+        </button>
         {deletionRequest ? (
           <div style={{ marginTop: 10, textAlign: "center" }}>
             <small>Account deletion requested — pending admin review.</small>
@@ -8101,7 +8131,7 @@ function LegalContent() {
   return (
     <div className="legal-content">
       <h2>Privacy Policy</h2>
-      <p><em>Last updated 14 August 2026.</em></p>
+      <p><em>Last updated 24 August 2026.</em></p>
 
       <h3>What we collect</h3>
       <p>
@@ -8135,12 +8165,36 @@ function LegalContent() {
         details.
       </p>
 
-      <h3>Your choices</h3>
+      <h3>Your choices &amp; data principal rights</h3>
       <p>
         You can edit or remove most profile info yourself at any time. You
         can set your profile to be hidden from the classmate directory in
-        Edit Profile. To request a copy of your data or ask us to delete
-        your account, contact your campus admin.
+        Edit Profile. From your profile page you can <strong>download a
+        copy of your data</strong> in-app at any time (a machine-readable
+        export of your orders, registrations, memberships, listings,
+        tickets, bookings, and similar activity), and <strong>request
+        account deletion</strong> in-app — a campus admin reviews and
+        actions every deletion request rather than it happening instantly,
+        since your data intersects other people&apos;s records (e.g. an
+        order a vendor fulfilled, or an event you&apos;re on the roster
+        for). You can cancel a pending deletion request yourself at any
+        time before it&apos;s actioned.
+      </p>
+      <p>
+        If you&apos;re a data principal under India&apos;s Digital Personal
+        Data Protection Act, 2023 and the above doesn&apos;t cover what
+        you&apos;re asking for (correction of inaccurate data, withdrawing
+        consent, or a grievance about how your data was handled), contact
+        your campus admin — for this deployment, that&apos;s the point of
+        contact standing in for a formally designated Grievance Officer
+        until CampusOS is run by an organization that appoints one. We aim
+        to acknowledge grievances within a reasonable time.
+      </p>
+      <p style={{ opacity: 0.75, fontSize: "0.9em" }}>
+        This policy is written in plain language for a campus deployment,
+        not drafted or reviewed by a lawyer — treat it as a good-faith
+        starting point, not a substitute for a real compliance review
+        before onboarding an actual college&apos;s students.
       </p>
 
       <h2>Terms of Service</h2>

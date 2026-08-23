@@ -47,13 +47,43 @@ once no longer needed for verification.
 An admin can suspend a `profiles` row (`status = 'suspended'`,
 `suspended_reason` set) — see `20260814003000_enforce_account_suspension.sql`.
 This **hides and blocks** the account (can't post, order, register, etc.
-— enforced by `reject_if_suspended()`), it does not delete any data. There
-is currently **no self-service account deletion** anywhere in the app — a
-student cannot request their own data be removed. **Open question**: if
-this needs to support a "right to erasure"-style request, that flow
-doesn't exist yet and needs a product decision (hard-delete vs.
-anonymize-in-place, and what happens to their orders/posts/event history
-which other people's records reference).
+— enforced by `reject_if_suspended()`), it does not delete any data.
+
+## Self-service account deletion — corrected 2026-08-24
+
+This document previously said "no self-service account deletion exists
+anywhere in the app" — that was true when this document was first written
+(14/15 Aug) but went stale: `20260818000500_email_domain_enforcement_and_account_deletion.sql`
+(18 Aug) added exactly that, and it's been live since. A student can
+request deletion from their profile page at any time
+(`request_account_deletion()` RPC); an admin reviews and actions it via
+`admin_process_account_deletion()` rather than it happening instantly,
+since the account's data intersects other people's records (a vendor's
+order history, an event roster, etc.) — the chosen approach is a
+**soft-delete** (`profiles.status = 'deleted'`), same posture as
+suspension, not a hard delete/anonymize pass. A student can cancel their
+own pending request before it's actioned. This is the "right to
+erasure"-equivalent flow the previous version of this document flagged as
+missing — the *particular* design decision it asked for (hard-delete vs.
+anonymize-in-place) is answered (soft-delete), but a true hard-delete pass
+that actually removes rows, rather than just hiding the account, is still
+undecided and out of scope for this correction.
+
+## Self-service data export — added 2026-08-24
+
+Closed the matching gap on the read side: `export_my_data()`
+(`20260824000100_export_my_data.sql`), callable from the same profile page,
+returns a jsonb snapshot of everything scoped to `auth.uid()` across the
+tables that hold a student's own generated activity (orders, event
+registrations, club memberships, marketplace listings, lost &amp; found
+reports, support tickets, service requests, bookings, print jobs,
+emergency contacts, posts/comments, student verification, and account
+deletion request history) and downloads it as a `.json` file client-side.
+Computed on read, nothing is stored server-side. Every export call is
+logged to `audit_logs` (`account.export_data`). Not exhaustive over every
+one of this schema's ~90 tables — see that migration's header comment for
+the scoping rationale — but covers what a data-principal access request
+would reasonably expect.
 
 ## What's explicitly fine to keep indefinitely
 
