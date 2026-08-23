@@ -47,3 +47,6 @@ scripts/.*credentials*.local.json
 scripts/.sessions*.json
 scripts/.vapid-keys*.local.json
 *.local.json
+
+# Throwaway output from scripts/loadtest-*.mjs (phase 7 reliability testing)
+scripts/.loadtest-*.json
