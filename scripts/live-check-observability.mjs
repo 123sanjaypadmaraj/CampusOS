@@ -14,10 +14,21 @@
 // Usage: node scripts/live-check-observability.mjs                 (staging)
 //        node scripts/live-check-observability.mjs --env=production --yes-production
 
+import fs from "node:fs";
+import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { resolveTarget } from "./env-target.mjs";
 
-const { SUPABASE_URL, ANON_KEY, SERVICE_ROLE_KEY, target } = resolveTarget();
+const { SUPABASE_URL, ANON_KEY, SERVICE_ROLE_KEY, target, root } = resolveTarget();
+
+// Admin's password isn't a fixed constant either -- see setup-admin-account.mjs's
+// header for why (an earlier version hardcoded "Sanjay@123" here; compromised).
+const adminCredsFile = target === "production" ? ".admin-credentials.local.json" : ".admin-credentials.staging.local.json";
+function adminPassword() {
+  const p = path.join(root, "scripts", adminCredsFile);
+  if (!fs.existsSync(p)) throw new Error(`No admin credentials known in ${adminCredsFile} -- run "node scripts/setup-admin-account.mjs --rotate" first (the account already exists, so a plain run won't write this file).`);
+  return JSON.parse(fs.readFileSync(p, "utf8")).password;
+}
 
 let passCount = 0;
 let failCount = 0;
@@ -48,7 +59,7 @@ const seededErrorIds = [];
 
 async function main() {
   console.log(`=== Observability pass (doc #97) [${target}] ===`);
-  const admin = await signIn("1nh25cs265@usn.campusos.internal", "Sanjay@123");
+  const admin = await signIn("1nh25cs265@usn.campusos.internal", adminPassword());
 
   try {
     // =========================================================

@@ -9,15 +9,49 @@
 //        node scripts/setup-facilities-account.mjs --env=production --yes-production
 // Prints the email/password to stdout and writes them to the gitignored
 // scripts/.facilities-credentials[.staging].local.json.
+//
+// Passwords are never hardcoded here (an earlier version did -- literal
+// "FacilitiesTest@2026" -- same class of finding as setup-admin-account.mjs,
+// same fix). This account's password is reset to a known value on every run
+// (unlike the vendor/store scripts) because live-check scripts need a
+// deterministic credential; that known value is a random one minted on
+// first run and persisted/reused from the credentials file after that,
+// never a literal in source.
 
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { resolveTarget, runProjectSql } from "./env-target.mjs";
 
 const { SUPABASE_URL, SERVICE_ROLE_KEY, projectRef, root, target } = resolveTarget();
 const credentialsFile = target === "production" ? ".facilities-credentials.local.json" : ".facilities-credentials.staging.local.json";
+const credentialsPath = path.join(root, "scripts", credentialsFile);
 
-const ACCOUNT = { email: "facilities.staff@nhce.edu.in", label: "Facilities Staff", password: "FacilitiesTest@2026" };
+function generatePassword() {
+  // 12 chars, unambiguous alphabet, guaranteed at least one of each class --
+  // same generator as setup-vendor-accounts.mjs/setup-store-account.mjs.
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const lower = "abcdefghijkmnopqrstuvwxyz";
+  const digits = "23456789";
+  const symbols = "!@#$%";
+  const all = upper + lower + digits + symbols;
+  const pick = (chars) => chars[crypto.randomInt(chars.length)];
+  let pwd = pick(upper) + pick(lower) + pick(digits) + pick(symbols);
+  for (let i = pwd.length; i < 12; i++) pwd += pick(all);
+  return pwd.split("").sort(() => crypto.randomInt(3) - 1).join("");
+}
+
+function loadOrCreatePassword() {
+  if (fs.existsSync(credentialsPath)) {
+    try {
+      const saved = JSON.parse(fs.readFileSync(credentialsPath, "utf8"));
+      if (saved?.password) return saved.password;
+    } catch { /* fall through to minting a fresh one */ }
+  }
+  return generatePassword();
+}
+
+const ACCOUNT = { email: "facilities.staff@nhce.edu.in", label: "Facilities Staff", password: loadOrCreatePassword() };
 
 async function adminFetch(pathname, options = {}) {
   const res = await fetch(`${SUPABASE_URL}${pathname}`, {

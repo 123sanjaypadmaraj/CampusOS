@@ -25,6 +25,15 @@ import { resolveTarget } from "./env-target.mjs";
 
 const { SUPABASE_URL, ANON_KEY, target, root } = resolveTarget();
 
+// Admin's password isn't a fixed constant either -- see setup-admin-account.mjs's
+// header for why (an earlier version hardcoded adminPassword() here; compromised).
+const adminCredsFile = target === "production" ? ".admin-credentials.local.json" : ".admin-credentials.staging.local.json";
+function adminPassword() {
+  const p = path.join(root, "scripts", adminCredsFile);
+  if (!fs.existsSync(p)) throw new Error(`No admin credentials known in ${adminCredsFile} -- run "node scripts/setup-admin-account.mjs --rotate" first (the account already exists, so a plain run won't write this file).`);
+  return JSON.parse(fs.readFileSync(p, "utf8")).password;
+}
+
 let passCount = 0;
 let failCount = 0;
 function check(label, cond, extra) {
@@ -59,7 +68,7 @@ async function main() {
   console.log(`=== AdminCMS operating-system pass (vendor mgmt / facilities / system health / campus settings / feature flags) [${target}] ===`);
 
   const creds = readE2eCredentials();
-  const admin = await signIn("1nh25cs265@usn.campusos.internal", "Sanjay@123");
+  const admin = await signIn("1nh25cs265@usn.campusos.internal", adminPassword());
   const bob = await signIn("e2e.bob@nhce.edu.in", creds["e2e.bob@nhce.edu.in"]);
   const carol = await signIn("e2e.carol@nhce.edu.in", creds["e2e.carol@nhce.edu.in"]);
 

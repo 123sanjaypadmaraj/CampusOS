@@ -165,6 +165,77 @@ doesn't have, or a decision only you should make):
   tracked files, so a gitignored credential file can't ride along even by
   accident.
 
+## 2026-08-23 finding: the real admin account's password was hardcoded in 19 public, tracked scripts
+
+Found during a readiness-audit internal-security-audit pass (phase 05):
+a second, separate instance of the exact same class of bug as the
+`CampusOS@2026` incident above, in files that same incident-response pass
+itself introduced. `scripts/setup-admin-account.mjs` -- the script that
+creates/promotes the real owner's super_admin account, and is designed to
+be run with `--env=production --yes-production` -- hardcoded the literal
+password `Sanjay@123` for `1nh25cs265@usn.campusos.internal` ("Admin
+(Sanjay Padmaraj)"). That literal, and copies of it, sat in **24 tracked
+files** (not gitignored, this repo is public -- see above): the setup
+script itself, `scripts/add-staging-sessions.mjs`,
+`scripts/print-ci-staging-accounts-secret.mjs`, 20
+`scripts/live-check-*.mjs` files that each independently re-hardcoded it
+(in a `signIn(...)` call, or as a bare `const adminPassword = "..."`)
+instead of reading it from a shared file -- despite several of those
+files' own header comments already claiming the password came from
+`setup-admin-account.mjs`'s credentials file, which didn't actually
+exist -- and `tests/live/03-usn-login-and-cms.spec.js`, which typed the
+literal directly into the real login form on every run. Introduced in
+`8e823497` (14 Aug), the same commit that removed the *original*
+`create_kingpin.js`/`test_login.js` hardcoded credential -- a regression
+in the very pass meant to fix this class of bug. A separate, unrelated
+file (`scripts/setup-facilities-account.mjs`) had the same pattern for the
+`facilities.staff@nhce.edu.in` test account (`FacilitiesTest@2026`).
+
+**Done, this pass** (pure code fix, no live credential touched -- an
+autonomous session correctly refused to call the production Admin API
+directly, even read-only, when attempted):
+- `setup-admin-account.mjs` no longer hardcodes a password. It mints a
+  random one via the Admin API only when creating the account fresh, and
+  added a `--rotate` flag (must be run by a human, not through this
+  script's default path) that resets an *existing* account's password to a
+  fresh random value and writes it to the gitignored
+  `scripts/.admin-credentials[.staging].local.json`.
+- `setup-facilities-account.mjs` now mints a random password on first run
+  and persists/reuses it via the same gitignored-credentials-file
+  convention `setup-vendor-accounts.mjs`/`setup-store-account.mjs` already
+  used correctly, instead of a literal.
+- All 23 consumer files (22 `scripts/*.mjs` + the Playwright spec, via a
+  new `tests/live/helpers/resolveAdminPassword.js`) now read the admin
+  password from `.admin-credentials[.staging].local.json` instead of a
+  hardcoded string, with a clear error telling you to run `--rotate` first
+  if that file doesn't exist yet.
+
+**Still needs action from you directly** (this session cannot touch the
+real owner's live login without your say-so):
+- **The account's actual current password, in both staging and
+  production, is still `Sanjay@123` until you run
+  `node scripts/setup-admin-account.mjs --rotate --env=production
+  --yes-production` (and the staging equivalent) yourself.** Treat it as
+  compromised the same way `CampusOS@2026` was treated — it's been
+  sitting in this public repo's history since 14 Aug regardless of what
+  the code does going forward.
+- Same reasoning as `FacilitiesTest@2026` if `facilities.staff@nhce.edu.in`
+  was ever created against a real environment with that literal — check and
+  rotate via `setup-facilities-account.mjs` (no flag needed, it always
+  resets on run) if so.
+- Consider whether this warrants a closer look at every other
+  `scripts/setup-*.mjs`/`scripts/live-check-*.mjs` file for the same
+  pattern beyond this pass's grep sweep (`grep -rn "password.*:.*\"" scripts/`
+  and `grep -rn "signIn(.*,.*\"" scripts/` were both used here and came back
+  clean afterward, but a new script added later could reintroduce this).
+  That sweep did turn up one more instance in the same pass, already fixed:
+  `scripts/live-check-store-variants-stock.mjs` reset the real Udupi Canteen
+  vendor account's password to a fixed literal (`LiveCheckTemp!2026`) on
+  every run instead of a random one, even though the write-back to
+  `.vendor-credentials.local.json` (the actual source of truth every other
+  script reads from) was already correct -- only the *value* being written
+  was the bug. Now generates a random value per run.
+
 ## Ongoing practices
 
 - Never commit `.env`. It's gitignored; use `.env.example` as the template.

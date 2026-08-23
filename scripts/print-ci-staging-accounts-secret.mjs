@@ -5,9 +5,10 @@
 // (run by .github/workflows/deploy.yml) needs, from the same gitignored
 // local credential files scripts/add-staging-sessions.mjs already reads --
 // see that script's header comment for what each file is and how to
-// (re)create it if missing (setup-test-users.mjs, setup-admin-account.mjs,
-// setup-facilities-account.mjs, setup-store-account.mjs,
-// setup-vendor-accounts.mjs, all run with no flags so they target staging).
+// (re)create it if missing (setup-test-users.mjs, setup-facilities-account.mjs,
+// setup-store-account.mjs, setup-vendor-accounts.mjs, all run with no flags
+// so they target staging; setup-admin-account.mjs needs --rotate since that
+// account already exists).
 //
 // Usage:
 //   node scripts/print-ci-staging-accounts-secret.mjs > /tmp/staging-accounts.json
@@ -22,6 +23,7 @@ function readJson(path) {
 }
 
 const e2e = readJson("scripts/.e2e-credentials.staging.local.json") || [];
+const admin = readJson("scripts/.admin-credentials.staging.local.json");
 const facilities = readJson("scripts/.facilities-credentials.staging.local.json");
 const store = readJson("scripts/.store-credentials.staging.local.json");
 const vendors = readJson("scripts/.vendor-credentials.staging.local.json") || [];
@@ -40,7 +42,9 @@ for (const u of e2e) {
   if (u?.email && u?.password) accounts.push({ email: u.email, password: u.password, label: E2E_LABELS[u.email] || u.email });
 }
 
-accounts.push({ email: "1nh25cs265@usn.campusos.internal", password: "Sanjay@123", label: "Admin (Sanjay Padmaraj)" });
+if (admin?.email && admin?.password) {
+  accounts.push({ email: admin.email, password: admin.password, label: "Admin (Sanjay Padmaraj)" });
+}
 
 if (facilities?.email && facilities?.password) {
   accounts.push({ email: facilities.email, password: facilities.password, label: facilities.label || "Facilities" });

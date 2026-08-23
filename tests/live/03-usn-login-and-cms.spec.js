@@ -5,6 +5,17 @@
 // deployed app and real Supabase backend.
 
 import { test, expect } from '@playwright/test';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { resolveAdminPassword } from './helpers/resolveAdminPassword.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(__dirname, '..', '..');
+function readEnvVar(name) {
+  return fs.readFileSync(path.join(root, '.env'), 'utf8').match(new RegExp(`^${name}=(.+)$`, 'm'))?.[1]?.trim();
+}
+const ADMIN_PASSWORD = resolveAdminPassword(root, readEnvVar('VITE_SUPABASE_URL'));
 
 test('USN login: sign in with the requested Sanjay Padmaraj account', async ({ page }) => {
   await page.goto('/');
@@ -13,7 +24,7 @@ test('USN login: sign in with the requested Sanjay Padmaraj account', async ({ p
   await page.getByTestId('sign-in-button').click();
   await page.getByRole('button', { name: 'USN & password' }).click();
   await page.getByLabel('USN').fill('1NH25CS265');
-  await page.getByLabel('Password', { exact: true }).fill('Sanjay@123');
+  await page.getByLabel('Password', { exact: true }).fill(ADMIN_PASSWORD);
   await page.getByTestId('usn-login-button').click();
 
   await expect(page.getByTestId('sign-in-button')).toHaveCount(0, { timeout: 10000 });
@@ -27,7 +38,7 @@ test('USN login: admin nav tab appears for the admin account', async ({ page }) 
   await page.getByTestId('sign-in-button').click();
   await page.getByRole('button', { name: 'USN & password' }).click();
   await page.getByLabel('USN').fill('1NH25CS265');
-  await page.getByLabel('Password', { exact: true }).fill('Sanjay@123');
+  await page.getByLabel('Password', { exact: true }).fill(ADMIN_PASSWORD);
   await page.getByTestId('usn-login-button').click();
   await expect(page.getByTestId('sign-in-button')).toHaveCount(0, { timeout: 10000 });
 
@@ -63,7 +74,7 @@ test('Admin CMS: Food & Canteens is gone -- canteen menus are vendor-only now', 
   await page.getByTestId('sign-in-button').click();
   await page.getByRole('button', { name: 'USN & password' }).click();
   await page.getByLabel('USN').fill('1NH25CS265');
-  await page.getByLabel('Password', { exact: true }).fill('Sanjay@123');
+  await page.getByLabel('Password', { exact: true }).fill(ADMIN_PASSWORD);
   await page.getByTestId('usn-login-button').click();
   await expect(page.getByTestId('sign-in-button')).toHaveCount(0, { timeout: 10000 });
 
@@ -82,7 +93,7 @@ test('Admin CMS: publish an announcement', async ({ page }) => {
   await page.getByTestId('sign-in-button').click();
   await page.getByRole('button', { name: 'USN & password' }).click();
   await page.getByLabel('USN').fill('1NH25CS265');
-  await page.getByLabel('Password', { exact: true }).fill('Sanjay@123');
+  await page.getByLabel('Password', { exact: true }).fill(ADMIN_PASSWORD);
   await page.getByTestId('usn-login-button').click();
   await expect(page.getByTestId('sign-in-button')).toHaveCount(0, { timeout: 10000 });
 
@@ -103,7 +114,7 @@ test('Admin CMS: create an event and a club', async ({ page }) => {
   await page.getByTestId('sign-in-button').click();
   await page.getByRole('button', { name: 'USN & password' }).click();
   await page.getByLabel('USN').fill('1NH25CS265');
-  await page.getByLabel('Password', { exact: true }).fill('Sanjay@123');
+  await page.getByLabel('Password', { exact: true }).fill(ADMIN_PASSWORD);
   await page.getByTestId('usn-login-button').click();
   await expect(page.getByTestId('sign-in-button')).toHaveCount(0, { timeout: 10000 });
 

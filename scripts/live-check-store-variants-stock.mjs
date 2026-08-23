@@ -11,6 +11,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { resolveTarget } from "./env-target.mjs";
 
@@ -221,8 +222,15 @@ async function main() {
   check("Past order still reads correctly after its variant is deleted", orderAfterVariantDelete?.variant_id === null && orderAfterVariantDelete?.variant_name === "Medium", orderAfterVariantDelete);
 
   console.log("\n=== Cross-vendor RLS on variants ===");
-  await adminResetPassword(udupi.userId, "LiveCheckTemp!2026");
-  const udupiVendor = await signIn(udupi.email, "LiveCheckTemp!2026");
+  // Random, not a fixed literal -- an earlier version hardcoded
+  // "LiveCheckTemp!2026" here, which meant a production run left Udupi
+  // Canteen's real login password sitting in this public tracked file
+  // (same class of finding as the admin-account incident, see SECURITY.md's
+  // 2026-08-23 entry). adminResetPassword() already persists whatever's
+  // passed here back to vendorCredsFile, so a random value costs nothing.
+  const tempPassword = crypto.randomBytes(18).toString("base64url");
+  await adminResetPassword(udupi.userId, tempPassword);
+  const udupiVendor = await signIn(udupi.email, tempPassword);
 
   const { error: intruderVariantErr } = await udupiVendor.sb
     .from("store_item_variants")

@@ -40,7 +40,15 @@ if (!VENDOR_PASSWORD || VENDOR_PASSWORD.startsWith("(")) {
 const ALICE = { email: "e2e.alice@nhce.edu.in", password: e2ePassword("e2e.alice@nhce.edu.in") };
 const BOB = { email: "e2e.bob@nhce.edu.in", password: e2ePassword("e2e.bob@nhce.edu.in") };
 const CAROL = { email: "e2e.carol@nhce.edu.in", password: e2ePassword("e2e.carol@nhce.edu.in") };
-const ADMIN = { email: "1nh25cs265@usn.campusos.internal", password: "Sanjay@123" };
+
+// Admin's password isn't a fixed constant either -- see the identical
+// comment above VENDOR_PASSWORD. Read it from the gitignored credentials
+// file setup-admin-account.mjs writes, instead of a hardcoded literal (an
+// earlier version had one here -- see setup-admin-account.mjs's header).
+const adminCredsFile = target === "production" ? ".admin-credentials.local.json" : ".admin-credentials.staging.local.json";
+const adminCredsPath = path.join(root, "scripts", adminCredsFile);
+if (!fs.existsSync(adminCredsPath)) throw new Error(`No admin credentials known in ${adminCredsFile} -- run "node scripts/setup-admin-account.mjs --rotate" first (the account already exists, so a plain run won't write this file).`);
+const ADMIN = { email: "1nh25cs265@usn.campusos.internal", password: JSON.parse(fs.readFileSync(adminCredsPath, "utf8")).password };
 const UDUPI_VENDOR = { email: "udupi.canteen@nhce.edu.in", password: VENDOR_PASSWORD };
 
 let passCount = 0;

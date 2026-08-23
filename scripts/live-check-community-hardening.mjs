@@ -15,9 +15,10 @@
 //        node scripts/live-check-community-hardening.mjs --env=production --yes-production
 
 import fs from "node:fs";
+import path from "node:path";
 import { resolveTarget } from "./env-target.mjs";
 
-const { SUPABASE_URL, ANON_KEY, SERVICE_ROLE_KEY, target, sessionsFile } = resolveTarget();
+const { SUPABASE_URL, ANON_KEY, SERVICE_ROLE_KEY, target, sessionsFile, root } = resolveTarget();
 
 // e2e.alice/bob/carol no longer have fixed hardcoded passwords (see the
 // 2026-08-18 credential-rotation incident in SECURITY.md) -- read the
@@ -35,7 +36,13 @@ const passwordFor = (email) => {
 
 const ALICE = { email: "e2e.alice@nhce.edu.in", password: passwordFor("e2e.alice@nhce.edu.in") };
 const BOB = { email: "e2e.bob@nhce.edu.in", password: passwordFor("e2e.bob@nhce.edu.in") };
-const ADMIN = { email: "1nh25cs265@usn.campusos.internal", password: "Sanjay@123" };
+
+// Admin's password isn't a fixed constant either -- see setup-admin-account.mjs's
+// header for why (an earlier version hardcoded "Sanjay@123" here; compromised).
+const adminCredsFile = target === "production" ? ".admin-credentials.local.json" : ".admin-credentials.staging.local.json";
+const adminCredsPath = path.join(root, "scripts", adminCredsFile);
+if (!fs.existsSync(adminCredsPath)) throw new Error(`No admin credentials known in ${adminCredsFile} -- run "node scripts/setup-admin-account.mjs --rotate" first (the account already exists, so a plain run won't write this file).`);
+const ADMIN = { email: "1nh25cs265@usn.campusos.internal", password: JSON.parse(fs.readFileSync(adminCredsPath, "utf8")).password };
 
 let passCount = 0;
 let failCount = 0;

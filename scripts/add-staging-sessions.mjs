@@ -3,7 +3,10 @@
 // base e2e.alice/bob/carol accounts; tests/live/*.spec.js also needs admin,
 // facilities-staff, store and canteen-vendor sessions, which production's
 // .sessions.json had accumulated over time but staging's never did). Uses
-// the already-known staging credentials from scripts/setup-admin-account.mjs,
+// the already-known staging credentials from
+// scripts/.admin-credentials.staging.local.json (run
+// scripts/setup-admin-account.mjs --rotate first if that file doesn't exist
+// yet -- the admin account already exists, so a plain run won't write it),
 // scripts/.facilities-credentials.staging.local.json and
 // scripts/.vendor-credentials.staging.local.json (run
 // scripts/setup-vendor-accounts.mjs first if that file doesn't exist yet).
@@ -12,6 +15,7 @@ import { resolveTarget } from "./env-target.mjs";
 
 const { SUPABASE_URL, ANON_KEY, sessionsFile } = resolveTarget();
 
+const admin = JSON.parse(fs.readFileSync("scripts/.admin-credentials.staging.local.json", "utf8"));
 const facilities = JSON.parse(fs.readFileSync("scripts/.facilities-credentials.staging.local.json", "utf8"));
 const store = fs.existsSync("scripts/.store-credentials.staging.local.json")
   ? JSON.parse(fs.readFileSync("scripts/.store-credentials.staging.local.json", "utf8"))
@@ -25,7 +29,7 @@ const vendors = fs.existsSync("scripts/.vendor-credentials.staging.local.json")
   : [];
 
 const ACCOUNTS = [
-  { email: "1nh25cs265@usn.campusos.internal", password: "Sanjay@123", label: "Admin (Sanjay Padmaraj)" },
+  { email: admin.email, password: admin.password, label: "Admin (Sanjay Padmaraj)" },
   { email: facilities.email, password: facilities.password, label: facilities.label },
   ...(store && !store.password.startsWith("(") ? [{ email: store.email, password: store.password, label: store.vendor }] : []),
   ...vendors

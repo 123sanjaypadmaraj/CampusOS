@@ -20,6 +20,15 @@ import { createClient } from "@supabase/supabase-js";
 import { resolveTarget } from "./env-target.mjs";
 
 const { SUPABASE_URL, ANON_KEY, root, target } = resolveTarget();
+
+// Admin's password isn't a fixed constant either -- see setup-admin-account.mjs's
+// header for why (an earlier version hardcoded adminPassword() here; compromised).
+const adminCredsFile = target === "production" ? ".admin-credentials.local.json" : ".admin-credentials.staging.local.json";
+function adminPassword() {
+  const p = path.join(root, "scripts", adminCredsFile);
+  if (!fs.existsSync(p)) throw new Error(`No admin credentials known in ${adminCredsFile} -- run "node scripts/setup-admin-account.mjs --rotate" first (the account already exists, so a plain run won't write this file).`);
+  return JSON.parse(fs.readFileSync(p, "utf8")).password;
+}
 const e2eCredsFile = target === "production" ? ".e2e-credentials.local.json" : ".e2e-credentials.staging.local.json";
 const e2eCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts", e2eCredsFile), "utf8"));
 const e2ePassword = (email) => {
@@ -54,7 +63,7 @@ async function signIn(email, password) {
 
 async function main() {
   console.log("=== Academic Announcements (doc §109-112) ===");
-  const admin = await signIn("1nh25cs265@usn.campusos.internal", "Sanjay@123");
+  const admin = await signIn("1nh25cs265@usn.campusos.internal", adminPassword());
   const alice = await signIn("e2e.alice@nhce.edu.in", e2ePassword("e2e.alice@nhce.edu.in"));
   const bob = await signIn("e2e.bob@nhce.edu.in", e2ePassword("e2e.bob@nhce.edu.in"));
   const carol = await signIn("e2e.carol@nhce.edu.in", e2ePassword("e2e.carol@nhce.edu.in"));

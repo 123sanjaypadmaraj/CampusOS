@@ -16,10 +16,21 @@
 // Usage: node scripts/live-check-auth-identity-hardening.mjs                 (staging)
 //        node scripts/live-check-auth-identity-hardening.mjs --env=production --yes-production
 
+import fs from "node:fs";
+import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { resolveTarget } from "./env-target.mjs";
 
-const { SUPABASE_URL, ANON_KEY, SERVICE_ROLE_KEY } = resolveTarget();
+const { SUPABASE_URL, ANON_KEY, SERVICE_ROLE_KEY, root, target } = resolveTarget();
+
+// Admin's password isn't a fixed constant either -- see setup-admin-account.mjs's
+// header for why (an earlier version hardcoded "Sanjay@123" here; compromised).
+const adminCredsFile = target === "production" ? ".admin-credentials.local.json" : ".admin-credentials.staging.local.json";
+function adminPassword() {
+  const p = path.join(root, "scripts", adminCredsFile);
+  if (!fs.existsSync(p)) throw new Error(`No admin credentials known in ${adminCredsFile} -- run "node scripts/setup-admin-account.mjs --rotate" first (the account already exists, so a plain run won't write this file).`);
+  return JSON.parse(fs.readFileSync(p, "utf8")).password;
+}
 
 let passCount = 0;
 let failCount = 0;
@@ -50,7 +61,7 @@ async function signIn(email, password) {
 
 async function main() {
   console.log("=== Auth & identity hardening pass ===");
-  const admin = await signIn("1nh25cs265@usn.campusos.internal", "Sanjay@123");
+  const admin = await signIn("1nh25cs265@usn.campusos.internal", adminPassword());
   const svc = serviceClient();
 
   const ts = Date.now();

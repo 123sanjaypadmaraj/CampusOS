@@ -29,7 +29,12 @@ const printShop = vendorCreds.find((v) => v.vendor === "Print Shop");
 const aliceEmail = "e2e.alice@nhce.edu.in";
 const alicePassword = e2ePassword("e2e.alice@nhce.edu.in");
 const adminEmail = "1nh25cs265@usn.campusos.internal";
-const adminPassword = "Sanjay@123";
+// Admin's password isn't a fixed constant either -- see setup-admin-account.mjs's
+// header for why (an earlier version hardcoded "Sanjay@123" here; compromised).
+const adminCredsFile = target === "production" ? ".admin-credentials.local.json" : ".admin-credentials.staging.local.json";
+const adminCredsPath = path.join(root, "scripts", adminCredsFile);
+if (!fs.existsSync(adminCredsPath)) throw new Error(`No admin credentials known in ${adminCredsFile} -- run "node scripts/setup-admin-account.mjs --rotate" first (the account already exists, so a plain run won't write this file).`);
+const adminPassword = JSON.parse(fs.readFileSync(adminCredsPath, "utf8")).password;
 
 let passCount = 0;
 let failCount = 0;
