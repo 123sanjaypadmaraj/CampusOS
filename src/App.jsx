@@ -5678,24 +5678,26 @@ function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfil
         <button className="logout-btn" onClick={onLogout}>
         <HiArrowLeftOnRectangle /> Logout
         </button>
-        {go && (
-          <button className="link-btn" style={{ marginTop: 10 }} onClick={() => go("legal")}>
-            Privacy Policy &amp; Terms of Service
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 16px", marginTop: 10 }}>
+          {go && (
+            <button className="link-btn" onClick={() => go("legal")}>
+              Privacy Policy &amp; Terms of Service
+            </button>
+          )}
+          <button className="link-btn" onClick={handleExportData} disabled={exportingData}>
+            {exportingData ? "Preparing…" : "Download my data"}
           </button>
-        )}
-        <button className="link-btn" style={{ marginTop: 10 }} onClick={handleExportData} disabled={exportingData}>
-          {exportingData ? "Preparing…" : "Download my data"}
-        </button>
-        {deletionRequest ? (
-          <div style={{ marginTop: 10, textAlign: "center" }}>
-            <small>Account deletion requested — pending admin review.</small>
-            <button className="link-btn" onClick={handleCancelDeletion}>Cancel deletion request</button>
-          </div>
-        ) : (
-          <button className="link-btn" style={{ marginTop: 10 }} onClick={handleRequestDeletion}>
-            Delete my account
-          </button>
-        )}
+          {deletionRequest ? (
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: "4px 10px" }}>
+              <small>Account deletion requested — pending admin review.</small>
+              <button className="link-btn" onClick={handleCancelDeletion}>Cancel deletion request</button>
+            </div>
+          ) : (
+            <button className="link-btn" onClick={handleRequestDeletion}>
+              Delete my account
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="profile-grid linkedin-grid">

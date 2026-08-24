@@ -3016,6 +3016,17 @@
   font-weight: 800;
 }
 
+/* .resource-row button above (element+class) outranks the plain .primary
+   class rule, so a primary action button nested in a resource row (order
+   accept/advance, print-job transitions, etc.) was silently losing its dark
+   background while keeping .primary's white text -- invisible white-on-white.
+   Restore it explicitly wherever .primary sits inside a resource row. */
+.resource-row button.primary {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}
+
 .resource-row strong {
   font: 800 16px Manrope;
 }
@@ -3154,6 +3165,17 @@
   background: var(--surface);
   color: var(--text);
   border-color: var(--border);
+}
+
+/* Same specificity fix as the light-mode block above, kept for consistency:
+   without it, primary actions here lose their accent styling in dark mode
+   too (not literally invisible since --surface/--text still contrast, but
+   the intended emphasis disappears). */
+.app-shell.dark-mode .workflow-card button.primary,
+.app-shell.dark-mode .resource-row button.primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
 }
 
 .app-shell.dark-mode .resource-row > div:not(.resource-icon),
