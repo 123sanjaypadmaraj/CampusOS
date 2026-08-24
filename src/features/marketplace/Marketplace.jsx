@@ -100,11 +100,11 @@ export default function Marketplace({ notify, authUser, openLogin, campusId, lis
             onChange={(e) => setSearch(e.target.value)}
           />
         </label>
-        <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+        <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} aria-label="Filter by category">
           <option value="All">All categories</option>
           {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
-        <select value={conditionFilter} onChange={(e) => setConditionFilter(e.target.value)}>
+        <select value={conditionFilter} onChange={(e) => setConditionFilter(e.target.value)} aria-label="Filter by condition">
           <option value="All">Any condition</option>
           {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
@@ -112,6 +112,7 @@ export default function Marketplace({ notify, authUser, openLogin, campusId, lis
           type="number"
           min="0"
           placeholder="Max price ₹"
+          aria-label="Maximum price"
           style={{ width: 120 }}
           value={maxPrice}
           onChange={(e) => setMaxPrice(e.target.value)}
@@ -579,7 +580,7 @@ function RateSellerModal({ purchase, notify, onClose, onRated }) {
       <p style={{ color: "var(--muted)", fontSize: 12 }}>For &ldquo;{purchase.title}&rdquo;</p>
       <div style={{ display: "flex", gap: 6, margin: "14px 0" }}>
         {[1, 2, 3, 4, 5].map((n) => (
-          <button key={n} onClick={() => setRating(n)} style={{ fontSize: 26, color: n <= rating ? "#f0a83c" : "var(--border)" }}>
+          <button key={n} onClick={() => setRating(n)} style={{ fontSize: 26, color: n <= rating ? "#f0a83c" : "var(--border)" }} aria-label={`Rate ${n} star${n > 1 ? "s" : ""}`} aria-pressed={n <= rating}>
             <HiStar />
           </button>
         ))}

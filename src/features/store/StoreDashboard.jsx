@@ -195,8 +195,8 @@ function StoreItemManager({ store, notify }) {
                   </button>
                 )}
                 <button onClick={() => setVariantsFor(item)}>Variants</button>
-                <button onClick={() => setItemModal(item)}><HiPencil /></button>
-                <button onClick={() => remove(item)}><HiTrash /></button>
+                <button onClick={() => setItemModal(item)} aria-label={`Edit ${item.name}`}><HiPencil /></button>
+                <button onClick={() => remove(item)} aria-label={`Delete ${item.name}`}><HiTrash /></button>
               </div>
             </article>
           );
@@ -363,8 +363,8 @@ function VariantManager({ item, onClose, notify }) {
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button onClick={() => toggleAvailable(v)}>{v.available ? "Mark out of stock" : "Mark in stock"}</button>
-                  <button onClick={() => setForm(v)}><HiPencil /></button>
-                  <button onClick={() => remove(v)}><HiTrash /></button>
+                  <button onClick={() => setForm(v)} aria-label={`Edit ${v.name}`}><HiPencil /></button>
+                  <button onClick={() => remove(v)} aria-label={`Delete ${v.name}`}><HiTrash /></button>
                 </div>
               </article>
             );

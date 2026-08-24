@@ -140,6 +140,7 @@ export default function TeamsBoard({ campusId, authUser, notify, openLogin }) {
               onKeyDown={(e) => { if (e.key === "Enter") reloadBrowse(); }}
               onBlur={reloadBrowse}
               placeholder="Search teams or skills needed…"
+              aria-label="Search teams or skills needed"
             />
           </div>
           <div className="chips" style={{ margin: "10px 0 18px", justifyContent: "flex-start" }}>

@@ -173,6 +173,7 @@ export default function SosAlertsPanel({ notify }) {
                 <textarea
                   rows={2}
                   placeholder="Resolution notes (optional)"
+                  aria-label="Resolution notes"
                   value={resolutionNotes}
                   onChange={(e) => setResolutionNotes(e.target.value)}
                   style={{ width: "100%" }}

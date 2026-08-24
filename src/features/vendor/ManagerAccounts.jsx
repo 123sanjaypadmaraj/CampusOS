@@ -76,6 +76,7 @@ export default function VendorManagerAccounts({ vendorType, scopeId, notify }) {
                 try { await api.remove(s.id); notify("Manager removed"); reload(); }
                 catch (err) { notify(err.message || "Could not remove manager"); }
               }}
+              aria-label={`Remove manager: ${s.profiles?.name || s.profiles?.email || "manager"}`}
             >
               <HiTrash />
             </button>

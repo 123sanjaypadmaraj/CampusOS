@@ -2749,6 +2749,7 @@ function Home({
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search events, clubs, services, people..."
+                aria-label="Search events, clubs, services, people"
               />
               <kbd>⌘ K</kbd>
             </div>
@@ -3025,6 +3026,7 @@ function Campus({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search campus posts..."
+            aria-label="Search campus posts"
           />
         </div>
 
@@ -3511,6 +3513,7 @@ function Post({ post, notify, authUser, setLoginOpen, saved = false, onToggleSav
               value={commentText}
               onChange={(e) => setCommentText(e.target.value)}
               placeholder="Add a comment..."
+              aria-label="Add a comment"
               style={{ flex: 1, padding: "6px 12px", borderRadius: "6px" }}
             />
             <button className="primary" onClick={handleAddComment}>
@@ -3567,6 +3570,7 @@ function People({ notify, people, campusId, authUser, openLogin, onOpenConversat
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Search people or skills..."
+              aria-label="Search people or skills"
             />
           </div>
 
@@ -4176,10 +4180,13 @@ function Events({
               <p>{mentor.role}</p>
               <small>{(mentor.skills || []).join(" · ")}</small>
             </div>
-            <button onClick={() => {
-              if (!authUser) { openLogin(); notify("Sign in to request mentorship"); return; }
-              setRequestingMentor(mentor);
-            }}>
+            <button
+              onClick={() => {
+                if (!authUser) { openLogin(); notify("Sign in to request mentorship"); return; }
+                setRequestingMentor(mentor);
+              }}
+              aria-label={`Request mentorship from ${mentor.name}`}
+            >
               <HiChatBubbleLeftRight />
             </button>
           </article>
@@ -4769,12 +4776,14 @@ function Food({ canteens: vendorList, items, cart, addFood, openModal, loading, 
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search dosa, biryani, Maggi, coffee..."
+          aria-label="Search food items"
         />
 
         {q && (
           <button
             className="search-clear"
             onClick={() => setQ("")}
+            aria-label="Clear search"
           >
             <HiXMark />
           </button>
@@ -5118,7 +5127,7 @@ function FoodCard({ item, add }) {
         )}
 
         {hasVariants && (
-          <select value={selectedVariant.id} onChange={(e) => setVariantId(e.target.value)} style={{ marginBottom: 8, width: "100%" }}>
+          <select value={selectedVariant.id} onChange={(e) => setVariantId(e.target.value)} aria-label={`Choose variant for ${item.name}`} style={{ marginBottom: 8, width: "100%" }}>
             {variants.map((v) => (
               <option key={v.id} value={v.id} disabled={!v.available}>
                 {v.name} · ₹{v.price}{!v.available ? " · unavailable" : ""}
@@ -5236,6 +5245,7 @@ function Store({ items, loading, cart, addStore, openModal, orders = [] }) {
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search stationery, books, records..."
+          aria-label="Search store items"
         />
       </div>
 
@@ -5315,7 +5325,7 @@ function StoreProductCard({ item, addStore }) {
       <p>{item.storeName}</p>
 
       {hasVariants && (
-        <select value={selectedVariant.id} onChange={(e) => setVariantId(e.target.value)} style={{ marginBottom: 8, width: "100%" }}>
+        <select value={selectedVariant.id} onChange={(e) => setVariantId(e.target.value)} aria-label={`Choose variant for ${item.name}`} style={{ marginBottom: 8, width: "100%" }}>
           {variants.map((v) => (
             <option key={v.id} value={v.id} disabled={!v.available}>
               {v.name} · ₹{v.price}{!v.available ? " · out of stock" : ""}
@@ -6105,7 +6115,7 @@ function YourActivity({
       />
 
       <div className="activity-layout">
-        <nav className="activity-nav">
+        <nav className="activity-nav" aria-label="Activity categories">
           {ACTIVITY_CATEGORIES.map((c) => (
             <button
               key={c.key}
@@ -6401,6 +6411,8 @@ function EventTicketModal({ event, userId, notify, onClose }) {
                     className="ghost"
                     style={{ padding: 4, color: n <= rating ? "#f5a623" : "var(--muted)" }}
                     onClick={() => setRating(n)}
+                    aria-label={`Rate ${n} star${n > 1 ? "s" : ""}`}
+                    aria-pressed={n <= rating}
                   >
                     <HiStar />
                   </button>
@@ -6409,6 +6421,7 @@ function EventTicketModal({ event, userId, notify, onClose }) {
               <textarea
                 rows={2}
                 placeholder="Optional comment for the organizers…"
+                aria-label="Comment for the organizers"
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
               />
@@ -6808,8 +6821,8 @@ function EmergencyContactsModal({ onClose, notify }) {
                 </small>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => setEditing(contact)}><HiPencilSquare /></button>
-                <button onClick={() => remove(contact)}><HiTrash /></button>
+                <button onClick={() => setEditing(contact)} aria-label={`Edit ${contact.contact_name || "contact"}`}><HiPencilSquare /></button>
+                <button onClick={() => remove(contact)} aria-label={`Remove ${contact.contact_name || "contact"}`}><HiTrash /></button>
               </div>
             </div>
           ))}
@@ -7022,6 +7035,7 @@ function Socialize({ notify, people = [], profile, campusId, authUser, openLogin
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search classmates, skills or achievements..."
+          aria-label="Search classmates, skills or achievements"
         />
       </div>
 
@@ -7299,7 +7313,7 @@ function CohortMembersModal({ group, campusId, onClose, notify }) {
             <b>{m.name}</b>
             <small>{m.department || m.course}{m.open_to_projects ? " · Open to projects" : ""}</small>
           </div>
-          <button onClick={() => notify(`Connection request sent to ${m.name}`)}>
+          <button onClick={() => notify(`Connection request sent to ${m.name}`)} aria-label={`Connect with ${m.name}`}>
             <HiUserPlus />
           </button>
         </div>
@@ -7854,6 +7868,7 @@ function LostService({ notify, authUser, openLogin, campusId, items: dbItems = [
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by keyword, category or location"
+            aria-label="Search lost and found by keyword, category or location"
             style={{ flex: 1, minWidth: 160, padding: "8px 12px", borderRadius: 999, border: "1px solid var(--line)" }}
           />
         </div>
@@ -8442,6 +8457,7 @@ function CampusMap({ notify, openModal }) {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search Lab 302, canteen, auditorium..."
+            aria-label="Search campus map"
           />
         </div>
 
@@ -8848,9 +8864,10 @@ function CampusAI({ notify, go, authUser, profile, campusId, addFood, openLogin 
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && ask()}
             placeholder={authUser ? "Ask Campus AI..." : "Sign in to ask Campus AI..."}
+            aria-label="Ask Campus AI"
             disabled={asking}
           />
-          <button disabled={asking || !message.trim()} onClick={() => ask()}>
+          <button disabled={asking || !message.trim()} onClick={() => ask()} aria-label="Ask Campus AI">
             <HiPaperAirplane />
           </button>
         </div>
@@ -9040,7 +9057,7 @@ function MyCalendar({ notify, events }) {
         <div className="calendar-box">
           <div className="calendar-header">
             <h3>{monthName} 2026</h3>
-            <button onClick={() => notify("Calendar synced")}>
+            <button onClick={() => notify("Calendar synced")} aria-label="Sync calendar">
               <HiArrowPath />
             </button>
           </div>
@@ -9662,7 +9679,7 @@ function Messages({ notify, authUser, openConversationId, onConversationOpened, 
             {conversations.length > 3 && (
               <div className="messages-search">
                 <HiMagnifyingGlass />
-                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search conversations…" />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search conversations…" aria-label="Search conversations" />
               </div>
             )}
             {filteredConversations.length === 0 && <EmptyState title="No matches" text="Try a different name or listing." />}
@@ -9754,6 +9771,7 @@ function Messages({ notify, authUser, openConversationId, onConversationOpened, 
                       onChange={(e) => setDraft(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
                       placeholder={attaching ? "Sending photo…" : "Type a message…"}
+                      aria-label="Message"
                       disabled={sending || attaching}
                     />
                     <button className="primary" disabled={sending || attaching || !draft.trim()} onClick={send} aria-label="Send message">
@@ -9893,6 +9911,7 @@ function GlobalSearchOverlay({ onClose, go, setSearch, authUser, openLogin, noti
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && authUser && query.trim().length >= 2) logSearch(query).catch(() => {}); }}
             placeholder="Search food, vendors, events, clubs, people, marketplace…"
+            aria-label="Search CampusOS"
           />
         </div>
 
@@ -10059,6 +10078,7 @@ function SuspendedAccountScreen({ profile, notify }) {
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder="Your explanation..."
+            aria-label="Appeal explanation"
             rows={5}
             style={{ width: "100%", marginBottom: 12 }}
           />
@@ -10085,6 +10105,7 @@ function SuspendedAccountScreen({ profile, notify }) {
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder="Your explanation..."
+            aria-label="Appeal explanation"
             rows={5}
             style={{ width: "100%", marginBottom: 12 }}
           />

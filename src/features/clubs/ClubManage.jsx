@@ -262,6 +262,7 @@ function MembersTab({ members, canManage, authUser, notify, onChange }) {
               value={m.role}
               disabled={busyId === m.id || (m.role === "owner" && ownerCount <= 1)}
               onChange={(e) => changeRole(m, e.target.value)}
+              aria-label={`Role for ${m.name || "member"}`}
             >
               {ALL_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
             </select>
@@ -478,6 +479,7 @@ function EventRosterModal({ event, onClose, notify }) {
       <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
         <input
           placeholder="Paste or type a ticket code"
+          aria-label="Ticket code"
           value={tokenInput}
           onChange={(e) => setTokenInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && tokenInput.trim()) doCheckin(tokenInput.trim()); }}
@@ -717,6 +719,7 @@ function AnnouncementsTab({ clubId, announcements, notify, onChange }) {
                   try { await clubApi.deleteClubAnnouncement(a.id); notify("Announcement deleted"); onChange(); }
                   catch (err) { notify(err.message || "Could not delete announcement"); }
                 }}
+                aria-label={`Delete announcement: ${a.title}`}
               >
                 <HiTrash />
               </button>
@@ -842,6 +845,7 @@ function DocumentsTab({ clubId, documents, authUser, notify, onChange }) {
                   try { await clubApi.deleteClubDocument(d); notify("Document deleted"); onChange(); }
                   catch (err) { notify(err.message || "Could not delete document"); }
                 }}
+                aria-label={`Delete document: ${d.title}`}
               >
                 <HiTrash />
               </button>
@@ -883,6 +887,7 @@ function MeetingsTab({ clubId, meetings, members, authUser, notify, onChange }) 
                   try { await clubApi.deleteClubMeeting(m.id); notify("Meeting deleted"); onChange(); }
                   catch (err) { notify(err.message || "Could not delete meeting"); }
                 }}
+                aria-label={`Delete meeting: ${m.title}`}
               >
                 <HiTrash />
               </button>
@@ -973,7 +978,7 @@ function AttendanceModal({ meeting, members, onClose, onSaved, notify }) {
             {members.map((m) => (
               <div className="club-roster-row" key={m.id}>
                 <div><b>{m.name || "Unnamed"}</b></div>
-                <select value={statuses[m.user_id] || "present"} onChange={(e) => setStatus(m.user_id, e.target.value)}>
+                <select value={statuses[m.user_id] || "present"} onChange={(e) => setStatus(m.user_id, e.target.value)} aria-label={`Attendance for ${m.name || "member"}`}>
                   {ATTENDANCE_STATUSES.map((s) => <option key={s} value={s}>{s[0].toUpperCase() + s.slice(1)}</option>)}
                 </select>
               </div>

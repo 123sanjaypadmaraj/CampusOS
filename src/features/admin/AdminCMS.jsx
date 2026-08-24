@@ -474,6 +474,7 @@ function BannedWordsPanel({ notify }) {
           value={newWord}
           onChange={(e) => setNewWord(e.target.value)}
           placeholder="Add a word…"
+          aria-label="Add a profanity-filter word"
           style={{ flex: 1, padding: "6px 12px", borderRadius: "6px" }}
         />
         <button className="primary" disabled={!newWord.trim() || busyWord === newWord.trim()} onClick={add}>Add</button>
@@ -552,6 +553,7 @@ function ProhibitedTermsPanel({ notify }) {
           value={newTerm}
           onChange={(e) => setNewTerm(e.target.value)}
           placeholder="Add a term…"
+          aria-label="Add a prohibited marketplace term"
           style={{ flex: 1, padding: "6px 12px", borderRadius: "6px" }}
         />
         <button className="primary" disabled={!newTerm.trim() || busyTerm === newTerm.trim()} onClick={add}>Add</button>
@@ -751,6 +753,7 @@ function UsersTab({ notify, campusId, authUser, can = () => false }) {
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && reload()}
           placeholder="Search name, email or USN…"
+          aria-label="Search name, email or USN"
         />
         <button onClick={reload}>Search</button>
       </div>
@@ -787,6 +790,7 @@ function UsersTab({ notify, campusId, authUser, can = () => false }) {
                   value={user.role}
                   disabled={busyId === user.id || user.id === authUser?.id}
                   onChange={(e) => changeRole(user, e.target.value)}
+                  aria-label={`Role for ${user.name}`}
                 >
                   {ROLE_OPTIONS.map((role) => <option key={role} value={role}>{role}</option>)}
                 </select>
@@ -1270,8 +1274,8 @@ export function EmergencyDirectoryTab({ notify }) {
               <button disabled={busyId === entry.id} onClick={() => verify(entry, !entry.verified)} className={entry.verified ? "chip active" : "chip"}>
                 <HiShieldCheck /> {entry.verified ? "Verified" : "Verify"}
               </button>
-              <button disabled={busyId === entry.id} onClick={() => setEditing(entry)}><HiPencilSquare /></button>
-              <button disabled={busyId === entry.id} onClick={() => toggleActive(entry)}>{entry.active ? <HiXCircle /> : <HiCheck />}</button>
+              <button disabled={busyId === entry.id} onClick={() => setEditing(entry)} aria-label={`Edit ${entry.name}`}><HiPencilSquare /></button>
+              <button disabled={busyId === entry.id} onClick={() => toggleActive(entry)} aria-label={entry.active ? `Deactivate ${entry.name}` : `Activate ${entry.name}`}>{entry.active ? <HiXCircle /> : <HiCheck />}</button>
             </div>
           </article>
         ))}
@@ -1416,8 +1420,8 @@ export function ResourcesTab({ notify, campusId }) {
               </small>
             </div>
             <div className="chips">
-              <button disabled={busyId === r.id} onClick={() => setEditing(r)}><HiPencilSquare /></button>
-              <button disabled={busyId === r.id} onClick={() => remove(r)}><HiTrash /></button>
+              <button disabled={busyId === r.id} onClick={() => setEditing(r)} aria-label={`Edit ${r.name}`}><HiPencilSquare /></button>
+              <button disabled={busyId === r.id} onClick={() => remove(r)} aria-label={`Delete ${r.name}`}><HiTrash /></button>
             </div>
           </article>
         ))}
@@ -1634,8 +1638,8 @@ function SupportFaqAdmin({ notify }) {
               <small>{f.category} · {f.campus_id ? "This campus" : "All campuses"}</small>
             </div>
             <div className="chips">
-              <button onClick={() => setEditing(f)}><HiPencilSquare /></button>
-              <button onClick={() => remove(f.id)}><HiTrash /></button>
+              <button onClick={() => setEditing(f)} aria-label={`Edit FAQ: ${f.question}`}><HiPencilSquare /></button>
+              <button onClick={() => remove(f.id)} aria-label={`Delete FAQ: ${f.question}`}><HiTrash /></button>
             </div>
           </article>
         ))}
@@ -2100,6 +2104,7 @@ function ClubMembersModal({ club, onClose, notify }) {
           </div>
           <select
             value={m.role}
+            aria-label={`Role for ${m.profiles?.name || "member"}`}
             onChange={async (e) => {
               const role = e.target.value;
               try {
@@ -2398,7 +2403,7 @@ function OpportunitiesAdminSection({ notify, campusId }) {
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={() => setApplicantsFor(item)}>Applicants</button>
-              <button onClick={() => setFormOpen(item)}><HiPencilSquare /></button>
+              <button onClick={() => setFormOpen(item)} aria-label={`Edit opportunity: ${item.role}`}><HiPencilSquare /></button>
               <button onClick={async () => {
                 try { await opportunitiesApi.updateOpportunity(item.id, { active: !item.active }); reload(); }
                 catch (err) { notify(err.message || "Could not update opportunity"); }
@@ -2409,7 +2414,7 @@ function OpportunitiesAdminSection({ notify, campusId }) {
                 if (!window.confirm(`Delete "${item.role}"?`)) return;
                 try { await opportunitiesApi.deleteOpportunity(item.id); notify("Opportunity deleted"); reload(); }
                 catch (err) { notify(err.message || "Could not delete opportunity"); }
-              }}>
+              }} aria-label={`Delete opportunity: ${item.role}`}>
                 <HiTrash />
               </button>
             </div>
@@ -2530,7 +2535,7 @@ function ApplicantsModal({ opportunity, onClose, notify }) {
                 <small>{a.profiles?.course} · {a.profiles?.email}</small>
                 {a.message && <small>&ldquo;{a.message}&rdquo;</small>}
               </div>
-              <select value={a.status} onChange={async (e) => {
+              <select value={a.status} aria-label={`Application status for ${a.profiles?.name || "applicant"}`} onChange={async (e) => {
                 try { await opportunitiesApi.setApplicationStatus(a.id, e.target.value); reload(); }
                 catch (err) { notify(err.message || "Could not update status"); }
               }}>
@@ -2583,7 +2588,7 @@ function MentorsAdminSection({ notify, campusId }) {
               <small>{(item.skills || []).join(", ")} · {item.active ? "Listed" : "Hidden"}</small>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => setFormOpen(item)}><HiPencilSquare /></button>
+              <button onClick={() => setFormOpen(item)} aria-label={`Edit mentor: ${item.name}`}><HiPencilSquare /></button>
               <button onClick={async () => {
                 try { await opportunitiesApi.updateMentor(item.id, { active: !item.active }); reload(); }
                 catch (err) { notify(err.message || "Could not update mentor"); }
@@ -2594,7 +2599,7 @@ function MentorsAdminSection({ notify, campusId }) {
                 if (!window.confirm(`Remove "${item.name}" from the mentor directory?`)) return;
                 try { await opportunitiesApi.deleteMentor(item.id); notify("Mentor removed"); reload(); }
                 catch (err) { notify(err.message || "Could not remove mentor"); }
-              }}>
+              }} aria-label={`Remove mentor: ${item.name}`}>
                 <HiTrash />
               </button>
             </div>
@@ -2756,7 +2761,7 @@ function TeamsAdminTab({ notify, campusId }) {
               if (!window.confirm(`Remove the team "${item.title}"? This deletes its roster, applications and invitations.`)) return;
               try { await teamsApi.deleteProjectTeam(item.id); notify("Team removed"); reload(); }
               catch (err) { notify(err.message || "Could not remove this team"); }
-            }}>
+            }} aria-label={`Remove team: ${item.title}`}>
               <HiTrash />
             </button>
           </article>
@@ -3030,9 +3035,9 @@ function AiAssistantTab({ notify, campusId }) {
               <small>{entry.campus_id ? "This campus only" : "Global"}</small>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => editEntry(entry)}><HiPencilSquare /></button>
+              <button onClick={() => editEntry(entry)} aria-label={`Edit knowledge base entry: ${entry.question}`}><HiPencilSquare /></button>
               <button onClick={() => toggleActive(entry)}>{entry.active ? "Deactivate" : "Activate"}</button>
-              <button onClick={() => removeEntry(entry)}><HiTrash /></button>
+              <button onClick={() => removeEntry(entry)} aria-label={`Delete knowledge base entry: ${entry.question}`}><HiTrash /></button>
             </div>
           </article>
         ))}
@@ -3422,6 +3427,7 @@ function EmailLookupSection({ notify, vendors, campusId, isSuperAdmin, onCreateV
           onChange={(e) => setEmail(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && lookup()}
           placeholder="new.vendor@nhce.edu.in"
+          aria-label="Email to look up"
         />
         <button onClick={lookup}>Check</button>
       </div>
@@ -3727,6 +3733,7 @@ function FacilitiesTab({ notify, campusId }) {
                 disabled={busyId === t.id}
                 value={t.assigned_to || ""}
                 onChange={(e) => assign(t, e.target.value || null)}
+                aria-label={`Assign ticket: ${t.title}`}
               >
                 <option value="">Unassigned</option>
                 {staff.map((s) => <option key={s.id} value={s.id}>{s.name || s.email}</option>)}
@@ -4139,8 +4146,8 @@ function FeatureFlagsTab({ notify, campusId }) {
               <button disabled={busyKey === f.id} onClick={() => toggleEnabled(f)} className={f.enabled ? "chip active" : "chip"}>
                 {f.enabled ? "Enabled" : "Disabled"}
               </button>
-              <button disabled={busyKey === f.id} onClick={() => setEditing(f)}><HiPencilSquare /></button>
-              <button disabled={busyKey === f.id} onClick={() => remove(f)}><HiTrash /></button>
+              <button disabled={busyKey === f.id} onClick={() => setEditing(f)} aria-label={`Edit feature flag: ${f.key}`}><HiPencilSquare /></button>
+              <button disabled={busyKey === f.id} onClick={() => remove(f)} aria-label={`Delete feature flag: ${f.key}`}><HiTrash /></button>
             </div>
           </article>
         ))}

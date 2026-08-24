@@ -726,8 +726,8 @@ function CanteenHoursManager({ canteenId, notify }) {
               <div className="resource-icon"><HiClock /></div>
               <div><b>{label}</b><small>{row ? (row.closed ? "Closed" : `${row.opens_at}–${row.closes_at}`) : "Not set (falls back to status)"}</small></div>
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <input type="time" defaultValue={row?.opens_at || "09:00"} onBlur={(e) => saveDay(day, { opens_at: e.target.value })} disabled={row?.closed} />
-                <input type="time" defaultValue={row?.closes_at || "18:00"} onBlur={(e) => saveDay(day, { closes_at: e.target.value })} disabled={row?.closed} />
+                <input type="time" defaultValue={row?.opens_at || "09:00"} onBlur={(e) => saveDay(day, { opens_at: e.target.value })} disabled={row?.closed} aria-label={`${label} opening time`} />
+                <input type="time" defaultValue={row?.closes_at || "18:00"} onBlur={(e) => saveDay(day, { closes_at: e.target.value })} disabled={row?.closed} aria-label={`${label} closing time`} />
                 <ToggleSwitch label="Closed" checked={Boolean(row?.closed)} onChange={(v) => saveDay(day, { closed: v })} />
               </div>
             </article>
@@ -766,7 +766,7 @@ function CanteenHoursManager({ canteenId, notify }) {
               <b>{new Date(c.starts_at).toLocaleString()} → {new Date(c.ends_at).toLocaleString()}</b>
               <small>{c.reason || "No reason given"}</small>
             </div>
-            <button className="ghost" onClick={async () => { await vendorApi.deleteCanteenClosure(c.id); notify("Closure removed"); reload(); }}>
+            <button className="ghost" onClick={async () => { await vendorApi.deleteCanteenClosure(c.id); notify("Closure removed"); reload(); }} aria-label={`Remove closure: ${c.reason || new Date(c.starts_at).toLocaleDateString()}`}>
               <HiTrash />
             </button>
           </article>
@@ -1243,6 +1243,7 @@ function StaffRosterModal({ canteenId, staff, onClose, onChanged, notify }) {
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Staff member name"
+          aria-label="Staff member name"
           style={{ flex: 1 }}
         />
         <button
@@ -1276,7 +1277,7 @@ function StaffRosterModal({ canteenId, staff, onClose, onChanged, notify }) {
                 if (!window.confirm(`Remove ${s.name} from the roster?`)) return;
                 try { await vendorApi.removeCanteenStaff(s.id); await onChanged(); }
                 catch (err) { notify(err.message || "Could not remove"); }
-              }}>
+              }} aria-label={`Remove staff member: ${s.name}`}>
                 <HiTrash />
               </button>
             </div>
@@ -1396,6 +1397,7 @@ function OrderCard({ order, busy, staff, onAct, onChanged, onSaveOps, notify }) 
               value={noteDraft}
               onChange={(e) => setNoteDraft(e.target.value)}
               placeholder="Internal note for kitchen/staff -- never shown to the student"
+              aria-label="Internal note for kitchen/staff"
               rows={2}
             />
             <button
@@ -1979,7 +1981,7 @@ function VariantManager({ foodItemId, notify }) {
               await vendorApi.deleteVariant(v.id);
               notify("Variant removed");
               reload();
-            }}><HiTrash /></button>
+            }} aria-label={`Remove variant: ${v.name}`}><HiTrash /></button>
           </div>
         </div>
       ))}
@@ -2030,22 +2032,24 @@ function AddonManager({ foodItemId, notify }) {
               await vendorApi.deleteAddonGroup(g.id);
               notify("Group removed");
               reload();
-            }}><HiTrash /></button>
+            }} aria-label={`Remove addon group: ${g.name}`}><HiTrash /></button>
           </div>
           {(g.food_item_addon_options || []).map((o) => (
             <div key={o.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <small>{o.name}{o.price_delta > 0 ? ` (+₹${o.price_delta})` : ""}</small>
-              <button className="ghost" onClick={async () => { await vendorApi.deleteAddonOption(o.id); reload(); }}><HiXMark /></button>
+              <button className="ghost" onClick={async () => { await vendorApi.deleteAddonOption(o.id); reload(); }} aria-label={`Remove option: ${o.name}`}><HiXMark /></button>
             </div>
           ))}
           <div className="form-grid">
             <input
               placeholder="Option name"
+              aria-label={`New option name for ${g.name}`}
               value={optionForms[g.id]?.name || ""}
               onChange={(e) => setOptionForms((f) => ({ ...f, [g.id]: { ...f[g.id], name: e.target.value } }))}
             />
             <input
               type="number" min="0" step="0.01" placeholder="+₹"
+              aria-label={`New option price for ${g.name}`}
               value={optionForms[g.id]?.price_delta || ""}
               onChange={(e) => setOptionForms((f) => ({ ...f, [g.id]: { ...f[g.id], price_delta: e.target.value } }))}
             />
@@ -2065,9 +2069,9 @@ function AddonManager({ foodItemId, notify }) {
       ))}
 
       <div className="form-grid">
-        <input placeholder="Group name (e.g. Toppings)" value={groupForm.name} onChange={(e) => setGroupForm((f) => ({ ...f, name: e.target.value }))} />
-        <input type="number" min="0" placeholder="Min select" value={groupForm.min_select} onChange={(e) => setGroupForm((f) => ({ ...f, min_select: e.target.value }))} />
-        <input type="number" min="1" placeholder="Max select" value={groupForm.max_select} onChange={(e) => setGroupForm((f) => ({ ...f, max_select: e.target.value }))} />
+        <input placeholder="Group name (e.g. Toppings)" aria-label="New addon group name" value={groupForm.name} onChange={(e) => setGroupForm((f) => ({ ...f, name: e.target.value }))} />
+        <input type="number" min="0" placeholder="Min select" aria-label="Minimum options to select" value={groupForm.min_select} onChange={(e) => setGroupForm((f) => ({ ...f, min_select: e.target.value }))} />
+        <input type="number" min="1" placeholder="Max select" aria-label="Maximum options to select" value={groupForm.max_select} onChange={(e) => setGroupForm((f) => ({ ...f, max_select: e.target.value }))} />
       </div>
       <button
         className="ghost"
@@ -2288,6 +2292,7 @@ function PrintJobRowVendor({ job, notify, onChanged }) {
           <>
             <input
               placeholder="Pickup code"
+              aria-label="Pickup code"
               value={pickupInput}
               onChange={(e) => setPickupInput(e.target.value)}
               style={{ width: 100 }}
@@ -2431,6 +2436,7 @@ function PrintShopStatusToggle({ notify, campusId }) {
         ))}
         <input
           placeholder="Optional note (e.g. out of toner)"
+          aria-label="Printer status note"
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onBlur={() => status && set(status)}
@@ -2505,6 +2511,7 @@ function PrintRateRow({ rate, notify, onChanged }) {
           step="0.5"
           value={price}
           onChange={(e) => setPrice(e.target.value)}
+          aria-label={`Price per page for ${RATE_LABELS[rate.color_mode] || rate.color_mode}`}
           style={{ width: 90 }}
         />
         <button
