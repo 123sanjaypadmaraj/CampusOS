@@ -5,8 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link href="/src/index.css" rel="stylesheet" />
     <link href="/favicon.png" rel="icon" />
+    <link href="/manifest.webmanifest" rel="manifest" />
+    <link href="/icons/apple-touch-icon.png" rel="apple-touch-icon" />
     <meta name="theme-color" content="#6945e8" />
     <meta name="description" content="CampusOS — your digital campus: food ordering, events, clubs, services, marketplace and more." />
+    <!-- iOS ignores the web manifest for install/standalone behavior, so its
+         PWA affordances need these legacy meta tags spelled out separately. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="CampusOS" />
     <title>Campus OS | Your Digital Campus</title>
   </head>
   <body>

@@ -1,17 +1,20 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useId, useState } from "react";
 import { HiPlus, HiXMark, HiPencil, HiTrash, HiCheck, HiClock, HiShoppingBag, HiExclamationTriangle } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import VendorAnalytics from "../vendor/Analytics";
 import VendorManagerAccounts from "../vendor/ManagerAccounts";
+import { useModalA11y } from "../../hooks/useModalA11y";
 import * as storeApi from "./api";
 
 function Modal({ title, kicker, onClose, children }) {
+  const titleId = useId();
+  const dialogRef = useModalA11y(onClose);
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
-      <div className="feature-modal" onMouseDown={(e) => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}><HiXMark /></button>
+      <div className="feature-modal" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onMouseDown={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose} aria-label="Close"><HiXMark /></button>
         {kicker && <span className="section-kicker">{kicker}</span>}
-        <h2>{title}</h2>
+        <h2 id={titleId}>{title}</h2>
         {children}
       </div>
     </div>

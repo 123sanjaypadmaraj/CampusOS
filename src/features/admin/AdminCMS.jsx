@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useId, useState } from "react";
 import {
   HiXMark,
   HiPlus,
@@ -32,6 +32,7 @@ import * as teamsApi from "../teams/api";
 import { deleteMessage } from "../../services/messagingService";
 import { getMyPrintShopStatus, setPrintShopStatus } from "../vendor/api";
 import { setEventApproval, uploadEventCoverImage } from "../../services/mvpService";
+import { useModalA11y } from "../../hooks/useModalA11y";
 import AdminAnalytics from "./Analytics";
 import SosAlertsPanel from "../facilities/SosAlerts";
 
@@ -41,14 +42,16 @@ import SosAlertsPanel from "../facilities/SosAlerts";
 ========================================================= */
 
 function Modal({ title, kicker, onClose, children }) {
+  const titleId = useId();
+  const dialogRef = useModalA11y(onClose);
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
-      <div className="feature-modal" onMouseDown={(e) => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}>
+      <div className="feature-modal" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onMouseDown={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose} aria-label="Close">
           <HiXMark />
         </button>
         {kicker && <span className="section-kicker">{kicker}</span>}
-        <h2>{title}</h2>
+        <h2 id={titleId}>{title}</h2>
         {children}
       </div>
     </div>

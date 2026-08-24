@@ -1,5 +1,5 @@
 import React from "react";
-import { HiExclamationTriangle, HiWifi, HiInboxStack, HiArrowPath } from "react-icons/hi2";
+import { HiExclamationTriangle, HiWifi, HiInboxStack, HiArrowPath, HiArrowDownTray, HiXMark } from "react-icons/hi2";
 
 /**
  * Shared loading/empty/error/offline building blocks (doc §82) so a screen
@@ -47,6 +47,27 @@ export function OfflineBanner({ online }) {
   return (
     <div className="offline-banner" role="status">
       <HiWifi /> You&rsquo;re offline — showing cached content. Orders, bookings and posting need a connection.
+    </div>
+  );
+}
+
+/** Custom install-prompt banner (doc §80) -- shown in place of relying on
+ * the browser's own install UI, which most browsers suppress by default
+ * once `beforeinstallprompt` is intercepted (see useInstallPrompt). Only
+ * rendered once `canInstall` is true, so this stays invisible on browsers/
+ * platforms (iOS Safari, an already-installed app) that never offer it. */
+export function InstallPromptBanner({ canInstall, onInstall, onDismiss }) {
+  if (!canInstall) return null;
+  return (
+    <div className="offline-banner install-banner" role="status">
+      <HiArrowDownTray aria-hidden="true" />
+      <span>Install CampusOS for faster access and offline support.</span>
+      <button type="button" className="install-banner-cta" onClick={onInstall}>
+        Install
+      </button>
+      <button type="button" className="install-banner-dismiss" onClick={onDismiss} aria-label="Dismiss install prompt">
+        <HiXMark aria-hidden="true" />
+      </button>
     </div>
   );
 }

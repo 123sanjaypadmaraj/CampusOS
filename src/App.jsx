@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { mergeCartItem, addonSelectionKey, isFoodItemAvailableNow, isCanteenOpenNow, calculatePrintJobPrice } from "./utils/mvpHelpers";
 import {
   getDefaultCampus,
@@ -102,8 +102,10 @@ import {
 } from "./services/mvpService";
 import { openRazorpayCheckout } from "./features/payments/razorpay";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
+import { useInstallPrompt } from "./hooks/useInstallPrompt";
+import { useModalA11y } from "./hooks/useModalA11y";
 import { usePermissions } from "./hooks/usePermissions";
-import { LoadingState, EmptyState, ErrorState, OfflineBanner } from "./components/ui/States";
+import { LoadingState, EmptyState, ErrorState, OfflineBanner, InstallPromptBanner } from "./components/ui/States";
 import { TrendChart, StatTile } from "./components/ui/Charts";
 import AdminCMS from "./features/admin/AdminCMS";
 import VendorDashboard from "./features/vendor/VendorDashboard";
@@ -1101,6 +1103,7 @@ const autonomousDevices = [
 
 function App() {
   const online = useOnlineStatus();
+  const { canInstall, promptInstall, dismiss: dismissInstallPrompt } = useInstallPrompt();
   // Lazily read the initial section straight from the URL (not just
   // "home") so a deep link or a page refresh lands you back where you
   // were instead of always bouncing to Home -- see the ROUTING block
@@ -2424,6 +2427,9 @@ function App() {
 
   return (
     <div className={`app-shell ${darkMode ? "dark-mode" : "light-mode"}`}>
+      <a href="#main-content" className="skip-link">
+        Skip to main content
+      </a>
       <header className="topbar">
         <button
           className="brand"
@@ -2503,6 +2509,7 @@ function App() {
       </header>
 
       <OfflineBanner online={online} />
+      <InstallPromptBanner canInstall={canInstall} onInstall={promptInstall} onDismiss={dismissInstallPrompt} />
 
       {backendError && (
         <div className="offline-banner" role="alert" style={{ background: "#e2555522", color: "#c23a3a" }}>
@@ -2510,9 +2517,9 @@ function App() {
         </div>
       )}
 
-      <main>{profile?.status === "suspended" ? <SuspendedAccountScreen profile={profile} notify={notify} /> : renderPage()}</main>
+      <main id="main-content" tabIndex={-1}>{profile?.status === "suspended" ? <SuspendedAccountScreen profile={profile} notify={notify} /> : renderPage()}</main>
 
-      <nav className="bottom-nav">
+      <nav className="bottom-nav" aria-label="Primary">
         {/* A vendor account is a purpose-built ordering console, not the
             full student nav plus an extra tab -- swap the whole bar for
             just Dashboard + Profile rather than filtering navItems down to
@@ -2522,6 +2529,7 @@ function App() {
             key={key}
             className={active === key ? "active" : ""}
             onClick={() => go(key)}
+            aria-current={active === key ? "page" : undefined}
             data-testid={`nav-${key}-button`}
           >
             <span style={key === "messages" ? { position: "relative" } : undefined}>
@@ -2539,6 +2547,7 @@ function App() {
           <button
             className={active === "admin" ? "active" : ""}
             onClick={() => go("admin")}
+            aria-current={active === "admin" ? "page" : undefined}
             data-testid="nav-admin-button"
           >
             <span><HiCog6Tooth /></span>
@@ -2549,6 +2558,7 @@ function App() {
           <button
             className={active === "facilities" ? "active" : ""}
             onClick={() => go("facilities")}
+            aria-current={active === "facilities" ? "page" : undefined}
             data-testid="nav-facilities-button"
           >
             <span><HiWrenchScrewdriver /></span>
@@ -3281,7 +3291,7 @@ function RecommendedForYou({ authUser, go, notify }) {
 function RecommendCard({ title, meta, reason, onClick, onDismiss }) {
   return (
     <div className="recommend-card">
-      <button className="recommend-dismiss" title="Not interested" onClick={(e) => { e.stopPropagation(); onDismiss(); }}>
+      <button className="recommend-dismiss" title="Not interested" aria-label="Not interested" onClick={(e) => { e.stopPropagation(); onDismiss(); }}>
         <HiXMark />
       </button>
       <div onClick={onClick}>
@@ -9380,6 +9390,8 @@ function MessageAttachmentImage({ path }) {
 function BlockedUsersModal({ onClose, notify }) {
   const [blocked, setBlocked] = useState([]);
   const [loading, setLoading] = useState(true);
+  const titleId = useId();
+  const dialogRef = useModalA11y(onClose);
 
   const reload = () => {
     setLoading(true);
@@ -9389,10 +9401,10 @@ function BlockedUsersModal({ onClose, notify }) {
 
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
-      <div className="feature-modal" onMouseDown={(e) => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}><HiXMark /></button>
+      <div className="feature-modal" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onMouseDown={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose} aria-label="Close"><HiXMark /></button>
         <span className="section-kicker">MESSAGES</span>
-        <h2>Blocked users</h2>
+        <h2 id={titleId}>Blocked users</h2>
         {loading && <LoadingState label="Loading…" />}
         {!loading && blocked.length === 0 && <EmptyState icon={<HiNoSymbol />} title="No one blocked" text="Users you block won't be able to message you." />}
         {!loading && blocked.map((b) => (
@@ -9707,7 +9719,7 @@ function Messages({ notify, authUser, openConversationId, onConversationOpened, 
                       placeholder={attaching ? "Sending photo…" : "Type a message…"}
                       disabled={sending || attaching}
                     />
-                    <button className="primary" disabled={sending || attaching || !draft.trim()} onClick={send}>
+                    <button className="primary" disabled={sending || attaching || !draft.trim()} onClick={send} aria-label="Send message">
                       <HiPaperAirplane />
                     </button>
                   </div>
@@ -9753,6 +9765,7 @@ function GlobalSearchOverlay({ onClose, go, setSearch, authUser, openLogin, noti
   const [recent, setRecent] = useState([]);
   const [suggestions, setSuggestions] = useState([]);
   const inputRef = useRef(null);
+  const dialogRef = useModalA11y(onClose);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
@@ -9824,8 +9837,16 @@ function GlobalSearchOverlay({ onClose, go, setSearch, authUser, openLogin, noti
 
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
-      <div className="login-modal global-search-modal" onMouseDown={(e) => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}><HiXMark /></button>
+      <div
+        className="login-modal global-search-modal"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Search CampusOS"
+        tabIndex={-1}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <button className="modal-close" onClick={onClose} aria-label="Close"><HiXMark /></button>
         <span className="section-kicker">SEARCH CAMPUSOS</span>
         <div className="searchbar" style={{ marginTop: 10, marginBottom: 4 }}>
           <HiMagnifyingGlass />
@@ -9920,18 +9941,25 @@ function GlobalSearchOverlay({ onClose, go, setSearch, authUser, openLogin, noti
 ========================================================= */
 
 function ModalShell({ title, kicker, onClose, children }) {
+  const titleId = useId();
+  const dialogRef = useModalA11y(onClose);
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div
         className="feature-modal"
         onMouseDown={(event) => event.stopPropagation()}
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
       >
-        <button className="modal-close" onClick={onClose}>
+        <button className="modal-close" onClick={onClose} aria-label="Close">
           <HiXMark />
         </button>
 
         {kicker && <span className="section-kicker">{kicker}</span>}
-        <h2>{title}</h2>
+        <h2 id={titleId}>{title}</h2>
 
         {children}
       </div>

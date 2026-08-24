@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useId, useMemo, useState } from "react";
 import {
   HiPlus, HiXMark, HiShoppingCart, HiStar, HiCheckCircle, HiChatBubbleLeftRight,
   HiMagnifyingGlass, HiPencilSquare, HiFlag, HiNoSymbol, HiClock, HiPhoto,
@@ -7,14 +7,17 @@ import { EmptyState } from "../../components/ui/States";
 import { createMarketplaceListing, markMarketplaceListingSold, reportContent } from "../../services/mvpService";
 import { startConversation, blockUser } from "../../services/messagingService";
 import * as marketApi from "./api";
+import { useModalA11y } from "../../hooks/useModalA11y";
 
 function Modal({ title, kicker, onClose, children }) {
+  const titleId = useId();
+  const dialogRef = useModalA11y(onClose);
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
-      <div className="feature-modal" onMouseDown={(e) => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}><HiXMark /></button>
+      <div className="feature-modal" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onMouseDown={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose} aria-label="Close"><HiXMark /></button>
         {kicker && <span className="section-kicker">{kicker}</span>}
-        <h2>{title}</h2>
+        <h2 id={titleId}>{title}</h2>
         {children}
       </div>
     </div>
@@ -297,6 +300,7 @@ function ListingFormModal({ authUser, notify, initial, onClose, onSaved, submitL
                 className="modal-close"
                 style={{ position: "absolute", top: -6, right: -6, width: 20, height: 20, fontSize: 10 }}
                 onClick={() => setForm((f) => ({ ...f, imageUrls: f.imageUrls.filter((u) => u !== url) }))}
+                aria-label={`Remove image ${i + 1}`}
               >
                 <HiXMark />
               </button>

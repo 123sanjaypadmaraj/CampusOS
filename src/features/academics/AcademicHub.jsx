@@ -6,22 +6,25 @@
 // supabase/migrations/20260817000100_academic_module.sql for the
 // authorization rules this UI is just a thin client for -- every write is
 // re-validated server-side regardless of what this form lets you pick.
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import {
   HiXMark, HiPlus, HiTrash, HiMegaphone, HiClock, HiCalendarDays,
   HiAcademicCap, HiBellAlert,
 } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import { createReminder } from "../../services/remindersService";
+import { useModalA11y } from "../../hooks/useModalA11y";
 import * as academicsApi from "./api";
 
 function Modal({ title, kicker, onClose, children }) {
+  const titleId = useId();
+  const dialogRef = useModalA11y(onClose);
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
-      <div className="feature-modal" onMouseDown={(e) => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}><HiXMark /></button>
+      <div className="feature-modal" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onMouseDown={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose} aria-label="Close"><HiXMark /></button>
         {kicker && <span className="section-kicker">{kicker}</span>}
-        <h2>{title}</h2>
+        <h2 id={titleId}>{title}</h2>
         {children}
       </div>
     </div>

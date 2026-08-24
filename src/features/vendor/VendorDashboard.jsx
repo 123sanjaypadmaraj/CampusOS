@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useId, useMemo, useState } from "react";
 import {
   HiXMark,
   HiPlus,
@@ -38,6 +38,7 @@ import VendorAnalytics from "./Analytics";
 import * as storeApi from "../store/api";
 import StoreDashboard from "../store/StoreDashboard";
 import VendorManagerAccounts from "./ManagerAccounts";
+import { useModalA11y } from "../../hooks/useModalA11y";
 
 /* =========================================================
    SHARED SHELL (mirrors App.jsx's ModalShell markup/classes, same
@@ -46,14 +47,24 @@ import VendorManagerAccounts from "./ManagerAccounts";
 ========================================================= */
 
 function Modal({ title, kicker, onClose, children, className }) {
+  const titleId = useId();
+  const dialogRef = useModalA11y(onClose);
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
-      <div className={`feature-modal${className ? ` ${className}` : ""}`} onMouseDown={(e) => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}>
+      <div
+        className={`feature-modal${className ? ` ${className}` : ""}`}
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <button className="modal-close" onClick={onClose} aria-label="Close">
           <HiXMark />
         </button>
         {kicker && <span className="section-kicker">{kicker}</span>}
-        <h2>{title}</h2>
+        <h2 id={titleId}>{title}</h2>
         {children}
       </div>
     </div>
@@ -1599,7 +1610,11 @@ function ItemCard({ item, selected, onToggleSelect, onEdit, onDelete, onToggleAv
       <div className="vendor-item-actions">
         <button onClick={onEdit}><HiPencilSquare /> Edit</button>
         {item.active && (
-          <button onClick={onToggleAvailable} title={item.available ? "Mark unavailable" : "Mark available"}>
+          <button
+            onClick={onToggleAvailable}
+            title={item.available ? "Mark unavailable" : "Mark available"}
+            aria-label={item.available ? "Mark unavailable" : "Mark available"}
+          >
             {item.available ? <HiEyeSlash /> : <HiEye />}
           </button>
         )}

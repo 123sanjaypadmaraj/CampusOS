@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useId, useState } from "react";
 import {
   HiXMark,
   HiPlus,
@@ -16,6 +16,7 @@ import {
   HiMagnifyingGlass,
 } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
+import { useModalA11y } from "../../hooks/useModalA11y";
 import * as teamsApi from "./api";
 
 // Project / Team Matching (doc §22): browse/find teammates, start a team
@@ -24,12 +25,14 @@ import * as teamsApi from "./api";
 // management. Mounted as a "Teams" tab from the People page in App.jsx.
 
 function Modal({ title, kicker, onClose, children }) {
+  const titleId = useId();
+  const dialogRef = useModalA11y(onClose);
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
-      <div className="feature-modal" onMouseDown={(e) => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}><HiXMark /></button>
+      <div className="feature-modal" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onMouseDown={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose} aria-label="Close"><HiXMark /></button>
         {kicker && <span className="section-kicker">{kicker}</span>}
-        <h2>{title}</h2>
+        <h2 id={titleId}>{title}</h2>
         {children}
       </div>
     </div>
