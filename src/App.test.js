@@ -212,6 +212,17 @@ describe("App button interactions", () => {
       });
       expect(screen.queryByText(/Vendor access only/i)).not.toBeInTheDocument();
     });
+
+    test("navigating updates document.title, not just the URL -- so a screen reader announces the change", async () => {
+      render(<App />);
+      await waitFor(() => expect(document.title).toBe("Home | Campus OS"));
+
+      fireEvent.click(await screen.findByTestId("nav-events-button"));
+      await waitFor(() => expect(document.title).toBe("Events | Campus OS"));
+
+      window.history.back();
+      await waitFor(() => expect(document.title).toBe("Home | Campus OS"));
+    });
   });
 
   test("starts Google OAuth sign-in from the login modal", async () => {

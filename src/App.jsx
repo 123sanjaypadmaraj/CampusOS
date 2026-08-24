@@ -972,6 +972,33 @@ const services = [
   },
 ];
 
+// document.title never changed across routes before this -- every page in
+// the app was announced to a screen reader (and shown in the tab/history)
+// as the same static "Campus OS | Your Digital Campus" from index.html, so
+// an AT user navigating via go()/back-forward got no confirmation the page
+// actually changed. Reuses the human-readable labels already defined for
+// the bottom nav and the services grid instead of a second hand-written
+// copy that could drift from them; every other ROUTABLE_KEYS entry gets an
+// explicit label below.
+const PAGE_TITLES = {
+  ...Object.fromEntries(navItems.map(([key, , label]) => [key, label])),
+  ...Object.fromEntries(services.map((s) => [s.id, s.title])),
+  legal: "Legal",
+  people: "People",
+  clubs: "Clubs",
+  food: "Food Ordering",
+  ai: "AI Assistant",
+  admin: "Admin",
+  vendor: "Vendor Dashboard",
+  facilities: "Facilities",
+  autonomous: "Autonomous Campus",
+  calendar: "Calendar",
+  notifications: "Notifications",
+  activity: "Activity",
+  "verify-email": "Verify Email",
+  "reset-password": "Reset Password",
+};
+
 /* =========================================================
    MAP / SYSTEM DATA
 ========================================================= */
@@ -1257,6 +1284,16 @@ function App() {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
+
+  // Single source of truth for document.title, covering every way `active`
+  // can change (go(), popstate, and the very first render) instead of
+  // setting it at each call site. A screen reader announces a title change
+  // on navigation; without this every route change was silent.
+  useEffect(() => {
+    document.title = PAGE_TITLES[active]
+      ? `${PAGE_TITLES[active]} | Campus OS`
+      : "Campus OS | Your Digital Campus";
+  }, [active]);
 
   // Shared by "Message seller" (Marketplace), "Message" (Connect/People) and
   // a tapped message notification -- all three just need "open the
@@ -2659,7 +2696,7 @@ function App() {
       )}
 
       {toast && (
-        <div className="toast">
+        <div className="toast" role="status" aria-live="polite">
           <HiCheckCircle />
           {toast}
         </div>
