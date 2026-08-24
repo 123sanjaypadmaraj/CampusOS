@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useState } from "react";
-import { HiPlus, HiXMark, HiPencil, HiTrash, HiCheck, HiClock, HiShoppingBag, HiExclamationTriangle } from "react-icons/hi2";
+import { HiPlus, HiXMark, HiPencil, HiTrash, HiCheck, HiClock, HiShoppingBag, HiExclamationTriangle, HiBanknotes } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import VendorAnalytics from "../vendor/Analytics";
 import VendorManagerAccounts from "../vendor/ManagerAccounts";
@@ -91,15 +91,106 @@ export default function StoreDashboard({ notify, authUser }) {
       <div className="socialize-filter-row">
         <button className={tab === "orders" ? "chip active" : "chip"} onClick={() => setTab("orders")}>Orders</button>
         <button className={tab === "items" ? "chip active" : "chip"} onClick={() => setTab("items")}>Items</button>
+        <button className={tab === "billing" ? "chip active" : "chip"} onClick={() => setTab("billing")}>Billing</button>
         <button className={tab === "analytics" ? "chip active" : "chip"} onClick={() => setTab("analytics")}>Analytics</button>
         <button className={tab === "staff" ? "chip active" : "chip"} onClick={() => setTab("staff")}>Managers</button>
       </div>
 
       {tab === "orders" && <StoreOrderQueue store={store} notify={notify} />}
       {tab === "items" && <StoreItemManager store={store} notify={notify} />}
+      {tab === "billing" && <StoreBillingPanel store={store} notify={notify} onStoreChanged={reload} />}
       {tab === "analytics" && <VendorAnalytics />}
       {tab === "staff" && <VendorManagerAccounts vendorType="store" scopeId={store.id} notify={notify} />}
     </section>
+  );
+}
+
+/* =========================================================
+   BILLING: GST configuration + settlement report (doc phase 04's
+   engineering-doable subset -- "extend Campus Store to the same
+   settlement/invoice depth Food already has", see
+   supabase/migrations/20260824000600_campus_store_gst_invoices_settlement.sql).
+   Mirrors src/features/vendor/VendorDashboard.jsx's BillingPanel, minus a
+   payout-history section: Store is pay-at-pickup, so there's no platform-
+   held money for a payout to release, only a sales report for the vendor's
+   own bookkeeping.
+========================================================= */
+
+function StoreBillingPanel({ store, notify, onStoreChanged }) {
+  const [gstRegistered, setGstRegistered] = useState(Boolean(store.gst_registered));
+  const [gstNumber, setGstNumber] = useState(store.gst_number || "");
+  const [savingGst, setSavingGst] = useState(false);
+
+  const [range, setRange] = useState(() => {
+    const end = new Date().toISOString().slice(0, 10);
+    const start = new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10);
+    return { start, end };
+  });
+  const [settlement, setSettlement] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setSettlement(await storeApi.getStoreSettlementReport(range.start, range.end));
+    } catch (err) { notify(err.message || "Could not load billing data"); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { reload(); }, [store.id, range.start, range.end]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const settlementTotal = settlement.reduce((sum, r) => sum + Number(r.net_amount || 0), 0);
+
+  return (
+    <div>
+      <div className="section-head"><h2>GST configuration</h2></div>
+      <div className="form-grid" style={{ maxWidth: 420 }}>
+        <ToggleSwitch label="GST registered" checked={gstRegistered} onChange={setGstRegistered} />
+        {gstRegistered && (
+          <label>GSTIN<input value={gstNumber} onChange={(e) => setGstNumber(e.target.value)} placeholder="29ABCDE1234F1Z5" /></label>
+        )}
+      </div>
+      <button
+        className="ghost"
+        disabled={savingGst}
+        onClick={async () => {
+          try {
+            setSavingGst(true);
+            await storeApi.updateStoreGst(store.id, { gstRegistered, gstNumber });
+            notify("GST settings saved");
+            onStoreChanged?.();
+          } catch (err) { notify(err.message || "Could not save GST settings"); } finally { setSavingGst(false); }
+        }}
+      >
+        Save GST settings
+      </button>
+
+      <div className="section-head" style={{ marginTop: 24 }}>
+        <h2>Settlement report</h2>
+      </div>
+      <div className="form-grid" style={{ maxWidth: 420 }}>
+        <label>From<input type="date" value={range.start} onChange={(e) => setRange((r) => ({ ...r, start: e.target.value }))} /></label>
+        <label>To<input type="date" value={range.end} onChange={(e) => setRange((r) => ({ ...r, end: e.target.value }))} /></label>
+      </div>
+
+      {loading ? <LoadingState label="Loading…" /> : (
+        <>
+          <div className="resource-row" style={{ marginTop: 12 }}>
+            <div><b>Net for this period</b><small>{settlement.length} completed order{settlement.length === 1 ? "" : "s"}</small></div>
+            <strong>₹{settlementTotal.toFixed(2)}</strong>
+          </div>
+          <div className="resource-list">
+            {settlement.length === 0 && <EmptyState title="No completed sales yet" text="Orders show up here once a student has picked them up." />}
+            {settlement.map((row, i) => (
+              <article className="resource-row" key={`${row.order_id}-${i}`}>
+                <div className="resource-icon"><HiBanknotes /></div>
+                <div><b>{row.description}</b><small>{row.occurred_on}</small></div>
+                <strong>₹{Number(row.net_amount).toFixed(2)}</strong>
+              </article>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 

@@ -60,6 +60,25 @@ export async function deleteStoreItem(id) {
   throw error;
 }
 
+// GST config + settlement report (supabase/migrations/20260824000600_
+// campus_store_gst_invoices_settlement.sql) -- mirrors updateCanteenGst()/
+// getSettlementReport() in src/features/vendor/api.js. No listMyPayouts()
+// equivalent: Store is pay-at-pickup, so there's no platform-held money for
+// a payout to release -- see that migration's header for why.
+export async function updateStoreGst(storeId, { gstRegistered, gstNumber }) {
+  const { data, error } = await supabase.from("stores")
+    .update({ gst_registered: Boolean(gstRegistered), gst_number: gstNumber || null })
+    .eq("id", storeId).select().single();
+  throwIfError(error);
+  return data;
+}
+
+export async function getStoreSettlementReport(startDate, endDate) {
+  const { data, error } = await supabase.rpc("store_settlement_report", { p_start: startDate, p_end: endDate });
+  throwIfError(error);
+  return data || [];
+}
+
 export async function listStoreOrders(storeId) {
   const { data, error } = await supabase
     .from("store_orders")

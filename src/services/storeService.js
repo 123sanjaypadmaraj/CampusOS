@@ -78,6 +78,17 @@ export async function getMyStoreOrders(userId) {
   return data || [];
 }
 
+// GST invoice/receipt for a store order -- see generate_store_order_invoice()
+// (supabase/migrations/20260824000600_campus_store_gst_invoices_settlement.sql),
+// mirroring getOrCreateOrderInvoice() in mvpService.js for food orders.
+// Idempotent server-side, and only available once the order reaches
+// COMPLETED (pay-at-pickup has no separate "paid" moment to gate on).
+export async function getOrCreateStoreOrderInvoice(orderId) {
+  const { data, error } = await supabase.rpc("generate_store_order_invoice", { p_order_id: orderId });
+  throwIfError(error);
+  return data;
+}
+
 export function subscribeToStores(callback) {
   const channel = supabase
     .channel("public:store_realtime")

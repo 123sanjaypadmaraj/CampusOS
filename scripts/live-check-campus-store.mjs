@@ -75,7 +75,13 @@ async function main() {
     p_idempotency_key: idempotencyKey,
   });
   check("create_store_order succeeds", !orderErr && order1?.status === "PLACED", orderErr);
-  check("Order total is computed server-side (3 pens)", Number(order1?.total) === Number(pen.price) * 3, order1);
+  // Total is subtotal + tax (20260824000600_campus_store_gst_invoices_
+  // settlement.sql added tax_rate to store_items, default 0.05) -- computed
+  // off the item's own tax_rate rather than a hardcoded rate so this stays
+  // correct whatever the pen's actual rate is.
+  const penSubtotal = Number(pen.price) * 3;
+  const penExpectedTotal = Math.round((penSubtotal + penSubtotal * Number(pen.tax_rate)) * 100) / 100;
+  check("Order total is computed server-side (3 pens, incl. tax)", Number(order1?.total) === penExpectedTotal, { order1, penExpectedTotal });
   check("Order gets a real pickup code", /^\d{6}$/.test(order1?.pickup_code || ""), order1?.pickup_code);
 
   const { data: order1Again, error: order1AgainErr } = await alice.sb.rpc("create_store_order", {

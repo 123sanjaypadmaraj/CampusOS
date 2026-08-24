@@ -169,6 +169,7 @@ import {
   getStoreItems,
   createStoreOrder,
   getMyStoreOrders,
+  getOrCreateStoreOrderInvoice,
   subscribeToStores,
   subscribeToStoreOrders,
 } from "./services/storeService";
@@ -261,6 +262,7 @@ import {
   HiBookmark,
   HiOutlineBookmark,
   HiArrowDownTray,
+  HiBuildingStorefront,
 } from "react-icons/hi2";
 import { FaLinkedin, FaGithub, FaGoogle } from "react-icons/fa6";
 
@@ -2290,6 +2292,7 @@ function App() {
           notify={notify}
           go={go}
           orders={orders}
+          storeOrders={myStoreOrders}
           printJobs={printJobs}
           serviceRequests={serviceRequests}
           bookings={bookings}
@@ -6023,6 +6026,7 @@ function ActivityRow({ icon, title, subtitle, meta, status, onClick, action }) {
 
 const ACTIVITY_CATEGORIES = [
   { key: "food", label: "Food orders", icon: <HiShoppingCart /> },
+  { key: "store", label: "Store orders", icon: <HiBuildingStorefront /> },
   { key: "events", label: "Event registrations", icon: <HiCalendarDays /> },
   { key: "clubs", label: "Club activity", icon: <HiUserGroup /> },
   { key: "marketplace", label: "Marketplace", icon: <HiShoppingBag /> },
@@ -6040,6 +6044,7 @@ function YourActivity({
   notify,
   go,
   orders = [],
+  storeOrders = [],
   printJobs = [],
   serviceRequests = [],
   bookings = [],
@@ -6095,6 +6100,7 @@ function YourActivity({
 
   const counts = {
     food: orders.length,
+    store: storeOrders.length,
     events: eventRegs.length,
     clubs: clubActivity.length,
     marketplace: myListings.length,
@@ -6135,6 +6141,7 @@ function YourActivity({
           ) : (
             <>
               {tab === "food" && <ActivityFoodOrders orders={orders} go={go} />}
+              {tab === "store" && <ActivityStoreOrders orders={storeOrders} go={go} />}
               {tab === "events" && <ActivityEventRegistrations items={eventRegs} go={go} userId={userId} notify={notify} />}
               {tab === "clubs" && <ActivityClubs items={clubActivity} go={go} />}
               {tab === "marketplace" && (
@@ -6244,6 +6251,97 @@ function FoodReceiptModal({ order, onClose }) {
           {Number(invoice.platform_fee) > 0 && <div className="price-preview"><span>Platform fee</span><b>₹{invoice.platform_fee}</b></div>}
           {Number(invoice.delivery_fee) > 0 && <div className="price-preview"><span>Delivery fee</span><b>₹{invoice.delivery_fee}</b></div>}
           {Number(invoice.discount_amount) > 0 && <div className="price-preview"><span>Discount</span><b>−₹{invoice.discount_amount}</b></div>}
+          <div className="price-preview"><span>Total</span><b>₹{invoice.total}</b></div>
+
+          <button className="ghost wide" style={{ marginTop: 16 }} onClick={() => window.print()}>Print / save as PDF</button>
+        </div>
+      )}
+    </ModalShell>
+  );
+}
+
+// Campus Store's activity tab + GST receipt (supabase/migrations/20260824000600_
+// campus_store_gst_invoices_settlement.sql), mirroring ActivityFoodOrders/
+// FoodReceiptModal above. Pay-at-pickup has no payment_status to gate the
+// receipt button on -- the order reaching COMPLETED is Store's equivalent
+// "money changed hands" moment, and generate_store_order_invoice() itself
+// enforces that server-side regardless of what this button shows.
+function ActivityStoreOrders({ orders, go }) {
+  const [receiptOrder, setReceiptOrder] = useState(null);
+
+  if (!orders.length) {
+    return (
+      <EmptyState
+        icon={<HiBuildingStorefront />}
+        title="No store orders yet"
+        text="Order from a campus store and it'll show up here."
+        action={<button className="ghost" onClick={() => go("store")}>Browse store</button>}
+      />
+    );
+  }
+  return (
+    <div className="activity-list">
+      {orders.map((order) => (
+        <ActivityRow
+          key={order.id}
+          icon={<HiBuildingStorefront />}
+          title={order.stores?.name || "Store order"}
+          subtitle={`${(order.store_order_items || []).length} item${(order.store_order_items || []).length === 1 ? "" : "s"} · ${order.created_at ? new Date(order.created_at).toLocaleString() : ""}${order.pickup_code ? ` · Pickup ${order.pickup_code}` : ""}`}
+          meta={activityMoney(order.total)}
+          status={order.status}
+          action={
+            order.status === "COMPLETED" ? (
+              <button className="ghost" onClick={(e) => { e.stopPropagation(); setReceiptOrder(order); }}>
+                Receipt
+              </button>
+            ) : undefined
+          }
+        />
+      ))}
+
+      {receiptOrder && <StoreReceiptModal order={receiptOrder} onClose={() => setReceiptOrder(null)} />}
+    </div>
+  );
+}
+
+function StoreReceiptModal({ order, onClose }) {
+  const [invoice, setInvoice] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+    getOrCreateStoreOrderInvoice(order.id)
+      .then((data) => { if (mounted) setInvoice(data); })
+      .catch((err) => { if (mounted) setError(err.message || "Could not load the receipt"); })
+      .finally(() => { if (mounted) setLoading(false); });
+    return () => { mounted = false; };
+  }, [order.id]);
+
+  return (
+    <ModalShell kicker="RECEIPT" title={order.stores?.name || "Order receipt"} onClose={onClose}>
+      {loading && <LoadingState label="Loading receipt…" />}
+      {error && <ErrorState title="Couldn't load the receipt" text={error} />}
+      {invoice && (
+        <div className="receipt-body">
+          <div className="resource-row">
+            <div>
+              <b>{invoice.invoice_number}</b>
+              <small>{new Date(invoice.issued_at).toLocaleString()}</small>
+            </div>
+          </div>
+
+          <div className="price-preview"><span>Subtotal</span><b>₹{invoice.subtotal}</b></div>
+          {Number(invoice.cgst_amount) > 0 || Number(invoice.sgst_amount) > 0 ? (
+            <>
+              <div className="price-preview"><span>CGST</span><b>₹{invoice.cgst_amount}</b></div>
+              <div className="price-preview"><span>SGST</span><b>₹{invoice.sgst_amount}</b></div>
+              {invoice.gst_number && <small>GSTIN: {invoice.gst_number}</small>}
+            </>
+          ) : (
+            <div className="price-preview"><span>Tax</span><b>₹{invoice.tax_amount}</b></div>
+          )}
+          {Number(invoice.platform_fee) > 0 && <div className="price-preview"><span>Platform fee</span><b>₹{invoice.platform_fee}</b></div>}
           <div className="price-preview"><span>Total</span><b>₹{invoice.total}</b></div>
 
           <button className="ghost wide" style={{ marginTop: 16 }} onClick={() => window.print()}>Print / save as PDF</button>

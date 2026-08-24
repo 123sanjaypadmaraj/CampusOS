@@ -43,10 +43,28 @@ env:
   PROD_PROJECT_REF: dzjzjlylsfpmymkcavrq
   # _shared is a shared-code directory, not a deployable function; razorpay-webhook
   # is deployed separately below with --no-verify-jwt (see supabase/functions/README.md).
+  #
+  # Functions in this group all expect a real, signed-in caller's Supabase JWT
+  # (forwarded Authorization header) -- print-file-cleanup's pg_net caller sends
+  # the service-role key, which is itself a project-signed JWT, so it passes
+  # gateway verification too. Deployed WITHOUT --no-verify-jwt (the default),
+  # so Supabase's gateway rejects anything without a valid JWT before the
+  # function code even runs.
   OTHER_FUNCTIONS: >-
-    campus-assistant confirm-password-reset create-razorpay-order
-    print-file-cleanup razorpay-refund request-password-reset
-    send-email send-push send-sms signup-with-usn system-health
+    campus-assistant create-razorpay-order print-file-cleanup
+    razorpay-refund system-health
+  # Functions in this group are never called with a Supabase session JWT --
+  # a signed-out browser (password reset, USN signup) or pg_net acting on a
+  # DB trigger/cron job (send-email/send-push/send-sms/payment-reconciliation),
+  # authenticated instead by a shared secret the function checks itself. Found
+  # live 24 Aug (readiness-audit phase 04): this whole group was previously
+  # folded into OTHER_FUNCTIONS above, which would have flipped verify_jwt back
+  # on for all of them the first time this workflow ever actually deployed --
+  # each function's own file header already says "deploy with --no-verify-jwt"
+  # for exactly this reason, but nothing enforced it here.
+  NO_VERIFY_JWT_FUNCTIONS: >-
+    confirm-password-reset payment-reconciliation request-password-reset
+    send-email send-push send-sms signup-with-usn
 
 jobs:
   # workflow_run fires for every CI run regardless of outcome -- only ever
@@ -82,6 +100,7 @@ jobs:
         run: |
           set -euo pipefail
           npx supabase functions deploy --project-ref "$STAGING_PROJECT_REF" --use-api --yes -- $OTHER_FUNCTIONS
+          npx supabase functions deploy --project-ref "$STAGING_PROJECT_REF" --use-api --no-verify-jwt --yes -- $NO_VERIFY_JWT_FUNCTIONS
           npx supabase functions deploy razorpay-webhook --project-ref "$STAGING_PROJECT_REF" --use-api --no-verify-jwt --yes
 
       - name: Deploy frontend to Vercel (staging = Preview env) and re-alias campusos-staging.vercel.app
@@ -192,6 +211,7 @@ jobs:
         run: |
           set -euo pipefail
           npx supabase functions deploy --project-ref "$PROD_PROJECT_REF" --use-api --yes -- $OTHER_FUNCTIONS
+          npx supabase functions deploy --project-ref "$PROD_PROJECT_REF" --use-api --no-verify-jwt --yes -- $NO_VERIFY_JWT_FUNCTIONS
           npx supabase functions deploy razorpay-webhook --project-ref "$PROD_PROJECT_REF" --use-api --no-verify-jwt --yes
 
       - name: Deploy frontend to Vercel (production)

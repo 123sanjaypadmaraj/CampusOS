@@ -167,7 +167,10 @@ async function main() {
     p_items: [{ store_item_id: variantItem.id, variant_id: smallVariant.id, quantity: 1 }],
   });
   check("Ordering a variant succeeds", !variantOrderErr && variantOrder?.status === "PLACED", variantOrderErr);
-  check("Order total is priced off the variant, not the parent item", Number(variantOrder?.total) === 480, variantOrder);
+  // 480 subtotal + 5% default tax_rate (20260824000600_campus_store_gst_
+  // invoices_settlement.sql) = 504. Priced off the variant, not the parent
+  // item's price -- that's still the thing this assertion is really for.
+  check("Order total is priced off the variant, not the parent item (480 + 5% tax = 504)", Number(variantOrder?.total) === 504, variantOrder);
 
   const { data: orderItems } = await alice.sb.from("store_order_items").select("*").eq("order_id", variantOrder.id);
   check("The order item snapshots the variant name", orderItems?.[0]?.variant_name === "Small", orderItems);
@@ -187,7 +190,8 @@ async function main() {
     p_items: [{ store_item_id: variantItem.id, variant_id: mediumVariant.id, quantity: 3 }],
   });
   check("The untracked variant has no stock ceiling", !mediumOrderErr && mediumOrder?.status === "PLACED", mediumOrderErr);
-  check("Untracked variant order is priced correctly (520 x 3)", Number(mediumOrder?.total) === 1560, mediumOrder);
+  // 1560 subtotal + 5% default tax_rate = 1638 (see note above).
+  check("Untracked variant order is priced correctly (520 x 3 + 5% tax = 1638)", Number(mediumOrder?.total) === 1638, mediumOrder);
 
   const { error: mismatchedVariantErr } = await alice.sb.rpc("create_store_order", {
     p_store_id: store.id,
@@ -257,7 +261,7 @@ async function main() {
   const { data: gmv, error: gmvErr } = await storeVendor.sb.rpc("vendor_gmv_series", { p_days: 7 });
   check("vendor_gmv_series resolves the 'store' branch for a store owner", !gmvErr && Array.isArray(gmv) && gmv.length === 7, gmvErr);
   const totalGmv = (gmv || []).reduce((s, d) => s + Number(d.gmv || 0), 0);
-  check("Today's GMV reflects the two completed test orders (480 + 1560)", totalGmv >= 2040, { totalGmv, gmv });
+  check("Today's GMV reflects the two completed test orders (504 + 1638, tax-inclusive totals)", totalGmv >= 2142, { totalGmv, gmv });
 
   const { data: sla, error: slaErr } = await storeVendor.sb.rpc("vendor_sla_summary", { p_days: 7 });
   check("vendor_sla_summary resolves the 'store_order' domain for a store owner", !slaErr && sla?.[0]?.domain === "store_order", { slaErr, sla });

@@ -28,14 +28,25 @@ canteens/food items/clubs/events tagged to the `nhce` campus slug.
 npx supabase secrets set RAZORPAY_KEY_ID=rzp_test_xxxxxxxx
 npx supabase secrets set RAZORPAY_KEY_SECRET=xxxxxxxxxxxxxxxx
 npx supabase secrets set RAZORPAY_WEBHOOK_SECRET=xxxxxxxxxxxxxxxx
+npx supabase secrets set RECONCILIATION_DISPATCH_SECRET=<same value as the auto-generated `reconciliation_dispatch_secret` Vault entry>
 
 npx supabase functions deploy create-razorpay-order
+npx supabase functions deploy razorpay-refund
 npx supabase functions deploy razorpay-webhook --no-verify-jwt
+npx supabase functions deploy payment-reconciliation --no-verify-jwt
 ```
 
 Register the webhook URL in the Razorpay Dashboard (Settings → Webhooks):
 `https://<project-ref>.functions.supabase.co/razorpay-webhook`, subscribed
 to `payment.authorized`, `payment.captured`, `payment.failed`.
+
+`payment-reconciliation` (2026-08-24) is a self-healing safety net for a
+missed webhook delivery, not something the webhook itself depends on -- see
+`supabase/migrations/20260824000800_payment_reconciliation.sql` for what it
+does and why. It needs `--no-verify-jwt` because pg_cron/pg_net calls it, not
+a signed-in browser; it authenticates that call via
+`RECONCILIATION_DISPATCH_SECRET` instead, same pattern as `send-email`/
+`send-push`/`send-sms`.
 
 Full detail, including how to get free test-mode keys with no KYC, in
 `supabase/functions/README.md`. **Stay in Razorpay test mode until you've
