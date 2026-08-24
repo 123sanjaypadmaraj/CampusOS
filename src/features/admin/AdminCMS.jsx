@@ -30,7 +30,7 @@ import * as adminApi from "./api";
 import * as opportunitiesApi from "../../services/opportunitiesService";
 import * as teamsApi from "../teams/api";
 import { deleteMessage } from "../../services/messagingService";
-import { getMyPrintShopStatus, setPrintShopStatus } from "../vendor/api";
+import { getMyPrintShopStatus, setPrintShopStatus, parseCsv } from "../vendor/api";
 import { setEventApproval, uploadEventCoverImage } from "../../services/mvpService";
 import { useModalA11y } from "../../hooks/useModalA11y";
 import AdminAnalytics from "./Analytics";
@@ -75,6 +75,8 @@ const TABS = [
   ["ai", "AI Assistant"],
   ["errors", "Errors"],
   ["vendors", "Vendors"],
+  ["onboarding", "Onboarding"],
+  ["roster", "Roster"],
   ["facilities", "Facilities"],
   ["systemhealth", "System Health"],
   ["campussettings", "Campus Settings"],
@@ -125,6 +127,8 @@ export default function AdminCMS({ notify, campusId, authUser, can = () => false
       {tab === "ai" && <AiAssistantTab notify={notify} campusId={campusId} />}
       {tab === "errors" && <ErrorLogsTab notify={notify} />}
       {tab === "vendors" && <VendorManagementTab notify={notify} campusId={campusId} />}
+      {tab === "onboarding" && <OnboardingTab notify={notify} campusId={campusId} can={can} />}
+      {tab === "roster" && <RosterTab notify={notify} />}
       {tab === "facilities" && <FacilitiesTab notify={notify} campusId={campusId} />}
       {tab === "systemhealth" && <SystemHealthTab notify={notify} />}
       {tab === "campussettings" && <CampusSettingsTab notify={notify} campusId={campusId} />}
@@ -3127,8 +3131,8 @@ function AuditLogTab() {
    vendor's own login (VendorDashboard.jsx).
 ========================================================= */
 
-function AddVendorModal({ campusId, onClose, notify, onSaved }) {
-  const [form, setForm] = useState({ type: "canteen", name: "", subtitle: "", category: "General", ownerEmail: "" });
+function AddVendorModal({ campusId, onClose, notify, onSaved, initialEmail = "" }) {
+  const [form, setForm] = useState({ type: "canteen", name: "", subtitle: "", category: "General", ownerEmail: initialEmail });
   const [saving, setSaving] = useState(false);
   const change = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -3289,6 +3293,313 @@ function VendorManagementTab({ notify, campusId }) {
 
       {showAdd && (
         <AddVendorModal campusId={campusId} notify={notify} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); reload(); }} />
+      )}
+    </div>
+  );
+}
+
+/* =========================================================
+   ONBOARDING (readiness-audit phase 10, part 2/2) -- account creation
+   itself already works self-service (magic-link sign-in auto-creates a
+   profile, see sendMagicLink()); admin_create_vendor/
+   admin_transfer_vendor_ownership/add_*_staff_account already promote an
+   existing profile by email. This tab is the missing piece that ties
+   those together so onboarding a vendor or facilities-staff account no
+   longer means running scripts/setup-vendor-accounts.mjs /
+   setup-facilities-account.mjs from a terminal with the service-role key.
+========================================================= */
+
+function OnboardingTab({ notify, campusId, can }) {
+  const isSuperAdmin = can("users.roles.manage");
+  const [vendors, setVendors] = useState([]);
+  const [showAddVendor, setShowAddVendor] = useState(false);
+  const [prefillEmail, setPrefillEmail] = useState("");
+
+  const reloadVendors = () => adminApi.listVendorsAdmin(campusId).then(setVendors).catch(() => {});
+
+  useEffect(() => { reloadVendors(); }, [campusId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div>
+      <div className="section-head">
+        <div>
+          <h2>Onboarding</h2>
+          <p>
+            Bring on a vendor owner, vendor manager or facilities-staff account without a terminal.
+            Everyone starts the same way: open CampusOS &rarr; Sign in &rarr; <b>Email link</b> &rarr; their
+            institutional email. That creates their account on first sign-in &mdash; come back here once
+            they&rsquo;ve done that to check their email and promote them.
+          </p>
+        </div>
+      </div>
+
+      <EmailLookupSection
+        notify={notify}
+        vendors={vendors}
+        campusId={campusId}
+        isSuperAdmin={isSuperAdmin}
+        onCreateVendor={(email) => { setPrefillEmail(email); setShowAddVendor(true); }}
+      />
+
+      {showAddVendor && (
+        <AddVendorModal
+          campusId={campusId}
+          notify={notify}
+          initialEmail={prefillEmail}
+          onClose={() => setShowAddVendor(false)}
+          onSaved={() => { setShowAddVendor(false); reloadVendors(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function EmailLookupSection({ notify, vendors, campusId, isSuperAdmin, onCreateVendor }) {
+  const [email, setEmail] = useState("");
+  const [status, setStatus] = useState(null); // null | "checking" | { found, profile }
+  const [busy, setBusy] = useState(false);
+  const [managerTarget, setManagerTarget] = useState("");
+
+  const lookup = async () => {
+    const clean = email.trim();
+    if (!clean) { notify("Enter an email to look up"); return; }
+    try {
+      setStatus("checking");
+      const profile = await adminApi.lookupProfileByEmail(clean);
+      setStatus({ found: !!profile, profile });
+    } catch (err) {
+      notify(err.message || "Lookup failed");
+      setStatus(null);
+    }
+  };
+
+  const makeFacilitiesStaff = async () => {
+    if (!status?.profile) return;
+    try {
+      setBusy(true);
+      if (isSuperAdmin) {
+        await adminApi.setUserRole(status.profile.id, "facilities_staff");
+        notify(`${status.profile.name} is now facilities staff`);
+        setStatus({ ...status, profile: { ...status.profile, role: "facilities_staff" } });
+      } else {
+        const reason = window.prompt(`Why should ${status.profile.name} become facilities staff? (a different admin must approve)`);
+        if (reason === null) return;
+        await adminApi.proposeRoleChange(status.profile.id, "facilities_staff", reason);
+        notify("Role change submitted for approval");
+      }
+    } catch (err) {
+      notify(err.message || "Could not update role");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addAsManager = async () => {
+    if (!status?.profile || !managerTarget) return;
+    const [type, id] = managerTarget.split(":");
+    try {
+      setBusy(true);
+      if (type === "canteen") await adminApi.addCanteenStaffByEmail(id, status.profile.email);
+      else if (type === "store") await adminApi.addStoreStaffByEmail(id, status.profile.email);
+      else await adminApi.addPrintStaffByEmail(campusId, status.profile.email);
+      notify(`${status.profile.name} added as a manager`);
+      setManagerTarget("");
+    } catch (err) {
+      notify(err.message || "Could not add as manager");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const eligibleForPromotion = status?.found && ["student", "vendor", "vendor_staff"].includes(status.profile.role);
+
+  return (
+    <div className="resource-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 12 }}>
+      <b>Check an email</b>
+      <div className="searchbar compact wide-search">
+        <input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && lookup()}
+          placeholder="new.vendor@nhce.edu.in"
+        />
+        <button onClick={lookup}>Check</button>
+      </div>
+
+      {status === "checking" && <small>Checking&hellip;</small>}
+
+      {status && status !== "checking" && !status.found && (
+        <div style={{ padding: 12, border: "1px solid var(--line, #dedbd2)", borderRadius: 8 }}>
+          <small>
+            No CampusOS account yet for this email. Ask them to open CampusOS &rarr; Sign in &rarr; <b>Email link</b>,
+            and enter this exact address &mdash; that creates their account on first sign-in. Come back once they&rsquo;ve done that.
+          </small>
+        </div>
+      )}
+
+      {status && status !== "checking" && status.found && (
+        <div style={{ padding: 12, border: "1px solid var(--line, #dedbd2)", borderRadius: 8 }}>
+          <p style={{ margin: "0 0 8px" }}>
+            <b>{status.profile.name}</b> &middot; {status.profile.email} &middot; current role: <b>{status.profile.role}</b>
+          </p>
+
+          {!eligibleForPromotion && (
+            <small>This account already has the &ldquo;{status.profile.role}&rdquo; role &mdash; use the Users tab if it needs to change.</small>
+          )}
+
+          {eligibleForPromotion && (
+            <>
+              {status.profile.role === "student" && (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                  <button disabled={busy} onClick={makeFacilitiesStaff}>Make facilities staff</button>
+                  <button disabled={busy} onClick={() => onCreateVendor(status.profile.email)}>Make vendor owner (new canteen/store)</button>
+                </div>
+              )}
+
+              {vendors.length > 0 && (
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <label>
+                    Add as manager to{" "}
+                    <select value={managerTarget} onChange={(e) => setManagerTarget(e.target.value)}>
+                      <option value="">Choose a vendor&hellip;</option>
+                      {vendors.map((v) => <option key={`${v.type}-${v.id}`} value={`${v.type}:${v.id}`}>{v.name} ({v.type})</option>)}
+                      <option value="print:">Print Shop</option>
+                    </select>
+                  </label>
+                  <button disabled={busy || !managerTarget} onClick={addAsManager}>Add as manager</button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* =========================================================
+   COLLEGE ROSTER (readiness-audit phase 10, part 1/2: data migration
+   tooling / USN mapping). Bulk-import the real student/staff roster so
+   signup-with-usn has something real to validate a USN against, instead
+   of just a shape regex. See supabase/migrations/
+   20260824000500_college_roster.sql's import_roster_rows() for the
+   upsert + backfill logic this just calls.
+========================================================= */
+
+// Reuses the same quote-aware CSV tokenizer the vendor bulk-import already
+// relies on (parseCsv, src/features/vendor/api.js) rather than a second
+// naive split(",") implementation -- just maps its array-of-arrays into
+// array-of-objects keyed by the header row.
+export function parseRosterCsv(text) {
+  const rows = parseCsv(text);
+  if (rows.length < 2) return [];
+  const header = rows[0].map((h) => h.trim().toLowerCase());
+  return rows.slice(1)
+    .filter((r) => r.some((c) => c.trim() !== ""))
+    .map((cells) => {
+      const row = {};
+      header.forEach((h, i) => { row[h] = (cells[i] || "").trim(); });
+      return row;
+    });
+}
+
+function RosterTab({ notify }) {
+  const [csvText, setCsvText] = useState("");
+  const [rows, setRows] = useState([]);
+  const [importing, setImporting] = useState(false);
+  const [batches, setBatches] = useState([]);
+  const [loadingBatches, setLoadingBatches] = useState(true);
+
+  const reloadBatches = async () => {
+    try {
+      setLoadingBatches(true);
+      setBatches(await adminApi.listRosterBatches());
+    } catch (err) {
+      notify(err.message || "Could not load import history");
+    } finally {
+      setLoadingBatches(false);
+    }
+  };
+
+  useEffect(() => { reloadBatches(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleChange = (text) => {
+    setCsvText(text);
+    setRows(text.trim() ? parseRosterCsv(text) : []);
+  };
+
+  const doImport = async () => {
+    if (rows.length === 0) { notify("Paste some CSV rows first"); return; }
+    try {
+      setImporting(true);
+      const result = await adminApi.importRosterRows(rows, `manual paste (${rows.length} rows)`);
+      notify(`Imported: ${result.created} new, ${result.updated} updated, ${result.invalid} invalid`);
+      setCsvText("");
+      setRows([]);
+      await reloadBatches();
+    } catch (err) {
+      notify(err.message || "Import failed");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className="section-head">
+        <div>
+          <h2>Official Roster</h2>
+          <p>
+            Import the real student/staff roster (USN, name, department, course, year). Once at least one row is
+            imported, new USN sign-ups must match a roster row &mdash; closes the &ldquo;anyone can type a
+            USN-shaped string&rdquo; gap. Existing profiles&rsquo; blank department/course get backfilled from a
+            match; nothing already set is ever overwritten.
+          </p>
+        </div>
+      </div>
+
+      <label>
+        CSV &mdash; header row required: <code>usn,name,department,course,year,person_type,email</code>
+        <textarea
+          rows={6}
+          value={csvText}
+          onChange={(e) => handleChange(e.target.value)}
+          placeholder={"usn,name,department,course,year,person_type,email\n1NH22CS201,Jane Doe,CSE,B.E,3,student,jane@nhce.edu.in"}
+        />
+      </label>
+
+      {rows.length > 0 && (
+        <div className="resource-list" style={{ maxHeight: 260, overflowY: "auto" }}>
+          {rows.slice(0, 20).map((r, i) => (
+            <article className="resource-row" key={i}>
+              <div>
+                <b>{r.usn || "(missing usn)"}</b>
+                <small>{r.name || "(missing name)"} &middot; {r.department || "—"} &middot; {r.course || "—"} &middot; {r.year || "—"}</small>
+              </div>
+            </article>
+          ))}
+          {rows.length > 20 && <small>&hellip;and {rows.length - 20} more row(s), not previewed.</small>}
+        </div>
+      )}
+
+      <button className="primary" disabled={importing || rows.length === 0} onClick={doImport} style={{ marginTop: 12 }}>
+        {importing ? "Importing…" : `Import ${rows.length || ""} row${rows.length === 1 ? "" : "s"}`}
+      </button>
+
+      <h3 style={{ marginTop: 28 }}>Import history</h3>
+      {loadingBatches ? <LoadingState label="Loading import history…" /> : (
+        <div className="resource-list">
+          {batches.length === 0 && <EmptyState title="No imports yet" />}
+          {batches.map((b) => (
+            <article className="resource-row" key={b.id}>
+              <div>
+                <b>{b.source_label || "Import"}</b>
+                <small>{new Date(b.created_at).toLocaleString()} &middot; by {b.importer?.name || b.importer?.email || "—"}</small>
+                <small>{b.created_count} new &middot; {b.updated_count} updated &middot; {b.invalid_count} invalid</small>
+              </div>
+            </article>
+          ))}
+        </div>
       )}
     </div>
   );

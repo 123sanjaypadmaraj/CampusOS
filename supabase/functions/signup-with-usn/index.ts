@@ -61,6 +61,29 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ code: "USN_TAKEN", message: "An account with this USN already exists." }, 409);
     }
 
+    // Roster enforcement (readiness-audit phase 10): only require roster
+    // membership once an admin has actually imported one -- an empty
+    // official_roster table means this environment (staging/dev/test) has
+    // never imported a real college roster, so signup stays pattern-only,
+    // exactly as before this changed. Once at least one row exists, a new
+    // USN must be a real, known one.
+    const { count: rosterSize } = await admin
+      .from("official_roster")
+      .select("id", { count: "exact", head: true });
+    if ((rosterSize ?? 0) > 0) {
+      const { data: rosterRow } = await admin
+        .from("official_roster")
+        .select("id")
+        .ilike("usn", usnUpper)
+        .maybeSingle();
+      if (!rosterRow) {
+        return jsonResponse(
+          { code: "USN_NOT_IN_ROSTER", message: "This USN isn't on the official college roster. Contact your department if this is a mistake." },
+          403
+        );
+      }
+    }
+
     const { data, error } = await admin.auth.admin.createUser({
       email,
       password,

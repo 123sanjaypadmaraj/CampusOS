@@ -255,6 +255,75 @@ export async function transferVendorOwnership(type, id, newOwnerEmail) {
 }
 
 /* ========================================================================
+   ONBOARDING (readiness-audit phase 10, part 2/2) -- account creation
+   itself already works self-service (magic-link sign-in auto-creates a
+   profile), and admin_create_vendor/admin_transfer_vendor_ownership/
+   add_*_staff_account above already promote an existing profile by email.
+   The only thing missing was a UI that ties the two together instead of
+   requiring scripts/setup-vendor-accounts.mjs / setup-facilities-account.mjs
+   from a terminal -- lookupProfileByEmail plus the three thin RPC wrappers
+   below are that UI's data layer. add_*_staff_account already accept an
+   admin caller (is_canteen_owner/is_store_owner/can_manage_print all treat
+   current_user_is_admin() as owner-equivalent), so these are direct calls,
+   not new authorization logic.
+======================================================================== */
+
+export async function lookupProfileByEmail(email) {
+  const clean = email?.trim().toLowerCase();
+  if (!clean) return null;
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, name, email, role, created_at")
+    .ilike("email", clean)
+    .maybeSingle();
+  throwIfError(error);
+  return data || null;
+}
+
+export async function addCanteenStaffByEmail(canteenId, email) {
+  const { data, error } = await supabase.rpc("add_canteen_staff_account", { p_canteen_id: canteenId, p_email: email });
+  throwIfError(error);
+  return data;
+}
+
+export async function addStoreStaffByEmail(storeId, email) {
+  const { data, error } = await supabase.rpc("add_store_staff_account", { p_store_id: storeId, p_email: email });
+  throwIfError(error);
+  return data;
+}
+
+export async function addPrintStaffByEmail(campusId, email) {
+  const { data, error } = await supabase.rpc("add_print_staff_account", { p_campus_id: campusId, p_email: email });
+  throwIfError(error);
+  return data;
+}
+
+/* ========================================================================
+   COLLEGE ROSTER (readiness-audit phase 10, part 1/2: data migration
+   tooling) -- bulk import of the real student/staff roster for
+   signup-with-usn to validate against (supabase/migrations/
+   20260824000500_college_roster.sql). See import_roster_rows() there for
+   the upsert + backfill logic; this is a thin RPC wrapper plus a batch-
+   history read.
+======================================================================== */
+
+export async function importRosterRows(rows, sourceLabel) {
+  const { data, error } = await supabase.rpc("import_roster_rows", { p_rows: rows, p_source_label: sourceLabel || null });
+  throwIfError(error);
+  return data;
+}
+
+export async function listRosterBatches() {
+  const { data, error } = await supabase
+    .from("roster_import_batches")
+    .select("id, source_label, row_count, created_count, updated_count, invalid_count, errors, created_at, importer:imported_by(name, email)")
+    .order("created_at", { ascending: false })
+    .limit(50);
+  throwIfError(error);
+  return data || [];
+}
+
+/* ========================================================================
    FACILITIES OVERSIGHT (part 2/5) -- reads were already reachable via RLS
    (tickets.read/bookings.approve or admin); this just gives them a UI, plus
    the new assign_ticket() RPC for the one gap that had no write path at all.
