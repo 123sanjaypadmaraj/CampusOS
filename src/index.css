@@ -4587,7 +4587,10 @@
   align-items: center;
   gap: 8px;
   justify-content: center;
-  background: #f4b73a22;
+  /* Solid, not translucent: this banner is position:sticky, so a
+     translucent background lets whatever page content scrolls underneath
+     (e.g. the dark hero card) bleed through and make the text illegible. */
+  background: #f8efdc;
   color: #a97313;
   font-size: 12px;
   font-weight: 700;
@@ -4598,16 +4601,28 @@
 }
 
 .app-shell.dark-mode .offline-banner {
+  background: #2c2417;
   color: #f4c771;
 }
 
+.offline-banner--error {
+  background: #f9e3e3;
+  color: #c23a3a;
+}
+
+.app-shell.dark-mode .offline-banner--error {
+  background: #2c1a1a;
+  color: #ff9b9b;
+}
+
 .install-banner {
-  background: #6945e822;
+  background: #ece7fb;
   color: #4b2fc4;
   gap: 10px;
 }
 
 .app-shell.dark-mode .install-banner {
+  background: #1a1730;
   color: #b6a1ff;
 }
 

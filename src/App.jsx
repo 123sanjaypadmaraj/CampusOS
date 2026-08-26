@@ -2552,7 +2552,7 @@ function App() {
       <InstallPromptBanner canInstall={canInstall} onInstall={promptInstall} onDismiss={dismissInstallPrompt} />
 
       {backendError && (
-        <div className="offline-banner" role="alert" style={{ background: "#e2555522", color: "#c23a3a" }}>
+        <div className="offline-banner offline-banner--error" role="alert">
           <HiExclamationTriangle /> {backendError} — some data may be out of date.
         </div>
       )}
@@ -10886,7 +10886,7 @@ function PrintModal({ onClose, setPrintFile, notify, authUser, user, campusId })
   return (
     <ModalShell kicker="PRINT HUB" title="Upload & print" onClose={onClose}>
       {shopStatus && shopStatus.status !== "online" && (
-        <div className="offline-banner" role="status" style={{ background: "#f4b73a22", color: "#a97313" }}>
+        <div className="offline-banner" role="status">
           <HiExclamationTriangle /> The print shop is currently {shopStatus.status}
           {shopStatus.message ? ` — ${shopStatus.message}` : ""}. You can still place an order; it will be queued once the shop is back.
         </div>
