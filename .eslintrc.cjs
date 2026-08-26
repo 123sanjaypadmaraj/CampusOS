@@ -20,6 +20,10 @@ module.exports = {
     "node_modules",
     "src/supabase/archive",
     "supabase/functions/**", // Deno runtime, not Node/browser -- linted separately
+    "android", // Capacitor-generated native project + Gradle build output (gitignored, but not glob-excluded here -- ESLint doesn't read .gitignore on its own)
+    "ios", // Capacitor-generated native project (Swift Package Manager artifacts)
+    "test-results",
+    "playwright-report",
   ],
   overrides: [
     {
