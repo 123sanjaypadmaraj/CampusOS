@@ -46,7 +46,12 @@ test('USN login: admin nav tab appears for the admin account', async ({ page }) 
 });
 
 test('USN sign-up: creates a brand-new account end-to-end', async ({ page }) => {
-  const usn = `E2E${Date.now().toString().slice(-7)}`.slice(0, 10).padEnd(10, '0');
+  // Must match the real NHCE USN structure the signup form enforces for new
+  // accounts (App.jsx's handleSubmit, mirroring src/features/auth/usn.ts's
+  // USN_PATTERN: \dNH\d{2}[A-Za-z]{2}\d{3}) -- an "E2E..."-prefixed string
+  // never matched this and silently failed client-side validation, which is
+  // why this test used to hang waiting for the sign-in button to disappear.
+  const usn = `1NH25XX${Date.now().toString().slice(-3)}`;
   await page.goto('/');
   await page.waitForLoadState('networkidle');
 

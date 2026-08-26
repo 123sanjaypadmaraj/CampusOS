@@ -133,6 +133,18 @@ test('Events: capacity + waitlist + promotion notification across two real users
   // Alice registers first -> confirmed (fills the only seat).
   await aliceCard.getByRole('button', { name: /Register/i }).click();
   await confirmRegistration(alice);
+  // A confirmed (non-waitlisted) registration opens an EventTicketModal
+  // (App.jsx's onConfirmed handler: setTicketFor(...)) once the
+  // registerEvent() RPC resolves -- confirmRegistration() above only
+  // awaits the *click*, not that RPC, so closing prematurely here raced it:
+  // the confirmation modal's own close button was still on screen and
+  // caught the click, then the ticket modal opened moments later anyway
+  // (onConfirmed still fires regardless of whether its modal unmounted)
+  // and its .modal-backdrop sat there intercepting the Cancel registration
+  // click below. Wait for the ticket modal to actually be up first.
+  const ticketModal = alice.locator('.feature-modal', { hasText: 'EVENT TICKET' });
+  await expect(ticketModal).toBeVisible({ timeout: 10000 });
+  await ticketModal.locator('.modal-close').click();
   await expect(aliceCard.getByRole('button', { name: /Cancel registration/i })).toBeVisible({ timeout: 10000 });
 
   // Bob registers second -> the event is full, so register_for_event()

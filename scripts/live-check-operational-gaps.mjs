@@ -239,7 +239,7 @@ async function main() {
   console.log("\n--- Support tickets ---");
 
   const { data: ticket, error: ticketErr } = await alice.sb.rpc("create_support_ticket", {
-    p_category: "technical", p_subject: `LiveCheck ${suffix}`, p_description: "The app crashed on checkout.",
+    p_category: "technical", p_subject: `LiveCheck ${suffix}`, p_description: "The app crashed on checkout.", p_attachment_url: null,
   });
   check("a student can create a support ticket", !ticketErr && !!ticket, ticketErr?.message);
   if (ticket) cleanup.tickets.push(ticket.id);
@@ -250,7 +250,7 @@ async function main() {
   const { data: adminTickets, error: adminListErr } = await admin.sb.from("support_tickets").select("id").eq("id", ticket.id);
   check("college_admin can see the ticket via support.manage/admin", !adminListErr && (adminTickets?.length ?? 0) === 1, adminListErr?.message);
 
-  const { error: replyErr } = await admin.sb.rpc("add_support_ticket_message", { p_ticket_id: ticket.id, p_body: "Looking into it." });
+  const { error: replyErr } = await admin.sb.rpc("add_support_ticket_message", { p_ticket_id: ticket.id, p_body: "Looking into it.", p_attachment_url: null });
   check("staff can reply to the ticket", !replyErr, replyErr?.message);
 
   const { data: afterReply } = await svc.from("support_tickets").select("status").eq("id", ticket.id).single();
@@ -262,7 +262,7 @@ async function main() {
   const { error: resolveErr } = await admin.sb.rpc("set_support_ticket_status", { p_ticket_id: ticket.id, p_status: "resolved" });
   check("admin can resolve the ticket", !resolveErr, resolveErr?.message);
 
-  const { error: reopenErr } = await alice.sb.rpc("add_support_ticket_message", { p_ticket_id: ticket.id, p_body: "Still broken, please reopen." });
+  const { error: reopenErr } = await alice.sb.rpc("add_support_ticket_message", { p_ticket_id: ticket.id, p_body: "Still broken, please reopen.", p_attachment_url: null });
   check("a student reply on a resolved ticket succeeds", !reopenErr, reopenErr?.message);
   const { data: afterReopen } = await svc.from("support_tickets").select("status").eq("id", ticket.id).single();
   check("a student reply on a resolved ticket reopens it", afterReopen?.status === "open", afterReopen);

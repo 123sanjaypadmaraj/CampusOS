@@ -33,7 +33,10 @@ async function openSosModal(page) {
   await page.goto('/');
   await page.waitForLoadState('networkidle');
   await page.locator('nav.bottom-nav button', { hasText: 'Services' }).click();
-  await page.getByRole('button', { name: /Emergency/i }).click();
+  // Unscoped /Emergency/i now matches 2 buttons -- this SOS quick-action and
+  // the (later-added) "Emergency Directory" service card -- so match the
+  // exact accessible name instead of a loose regex.
+  await page.getByRole('button', { name: 'Emergency Campus SOS' }).click();
   await expect(page.getByText(/Hold for emergency/i)).toBeVisible({ timeout: 10000 });
 }
 

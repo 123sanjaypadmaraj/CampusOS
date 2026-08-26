@@ -115,8 +115,15 @@ test.describe.serial('Lost & Found', () => {
 
     const row = page.locator('.resource-row', { hasText: reportMarker });
     await expect(row).toBeVisible({ timeout: 15000 });
-    page.once('dialog', (dialog) => dialog.accept('E2E proof: it has a keychain shaped like a cat'));
+    // The claim flow is a real modal form (proof textarea + optional photo
+    // upload, LostFoundClaimModal), not a native window.prompt() -- was
+    // driving a `dialog` handler that never fired against anything, so the
+    // claim was never actually submitted and this hung waiting for a toast
+    // that could never appear.
     await row.getByRole('button', { name: 'Claim' }).click();
+    const claimModal = page.locator('.feature-modal');
+    await claimModal.getByLabel(/How can you prove this is yours/i).fill('E2E proof: it has a keychain shaped like a cat');
+    await claimModal.getByRole('button', { name: /Submit claim/i }).click();
     await expect(page.getByText('Claim submitted')).toBeVisible({ timeout: 10000 });
     // exact + scoped to <strong> -- the row's own <small> also contains the
     // substring "pending" ("Claim pending staff verification"), and

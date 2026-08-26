@@ -13,7 +13,7 @@ jest.mock("../lib/supabase", () => ({
   supabase: {
     rpc: jest.fn(),
     functions: { invoke: jest.fn() },
-    auth: { linkIdentity: jest.fn() },
+    auth: { linkIdentity: jest.fn(), getUser: jest.fn() },
     from: (...args) => mockFrom(...args),
     storage: { from: jest.fn() },
   },
@@ -69,7 +69,38 @@ import {
   removeBannedWord,
   listSuspensionAppeals,
   resolveSuspensionAppeal,
+  getCurrentUser,
 } from "./mvpService";
+
+describe("getCurrentUser", () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it("returns null (not a thrown error) when there's no session at all -- the normal state for an anonymous visitor", async () => {
+    // supabase-js's getUser() throws AuthSessionMissingError rather than
+    // returning { user: null } when there's no active session -- this is
+    // the exact shape it throws in, reproduced from the real staging repro.
+    const authSessionMissingError = Object.assign(new Error("Auth session missing!"), {
+      name: "AuthSessionMissingError",
+    });
+    supabase.auth.getUser.mockResolvedValue({ data: { user: null }, error: authSessionMissingError });
+
+    await expect(getCurrentUser()).resolves.toBeNull();
+  });
+
+  it("still throws a real error (e.g. an actual network/backend failure)", async () => {
+    const networkError = new Error("Failed to fetch");
+    supabase.auth.getUser.mockResolvedValue({ data: { user: null }, error: networkError });
+
+    await expect(getCurrentUser()).rejects.toBe(networkError);
+  });
+
+  it("returns the user when signed in", async () => {
+    const user = { id: "user-1", email: "alice@nhce.edu.in" };
+    supabase.auth.getUser.mockResolvedValue({ data: { user }, error: null });
+
+    await expect(getCurrentUser()).resolves.toBe(user);
+  });
+});
 
 describe("createFoodOrder", () => {
   beforeEach(() => jest.clearAllMocks());

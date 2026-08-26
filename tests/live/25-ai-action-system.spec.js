@@ -63,8 +63,17 @@ test.describe.serial('AI Action System: reminders + Campus AI page health', () =
     await expect(row).toBeVisible({ timeout: 15000 });
     await expect(row).toContainText('via service role seed');
 
+    // complete() (App.jsx) removes the row from local state optimistically
+    // -- the UI updates before setReminderDone()'s PATCH has actually
+    // reached Postgres, and there's no toast/other visible confirmation on
+    // success (only on failure) to wait on instead. Wait for the real PATCH
+    // response so the DB check below isn't racing the network request.
+    const patchResponse = page.waitForResponse((resp) =>
+      resp.url().includes('/rest/v1/reminders') && resp.request().method() === 'PATCH'
+    );
     await row.locator('.reminder-check').click();
     await expect(page.locator('.reminder-row', { hasText: marker })).toHaveCount(0, { timeout: 10000 });
+    await patchResponse;
 
     const { data: afterComplete } = await admin.from('reminders').select('done').eq('id', reminderId).single();
     expect(afterComplete.done).toBe(true);

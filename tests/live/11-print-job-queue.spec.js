@@ -29,9 +29,9 @@ const PRINT_SHOP = 'printshop@nhce.edu.in';
 
 test.describe.serial('Print job queue', () => {
   let pickupCode; // set by the upload test, used to find the exact row in the queue
+  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
 
   test.beforeAll(async () => {
-    const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
     const aliceId = getTestUserId(ALICE);
     await admin.from('print_jobs').delete().eq('user_id', aliceId).neq('status', 'COLLECTED');
   });
@@ -46,14 +46,30 @@ test.describe.serial('Print job queue', () => {
     await page.getByRole('button', { name: 'Upload', exact: true }).click();
 
     await page.locator('input[type="file"]').setInputFiles(TEST_PDF);
-    await page.getByRole('button', { name: /Place print order/i }).click();
+    // Renamed from "Place print order" once the job creation flow was
+    // wired into Razorpay checkout (readiness-audit phase 4) -- the job
+    // itself is still created synchronously (create_print_job() lands
+    // every job straight in QUEUED regardless of payment, see the comment
+    // below), only the button label and the follow-on toast changed.
+    await page.getByRole('button', { name: /Continue to payment/i }).click();
     const toast = page.getByText(/Print job created/i);
     await expect(toast).toBeVisible({ timeout: 10000 });
-    // "Print job created · <code>" -- grab the real code so the next test
-    // can find this exact job, not just "whichever one is named Alice Test"
-    // (the print shop is a single shared queue; a concurrently-running spec
-    // or a leftover job from an earlier failed run could otherwise collide).
-    pickupCode = (await toast.textContent()).split('·')[1]?.trim();
+    // The toast text changed too -- it now reads "Print job created ·
+    // ₹<price> — opening payment…" (no pickup code in it at all, since the
+    // flow moved on to Razorpay checkout, which staging has no test keys
+    // for -- see docs/ENVIRONMENTS.md). Read the real code back from the
+    // row the upload just created instead of parsing the toast, the same
+    // way the next test would need to find it anyway.
+    const aliceId = getTestUserId(ALICE);
+    const { data: job, error } = await admin
+      .from('print_jobs')
+      .select('pickup_code')
+      .eq('user_id', aliceId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+    if (error) throw error;
+    pickupCode = job.pickup_code;
     expect(pickupCode).toBeTruthy();
   });
 

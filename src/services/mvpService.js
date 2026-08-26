@@ -164,7 +164,18 @@ export async function getCurrentUser() {
     error,
   } = await supabase.auth.getUser();
 
-  if (error) throw error;
+  if (error) {
+    // supabase-js throws AuthSessionMissingError from getUser() when there's
+    // no active session at all -- the normal, expected state for an
+    // anonymous visitor -- rather than returning { user: null } the way
+    // getSession() does. Treat it as "not signed in", not a real backend
+    // failure: without this, every logged-out visit surfaced a scary "Auth
+    // session missing! -- some data may be out of date" banner and a console
+    // error on first load, App.jsx's initialize() catch block having no way
+    // to tell this apart from an actual connectivity problem.
+    if (error.name === "AuthSessionMissingError") return null;
+    throw error;
+  }
 
   return user || null;
 }

@@ -15,7 +15,7 @@ import { createClient } from '@supabase/supabase-js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { seedRealSession, getTestUserId } from './helpers/realSession.js';
+import { seedRealSession, getTestUserId, getTestUserSession } from './helpers/realSession.js';
 import { resolveServiceRoleKey } from './helpers/resolveServiceRoleKey.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -54,12 +54,21 @@ test.describe.serial('Marketplace messaging: block, report, attachments, availab
 
     // start_conversation/send_message key off auth.uid(), which the
     // service_role client doesn't have -- seed the thread via a real
-    // signed-in call instead.
+    // signed-in client instead. Was a hardcoded signInWithPassword() call
+    // with a literal password that predates the 2026-08-18 credential-
+    // rotation incident (SECURITY.md) and has been silently wrong since --
+    // aliceClient never actually got a session, so seededConv/convId were
+    // undefined all along and every check further down this file that
+    // depends on convId (the report test) was comparing against nothing.
+    // Reuse the same real session seedRealSession() seeds into the browser.
     const aliceClient = createClient(SUPABASE_URL, readEnvVar('VITE_SUPABASE_PUBLISHABLE_KEY'));
-    await aliceClient.auth.signInWithPassword({ email: ALICE, password: 'TestPass!2026Alice' });
-    const { data: seededConv } = await aliceClient.rpc('start_conversation', { p_other_user: bobId, p_listing_id: null });
+    const { error: setSessionError } = await aliceClient.auth.setSession(getTestUserSession(ALICE));
+    if (setSessionError) throw setSessionError;
+    const { data: seededConv, error: startConvError } = await aliceClient.rpc('start_conversation', { p_other_user: bobId, p_listing_id: null });
+    if (startConvError) throw startConvError;
     convId = seededConv;
-    await aliceClient.rpc('send_message', { p_conversation_id: convId, p_body: 'hello from the live spec', p_attachment_path: null });
+    const { error: sendMessageError } = await aliceClient.rpc('send_message', { p_conversation_id: convId, p_body: 'hello from the live spec', p_attachment_path: null });
+    if (sendMessageError) throw sendMessageError;
   });
 
   test.afterAll(async () => {

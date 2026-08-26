@@ -13,7 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, expect } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
-import { seedRealSession, getTestUserId } from './helpers/realSession.js';
+import { seedRealSession, getTestUserId, getTestUserSession } from './helpers/realSession.js';
 import { resolveServiceRoleKey } from './helpers/resolveServiceRoleKey.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -52,9 +52,14 @@ test.describe.serial('Emergency contacts directory', () => {
     await expect(page.getByText(/No emergency contacts yet/i)).toBeVisible({ timeout: 10000 });
     await page.getByRole('button', { name: /Add emergency contact/i }).click();
 
-    await page.getByPlaceholder(/Contact's full name/i).fill(CONTACT_NAME);
-    await page.getByPlaceholder('+91XXXXXXXXXX').fill('9876543210');
-    await page.getByRole('button', { name: /Save contact/i }).click();
+    // Scoped to the modal -- an unscoped +91XXXXXXXXXX placeholder is
+    // ambiguous with Profile's own personal-phone field, which stays
+    // mounted (and, for this reused test account, already has a value)
+    // behind this modal.
+    const modal = page.locator('.feature-modal');
+    await modal.getByPlaceholder(/Contact's full name/i).fill(CONTACT_NAME);
+    await modal.getByPlaceholder('+91XXXXXXXXXX').fill('9876543210');
+    await modal.getByRole('button', { name: /Save contact/i }).click();
 
     await expect(page.getByText('Emergency contact added')).toBeVisible({ timeout: 10000 });
     const row = page.locator('.resource-row', { hasText: CONTACT_NAME });
@@ -91,8 +96,10 @@ test.describe.serial('Emergency contacts directory', () => {
     await expect(row).toContainText('Verified', { timeout: 10000 });
 
     await row.getByRole('button').first().click(); // edit (pencil icon button)
-    await page.getByPlaceholder('+91XXXXXXXXXX').fill('9876543299');
-    await page.getByRole('button', { name: /Save contact/i }).click();
+    // Same modal-scoping fix as the "adds a contact" test above.
+    const editModal = page.locator('.feature-modal');
+    await editModal.getByPlaceholder('+91XXXXXXXXXX').fill('9876543299');
+    await editModal.getByRole('button', { name: /Save contact/i }).click();
     await expect(page.getByText('Emergency contact updated')).toBeVisible({ timeout: 10000 });
 
     row = page.locator('.resource-row', { hasText: CONTACT_NAME });
@@ -106,7 +113,12 @@ test.describe.serial('Emergency contacts directory', () => {
     // not re-proving SOS dispatch itself).
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
     const aliceClient = createClient(SUPABASE_URL, readEnvVar('VITE_SUPABASE_PUBLISHABLE_KEY'));
-    await aliceClient.auth.signInWithPassword({ email: ALICE, password: 'TestPass!2026Alice' });
+    // Same fix as 23-marketplace-messaging.spec.js: a hardcoded literal
+    // password here predates the 2026-08-18 credential-rotation incident
+    // and has been silently wrong (failed sign-in) since -- reuse the real
+    // session seedRealSession() already seeds into the browser instead.
+    const { error: setSessionError } = await aliceClient.auth.setSession(getTestUserSession(ALICE));
+    if (setSessionError) throw setSessionError;
     const { error } = await aliceClient.rpc('trigger_sos_alert', { p_alert_type: 'help' });
     expect(error).toBeFalsy();
 

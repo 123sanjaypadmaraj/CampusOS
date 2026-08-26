@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
-import { seedRealSession } from './helpers/realSession.js';
+import { seedRealSession, getTestUserId, getTestUserSession } from './helpers/realSession.js';
 import { resolveServiceRoleKey } from './helpers/resolveServiceRoleKey.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -55,7 +55,9 @@ test.describe.serial('Admin user management', () => {
 
     page.once('dialog', (dialog) => dialog.accept('E2E suspension test'));
     await row.getByRole('button', { name: 'Suspend' }).click();
-    await expect(page.getByText('Bob Test suspended')).toBeVisible({ timeout: 10000 });
+    // Scoped to the toast -- unscoped getByText is ambiguous with the row's
+    // own "Bob Test SUSPENDED" badge, case-insensitive by default.
+    await expect(page.locator('.toast', { hasText: 'Bob Test suspended' })).toBeVisible({ timeout: 10000 });
     await expect(row).toContainText('SUSPENDED');
     await expect(row).toContainText('E2E suspension test');
 
@@ -120,6 +122,14 @@ test.describe.serial('Admin user management', () => {
   });
 
   test('a suspended account is actually blocked from posting, not just hidden from search', async ({ browser }) => {
+    // This test drives two full browser contexts (admin + Bob) through two
+    // full page loads and a suspend/reactivate round-trip each -- roughly
+    // double the work of the simpler suspend+reactivate test above, and it
+    // was consistently landing right on the default 45s test timeout
+    // against the real deployed staging app (not a mock), cutting off the
+    // finally block's own reactivate call mid-flight and leaving Bob's
+    // account suspended for every test that runs after this one.
+    test.setTimeout(90000);
     const adminContext = await browser.newContext();
     const adminPage = await adminContext.newPage();
     await seedRealSession(adminContext, ADMIN);
@@ -134,21 +144,31 @@ test.describe.serial('Admin user management', () => {
 
     adminPage.once('dialog', (dialog) => dialog.accept('E2E enforcement test'));
     await bobRow.getByRole('button', { name: 'Suspend' }).click();
-    await expect(adminPage.getByText('Bob Test suspended')).toBeVisible({ timeout: 10000 });
+    // Scoped to the toast, same ambiguity as the sibling test above.
+    await expect(adminPage.locator('.toast', { hasText: 'Bob Test suspended' })).toBeVisible({ timeout: 10000 });
 
     try {
-      const bobContext = await browser.newContext();
-      const bobPage = await bobContext.newPage();
-      await seedRealSession(bobContext, 'e2e.bob@nhce.edu.in');
-      await bobPage.goto('/');
-      await bobPage.waitForLoadState('networkidle');
-      await bobPage.locator('nav.bottom-nav button', { hasText: 'Campus' }).click();
-      await bobPage.getByRole('button', { name: /Create post/i }).click();
-      await bobPage.getByLabel(/Post type/i).selectOption('Hackathon');
-      await bobPage.getByLabel(/What do you want to say/i).fill(`Should be blocked ${Date.now()}`);
-      await bobPage.getByRole('button', { name: /Publish/i }).click();
-      await expect(bobPage.getByText(/suspended/i)).toBeVisible({ timeout: 10000 });
-      await bobContext.close();
+      // Was driving the full Create-post UI flow -- but App.jsx gates the
+      // *entire* app behind SuspendedAccountScreen for a suspended profile
+      // (not just specific actions), so "Create post" structurally never
+      // exists to click while suspended and this hung against Playwright's
+      // default actionability timeout every time, eating the whole test
+      // budget before ever reaching the reactivate step below. This test's
+      // own name says what it actually needs to prove -- "blocked from
+      // posting, not just hidden from search", i.e. real server-side
+      // enforcement, not merely a UI gate -- so call the same insert
+      // publishPost() makes directly, exactly like the pre-existing
+      // reject_if_suspended() trigger (20260814003000_enforce_account_
+      // suspension.sql) is meant to be exercised.
+      const bobClient = createClient(SUPABASE_URL, readEnvVar('VITE_SUPABASE_PUBLISHABLE_KEY'));
+      const { error: setSessionError } = await bobClient.auth.setSession(getTestUserSession('e2e.bob@nhce.edu.in'));
+      if (setSessionError) throw setSessionError;
+      const bobId = getTestUserId('e2e.bob@nhce.edu.in');
+      const { error: postError } = await bobClient
+        .from('posts')
+        .insert({ author_id: bobId, type: 'General', title: `Should be blocked ${Date.now()}`, content: 'test' });
+      expect(postError).toBeTruthy();
+      expect(postError.message).toMatch(/suspended/i);
     } finally {
       // Always reactivate, even if the assertions above throw.
       adminPage.once('dialog', (dialog) => dialog.accept());

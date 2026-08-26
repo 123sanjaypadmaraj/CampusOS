@@ -81,15 +81,30 @@ async function simulatePaymentCapture(studentSb, admin, orderId) {
   if (createPaymentErr) throw new Error(`create_payment_order failed: ${createPaymentErr.message}`);
 
   const gatewayOrderId = `live-check-food-hardening-${orderId}`;
-  const { error: payErr } = await admin.from("payments").update({ gateway_order_id: gatewayOrderId }).eq("order_id", orderId).eq("status", "created");
+  const { data: stampedPayment, error: payErr } = await admin
+    .from("payments")
+    .update({ gateway_order_id: gatewayOrderId })
+    .eq("order_id", orderId)
+    .eq("status", "created")
+    .select("amount")
+    .single();
   if (payErr) throw new Error(`Could not stamp gateway_order_id: ${payErr.message}`);
 
+  // record_payment_event() (20260824000700) requires the webhook payload's
+  // payload.payment.entity.amount (paise) to match payments.amount*100, or
+  // it records the event but does NOT flip the order to paid -- match that
+  // real Razorpay webhook shape here, not a bare marker object.
+  const gatewayPaymentId = `live-check-payment-${orderId}`;
   const { error: eventErr } = await admin.rpc("record_payment_event", {
     p_gateway_order_id: gatewayOrderId,
-    p_gateway_payment_id: `live-check-payment-${orderId}`,
+    p_gateway_payment_id: gatewayPaymentId,
     p_status: "captured",
     p_signature_verified: true,
-    p_raw_payload: { source: "live-check-food-hardening.mjs" },
+    p_raw_payload: {
+      source: "live-check-food-hardening.mjs",
+      event: "payment.captured",
+      payload: { payment: { entity: { id: gatewayPaymentId, order_id: gatewayOrderId, amount: Math.round(stampedPayment.amount * 100) } } },
+    },
   });
   if (eventErr) throw new Error(`record_payment_event failed: ${eventErr.message}`);
 }
@@ -161,9 +176,13 @@ async function main() {
     const { error: bobAcceptErr } = await bob.sb.rpc("transition_order_status", { p_order_id: order1.id, p_to_status: "ACCEPTED" });
     check("Staff sub-account can advance an order for their canteen", !bobAcceptErr, bobAcceptErr?.message);
 
-    const { error: bobMenuWriteErr } = await bob.sb.from("food_items").update({ price: 999 }).eq("id", stockItem.id);
+    // Staff sub-accounts are full owner-equivalent "managers" as of
+    // 20260819000300_vendor_manager_accounts.sql + the 20260819000800 fix
+    // (food.menu.write granted to the vendor_staff role) -- there is no
+    // kitchen/cashier split, so this is expected to succeed, not be rejected.
+    const { error: bobMenuWriteErr } = await bob.sb.from("food_items").update({ price: 60 }).eq("id", stockItem.id);
     const { data: priceCheck } = await admin.from("food_items").select("price").eq("id", stockItem.id).single();
-    check("Staff sub-account cannot write menu items (price unchanged)", Number(priceCheck.price) !== 999, priceCheck.price);
+    check("Staff sub-account (manager) can write menu items", !bobMenuWriteErr && Number(priceCheck.price) === 60, bobMenuWriteErr || priceCheck.price);
 
     const { error: bobRefundErr } = await bob.sb.rpc("request_refund", { p_order_id: order1.id, p_amount: 100, p_reason: "test" });
     check("Staff sub-account cannot initiate refunds", !!bobRefundErr, bobRefundErr?.message);

@@ -27,18 +27,27 @@ function readEnvVar(name) {
 // .env currently says.
 const SUPABASE_URL = process.env.LIVE_CHECK_SUPABASE_URL || readEnvVar("VITE_SUPABASE_URL");
 const ANON_KEY = process.env.LIVE_CHECK_ANON_KEY || readEnvVar("VITE_SUPABASE_PUBLISHABLE_KEY");
-const facilitiesCreds = JSON.parse(
-  fs.readFileSync(path.join(root, "scripts/.facilities-credentials.local.json"), "utf8")
-);
 
 // e2e.alice/bob no longer have fixed literal passwords (2026-08-18
 // credential-rotation incident, see SECURITY.md) -- read from the same
 // gitignored file every other live-check script now reads from. This
 // script doesn't go through env-target.mjs's resolveTarget(), so infer
 // staging-vs-production from which SUPABASE_URL actually resolved instead.
-const e2eCredsFile = SUPABASE_URL.includes("dzjzjlylsfpmymkcavrq")
+const isProduction = SUPABASE_URL.includes("dzjzjlylsfpmymkcavrq");
+const e2eCredsFile = isProduction
   ? ".e2e-credentials.local.json"
   : ".e2e-credentials.staging.local.json";
+// Bug fix: this used to hardcode the PRODUCTION facilities-credentials
+// filename regardless of target, so a default (staging) run signed in with
+// prod's facilities.staff password against the staging project and failed
+// with "Invalid login credentials" -- same class of bug live-check-campus-
+// store.mjs already had fixed, this script never got the same fix.
+const facilitiesCredsFile = isProduction
+  ? ".facilities-credentials.local.json"
+  : ".facilities-credentials.staging.local.json";
+const facilitiesCreds = JSON.parse(
+  fs.readFileSync(path.join(root, "scripts", facilitiesCredsFile), "utf8")
+);
 const e2eCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts", e2eCredsFile), "utf8"));
 const e2ePassword = (email) => {
   const password = e2eCreds.find((r) => r.email === email)?.password;

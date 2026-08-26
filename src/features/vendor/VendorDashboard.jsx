@@ -640,7 +640,7 @@ function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
           ownerId={canteen.owner_id}
           categories={categories}
           onClose={() => setItemModal(null)}
-          onSaved={(saved) => { setItemModal(saved); reload(); }}
+          onSaved={() => { setItemModal(null); reload(); }}
           notify={notify}
         />
       )}

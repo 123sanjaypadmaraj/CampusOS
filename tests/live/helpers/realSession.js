@@ -50,6 +50,21 @@ export function getTestUserId(email) {
   return entry.userId;
 }
 
+// For specs that need an authenticated supabase-js client of their own (not
+// just a seeded browser context) -- e.g. to call an RPC that keys off
+// auth.uid() from Node, like start_conversation/send_message. Returns the
+// same real session seedRealSession() injects into the browser, so callers
+// pass it to `supabase.auth.setSession(...)` instead of re-deriving one via
+// signInWithPassword() with a literal password -- test accounts haven't had
+// fixed literal passwords since the 2026-08-18 credential-rotation incident
+// (see SECURITY.md), so a hardcoded password string here would just be
+// silently wrong and fail sign-in.
+export function getTestUserSession(email) {
+  const entry = SESSIONS[email];
+  if (!entry) throw new Error(`No session found for ${email} -- run scripts/setup-test-users.mjs first`);
+  return entry.session;
+}
+
 export async function seedRealSession(context, email) {
   const entry = SESSIONS[email];
   if (!entry) throw new Error(`No session found for ${email} -- run scripts/setup-test-users.mjs first`);

@@ -125,8 +125,12 @@ test('Services: Marketplace -- create a listing', async ({ page }) => {
   await page.getByRole('button', { name: /Campus Marketplace/i }).click();
   await page.waitForLoadState('networkidle');
   await page.getByRole('button', { name: /Create listing/i }).click();
-  await page.getByLabel(/Title/i).fill(marker);
-  await page.getByLabel(/Price/i).fill('99');
+  // Scoped to the modal -- unscoped getByLabel(/Price/i) is ambiguous with
+  // the marketplace filter panel's "Maximum price" field, which stays
+  // mounted behind the modal.
+  const modal = page.locator('.feature-modal');
+  await modal.getByLabel(/Title/i).fill(marker);
+  await modal.getByLabel(/Price/i).fill('99');
   await page.getByRole('button', { name: /Publish listing/i }).click();
   await expect(page.getByText(marker)).toBeVisible({ timeout: 10000 });
 });

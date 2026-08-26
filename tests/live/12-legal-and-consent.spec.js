@@ -12,7 +12,11 @@ const ALICE = 'e2e.alice@nhce.edu.in';
 
 test.describe.serial('Legal page + signup consent', () => {
   test('signup is blocked until the consent checkbox is checked', async ({ page }) => {
-    const usn = `E2E${Date.now().toString().slice(-7)}`.slice(0, 10).padEnd(10, '0');
+    // Must match the real NHCE USN structure the signup form enforces for
+    // new accounts (App.jsx's handleSubmit / src/features/auth/usn.ts's
+    // USN_PATTERN: \dNH\d{2}[A-Za-z]{2}\d{3}) -- see the identical fix/note
+    // in 03-usn-login-and-cms.spec.js.
+    const usn = `1NH25XY${Date.now().toString().slice(-3)}`;
     await page.goto('/');
     await page.waitForLoadState('networkidle');
 
