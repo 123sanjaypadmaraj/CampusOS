@@ -265,6 +265,10 @@ import {
   HiBuildingStorefront,
 } from "react-icons/hi2";
 import { FaLinkedin, FaGithub, FaGoogle } from "react-icons/fa6";
+import { Capacitor } from "@capacitor/core";
+import { App as CapacitorApp } from "@capacitor/app";
+import { StatusBar, Style as StatusBarStyle } from "@capacitor/status-bar";
+import { SplashScreen } from "@capacitor/splash-screen";
 
 /* =========================================================
    NAVIGATION
@@ -324,6 +328,21 @@ const pathToKey = (pathname) => {
   const key = pathname.replace(/^\/+|\/+$/g, "") || "home";
   return ROUTABLE_KEYS.has(key) ? key : "home";
 };
+
+/* =========================================================
+   PLATFORM (native wrapper -- doc PLATFORM_ADAPTIVE_LAYOUT)
+   Same web build (this whole file) runs three places: a plain browser tab,
+   and -- via Capacitor -- an installed iOS app and an installed Android
+   app. Capacitor.getPlatform() is synchronous and never changes for the
+   life of the page, so this is a module-level constant rather than state,
+   the same way navItems/ROUTABLE_KEYS above are constants: 'web' | 'ios' |
+   'android'. Applied as a className on .app-shell (see the darkMode
+   className right next to it) so CSS can target
+   .platform-ios/.platform-android without touching the .platform-web
+   (default) case at all.
+========================================================= */
+const PLATFORM = Capacitor.getPlatform();
+const IS_NATIVE = Capacitor.isNativePlatform();
 
 /* =========================================================
    FREE DEMO FOOD IMAGES
@@ -1219,6 +1238,12 @@ function App() {
   // which still works unchanged since it just reuses/reawaits whatever
   // registration is already in place by the time someone opts in).
   useEffect(() => {
+    // Inside a Capacitor native shell the app already ships its assets
+    // locally (no need for an offline app-shell cache) and Web Push -- the
+    // other half of what public/sw.js does -- doesn't work in a native
+    // WebView at all (iOS) or reliably (Android); registering it there
+    // would just be dead weight, so skip it entirely on native.
+    if (IS_NATIVE) return;
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
     navigator.serviceWorker.register("/sw.js").catch(() => {});
   }, []);
@@ -1286,6 +1311,51 @@ function App() {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
+
+  // Android hardware/gesture back button -- standard Android UX is "go back
+  // one screen, and only exit the app from the root screen." We already
+  // have a real navigation stack via go()'s pushState + the popstate
+  // listener above, so this reuses it rather than building a second one:
+  // one step back just replays browser history, which the popstate
+  // listener already turns into the right setActive(). No-ops entirely on
+  // web/iOS (iOS has no hardware back button; Capacitor doesn't fire this
+  // event there).
+  const activeRef = useRef(active);
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
+  useEffect(() => {
+    if (PLATFORM !== "android") return;
+    const handle = CapacitorApp.addListener("backButton", () => {
+      if (activeRef.current === "home") {
+        CapacitorApp.exitApp();
+      } else {
+        window.history.back();
+      }
+    });
+    return () => {
+      handle.then((h) => h.remove());
+    };
+  }, []);
+
+  // Native chrome that has no web equivalent: hide the launch splash once
+  // the shell has actually mounted (capacitor.config.ts also auto-hides it
+  // after 0ms as a fallback -- this is the explicit, "only once we're
+  // really ready" version; calling hide() when it's already hidden is a
+  // documented no-op) and keep the status bar's light/dark style in sync
+  // with the same darkMode state that already drives .dark-mode/.light-mode
+  // on .app-shell.
+  useEffect(() => {
+    if (!IS_NATIVE) return;
+    SplashScreen.hide().catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (!IS_NATIVE) return;
+    StatusBar.setStyle({ style: darkMode ? StatusBarStyle.Dark : StatusBarStyle.Light }).catch(() => {});
+    if (PLATFORM === "android") {
+      StatusBar.setBackgroundColor({ color: darkMode ? "#0c0d12" : "#faf9fc" }).catch(() => {});
+    }
+  }, [darkMode]);
 
   // Single source of truth for document.title, covering every way `active`
   // can change (go(), popstate, and the very first render) instead of
@@ -2466,7 +2536,7 @@ function App() {
   };
 
   return (
-    <div className={`app-shell ${darkMode ? "dark-mode" : "light-mode"}`}>
+    <div className={`app-shell ${darkMode ? "dark-mode" : "light-mode"} platform-${PLATFORM}`}>
       <a href="#main-content" className="skip-link">
         Skip to main content
       </a>

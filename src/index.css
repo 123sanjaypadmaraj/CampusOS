@@ -4651,6 +4651,77 @@
   background: #00000011;
 }
 
+/* =========================================================
+   PLATFORM-ADAPTIVE LAYOUT (native wrapper via Capacitor)
+   .platform-web (the default; see App.jsx's PLATFORM constant) keeps
+   today's floating pill dock and topbar pixel-for-pixel -- nothing below
+   targets it. .platform-ios/.platform-android replace the floating
+   bottom-nav with an edge-to-edge bar matching each platform's own
+   tab-bar convention, and account for the safe-area insets
+   viewport-fit=cover now exposes (notch/Dynamic Island up top, the
+   gesture-nav strip at the bottom) -- see index.html's viewport meta.
+   env(safe-area-inset-*) resolves to 0 wherever there's no notch, so
+   none of this shifts anything on a normal rectangular screen.
+========================================================= */
+.platform-ios .app-shell,
+.platform-android .app-shell {
+  padding-bottom: calc(64px + env(safe-area-inset-bottom));
+}
+
+.platform-ios .topbar,
+.platform-android .topbar {
+  height: auto;
+  min-height: 74px;
+  padding-top: env(safe-area-inset-top);
+}
+
+.platform-ios .offline-banner,
+.platform-android .offline-banner {
+  top: calc(74px + env(safe-area-inset-top));
+}
+
+.platform-ios .modal-backdrop,
+.platform-android .modal-backdrop {
+  padding:
+    max(20px, env(safe-area-inset-top))
+    max(20px, env(safe-area-inset-right))
+    max(20px, env(safe-area-inset-bottom))
+    max(20px, env(safe-area-inset-left));
+}
+
+.platform-ios .bottom-nav,
+.platform-android .bottom-nav {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  transform: none;
+  width: 100%;
+  border-radius: 0;
+  box-shadow: none;
+  justify-content: space-around;
+  padding: 8px 6px calc(8px + env(safe-area-inset-bottom));
+}
+
+.platform-ios .bottom-nav button,
+.platform-android .bottom-nav button {
+  width: auto;
+  flex: 1;
+}
+
+/* iOS: translucent frosted-glass tab bar, matching UIKit's default look. */
+.platform-ios .bottom-nav {
+  background: rgba(23, 21, 31, 0.85);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Android: solid Material elevated surface, not glassy. */
+.platform-android .bottom-nav {
+  background: #17151f;
+  box-shadow: 0 -2px 16px rgba(0, 0, 0, 0.3);
+}
+
 /* Skip-to-content link (doc §9 accessibility pass): off-screen until
    keyboard-focused, so sighted mouse users never see it but a keyboard or
    screen-reader user tabbing in from the address bar gets a way to jump

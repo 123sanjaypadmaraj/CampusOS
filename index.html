@@ -2,7 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover lets the page draw under the iPhone
+         notch/Dynamic Island and Android's gesture-nav strip instead of
+         leaving them blank; env(safe-area-inset-*) in index.css (topbar,
+         bottom-nav, modal-backdrop) then pads real content back inside
+         the safe area. Harmless no-op on browsers/devices without a
+         notch. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <link href="/src/index.css" rel="stylesheet" />
     <link href="/favicon.png" rel="icon" />
     <link href="/manifest.webmanifest" rel="manifest" />

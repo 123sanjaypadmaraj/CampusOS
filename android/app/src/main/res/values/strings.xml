@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">CampusOS</string>
+    <string name="title_activity_main">CampusOS</string>
+    <string name="package_name">in.edu.nhce.campusos</string>
+    <string name="custom_url_scheme">in.edu.nhce.campusos</string>
+</resources>
