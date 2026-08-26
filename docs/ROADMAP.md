@@ -1,5 +1,22 @@
 # Roadmap — what this hardening pass covered vs. deferred
 
+> **Stale as of 2026-08-27 — most of "Deferred" below has since shipped.**
+> This document was written 2026-08-15/17, after the *first* hardening pass.
+> Twelve more days of passes have since shipped nearly everything this file
+> lists as deferred: Campus Store (real commerce + GST/invoice/settlement),
+> print vendor + facilities dashboards, Club CMS (roles/applications/
+> documents/gallery/analytics), a full Admin CMS (user management, vendor
+> onboarding, moderation console, analytics), a full PWA (manifest, service
+> worker, install prompt), a formal Privacy Policy/ToS/consent flow + DPDP
+> data export, admin approval workflows (events, vendor accounts), the
+> campus-office Emergency Directory, a `feature_flags` table, and per-vendor
+> staff sub-accounts. **Only §109-112 (hostel module, transport-tracking
+> module) and the mentor-matching depth described under §109 are still
+> genuinely not built** — everything else below should be read as history,
+> not a current gap list. For the actual up-to-date status, read the
+> [CampusOS Readiness Audit artifact](https://claude.ai/code/artifact/2d3dfcfa-26ab-48ef-bece-40cf9346a3ab)
+> instead of this file.
+
 The source document ("CampusOS — Complete Production Implementation Plan")
 describes 114 sections covering a full multi-tenant campus super-app:
 student-facing modules, vendor/admin/facilities CMSs, payments, RBAC,
