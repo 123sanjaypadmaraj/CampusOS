@@ -340,14 +340,14 @@ CampusOS/
 ├── src/
 │   ├── main.jsx                 # React root + TanStack Query provider
 │   ├── App.jsx                  # Main application shell + most page components
-│   ├── features/
-│   │   └── payments/             # Razorpay Checkout.js wrapper
+│   ├── features/<name>/          # Component(s).jsx + api.js + tests, one folder per feature
 │   ├── components/ui/            # Shared loading/empty/error/offline states
-│   ├── services/mvpService.js    # Data layer — calls Postgres RPCs for anything
+│   ├── services/mvpService.js    # Barrel re-exporting src/services/mvpService/<domain>.js —
+│   │                              # data layer, calls Postgres RPCs for anything
 │   │                              # security-sensitive, direct reads for public data
 │   ├── lib/supabase.ts           # Supabase client
 │   ├── types/database.ts         # Hand-authored DB types (see file header)
-│   ├── hooks/                    # useAuth, useOnlineStatus
+│   ├── hooks/                    # useAuth, usePermissions, useOnlineStatus, ...
 │   └── utils/                    # orderCalculator, mvpHelpers
 │
 ├── supabase/
@@ -362,11 +362,9 @@ CampusOS/
 └── .github/workflows/ci.yml
 ```
 
-`App.jsx` is still a large file holding most page-level components. The
-service/data layer (the part that actually mattered for security and
-correctness) was fully migrated off direct table writes onto Postgres RPCs
-in this hardening pass; splitting the remaining UI into
-`src/features/<name>/components/` is tracked in `docs/ROADMAP.md`.
+See `docs/ARCHITECTURE.md` for the full module map, including the
+`mvpService/` domain breakdown and the known-monolith backlog (`App.jsx`,
+`AdminCMS.jsx`, `VendorDashboard.jsx`) with a plan for each.
 
 ---
 
