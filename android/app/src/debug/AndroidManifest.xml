@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEBUG-BUILD ONLY manifest fragment (merged by Gradle only into debug
+  variants, never release). Points the app at network_security_config.xml
+  in this same source set, which permits cleartext HTTP to the emulator
+  host-loopback alias (10.0.2.2) for local reverse-proxy testing.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:networkSecurityConfig="@xml/network_security_config" />
+</manifest>
