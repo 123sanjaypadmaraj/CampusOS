@@ -175,9 +175,22 @@ function AnnouncementForm({ profile, onClose, onSaved, notify }) {
   const [saving, setSaving] = useState(false);
 
   const scopeValue = { department: profile?.department, year: profile?.year, course: profile?.course }[scope];
+  // If none of department/year/course is set on this profile, the Audience
+  // select below renders zero options and Publish is permanently disabled
+  // with nothing to explain why -- most likely to hit a faculty account
+  // promoted straight from a bare magic-link signup (see AdminCMS.jsx's
+  // "Make faculty" onboarding action), which has no roster-backfilled
+  // department/year/course yet. Say so instead of a silent dead button.
+  const noScope = !profile?.department && !profile?.year && !profile?.course;
 
   return (
     <Modal kicker="ANNOUNCEMENTS" title="New academic announcement" onClose={onClose}>
+      {noScope && (
+        <p style={{ color: "var(--warn, #a3691f)", fontSize: 13 }}>
+          Your account has no department, year or course set, so there&rsquo;s nothing to target this to yet.
+          Ask an admin to set it (via a roster import, or directly on your profile) before publishing here.
+        </p>
+      )}
       <label>Category
         <select value={category} onChange={(e) => setCategory(e.target.value)}>
           {ANNOUNCEMENT_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
@@ -309,9 +322,22 @@ function DeadlineForm({ profile, onClose, onSaved, notify }) {
   const [saving, setSaving] = useState(false);
 
   const scopeValue = scope === "everyone" ? null : { department: profile?.department, year: profile?.year, course: profile?.course }[scope];
+  // Same gap as AnnouncementForm above: a non-admin with no department/year/
+  // course set gets an empty Audience select and, unlike that form, this
+  // one's Publish button didn't even check scopeValue -- it would submit
+  // scope="department" with an undefined target_value and only find out it
+  // was rejected from the server's raw error. Guard it explicitly and say why.
+  const noScope = !isAdmin && !profile?.department && !profile?.year && !profile?.course;
+  const audienceMissing = scope !== "everyone" && !scopeValue;
 
   return (
     <Modal kicker="ASSIGNMENTS & DEADLINES" title="New assignment/deadline notice" onClose={onClose}>
+      {noScope && (
+        <p style={{ color: "var(--warn, #a3691f)", fontSize: 13 }}>
+          Your account has no department, year or course set, so there&rsquo;s nothing to target this to yet.
+          Ask an admin to set it (via a roster import, or directly on your profile) before posting here.
+        </p>
+      )}
       <label>Category
         <select value={category} onChange={(e) => setCategory(e.target.value)}>
           {DEADLINE_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
@@ -330,7 +356,7 @@ function DeadlineForm({ profile, onClose, onSaved, notify }) {
       </label>
       <button
         className="primary wide"
-        disabled={saving || !title.trim() || !dueAt}
+        disabled={saving || !title.trim() || !dueAt || audienceMissing}
         onClick={async () => {
           setSaving(true);
           try {
@@ -442,9 +468,19 @@ function TimetableForm({ profile, onClose, onSaved, notify }) {
   const [subject, setSubject] = useState("");
   const [room, setRoom] = useState("");
   const [saving, setSaving] = useState(false);
+  // Same gap as the Announcement/Deadline forms: a non-admin faculty with no
+  // course set gets a permanently-empty, disabled Course field and a
+  // permanently-disabled Add-class button with no explanation anywhere.
+  const noScope = !isAdmin && !profile?.course;
 
   return (
     <Modal kicker="TIMETABLE" title="New class" onClose={onClose}>
+      {noScope && (
+        <p style={{ color: "var(--warn, #a3691f)", fontSize: 13 }}>
+          Your account has no course set, so there&rsquo;s no course to add a class to yet.
+          Ask an admin to set it (via a roster import, or directly on your profile) before adding classes here.
+        </p>
+      )}
       <label>Course<input value={course} onChange={(e) => setCourse(e.target.value)} placeholder="e.g. B.Tech CSE" disabled={!isAdmin} /></label>
       <label>Subject<input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="e.g. Data Structures" /></label>
       <label>Day

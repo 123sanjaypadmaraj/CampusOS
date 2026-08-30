@@ -111,6 +111,26 @@ async function main() {
     });
     check("Faculty CANNOT target another department", !!annOtherDeptErr, annOtherDeptErr?.message);
 
+    // --- Regression check for 20260831000500_fix_academic_scope_null_bypass.sql ---
+    // In plpgsql, `if <null> then` never fires. The old check was
+    // `p_target_value is null or p_target_value <> v_profile.department` --
+    // with v_profile.department itself NULL and a non-null p_target_value,
+    // the `<>` half evaluated to NULL, the whole OR could end up NULL, and
+    // `if NULL then raise` silently did NOT raise: a faculty account with no
+    // department set could target ANY department, not just "their own"
+    // (which for them was nothing). Null Alice's department momentarily to
+    // prove this is closed, then restore it before the rest of this script's
+    // department-scoped checks below run.
+    await admin.sb.from("profiles").update({ department: null }).eq("id", alice.userId);
+    const { error: annNullDeptBypassErr } = await alice.sb.rpc("publish_announcement", {
+      p_category: "Academic", p_title: `${marker} null-dept-bypass`, p_body: "Body", p_target_scope: "department", p_target_value: OTHER_DEPT,
+    });
+    check(
+      "Faculty with NO department set cannot target an arbitrary department (null-comparison bypass, fixed 31 Aug)",
+      !!annNullDeptBypassErr, annNullDeptBypassErr?.message
+    );
+    await admin.sb.from("profiles").update({ department: DEPT }).eq("id", alice.userId);
+
     const { error: annEveryoneErr } = await alice.sb.rpc("publish_announcement", {
       p_category: "Academic", p_title: `${marker} everyone`, p_body: "Body", p_target_scope: "everyone",
     });
@@ -147,6 +167,19 @@ async function main() {
       p_category: "assignment", p_title: `${marker} other-course`, p_due_at: dueAt, p_target_scope: "course", p_target_value: "B.Tech Mech",
     });
     check("Faculty CANNOT target a deadline notice at another course", !!deadlineOtherCourseErr, deadlineOtherCourseErr?.message);
+
+    // Same null-comparison bypass as the announcement check above, in
+    // create_academic_deadline()'s copy of the same pattern -- also fixed
+    // by 20260831000500_fix_academic_scope_null_bypass.sql.
+    await admin.sb.from("profiles").update({ course: null }).eq("id", alice.userId);
+    const { error: deadlineNullCourseBypassErr } = await alice.sb.rpc("create_academic_deadline", {
+      p_category: "assignment", p_title: `${marker} null-course-bypass`, p_due_at: dueAt, p_target_scope: "course", p_target_value: "B.Tech Mech",
+    });
+    check(
+      "Faculty with NO course set cannot target an arbitrary course (null-comparison bypass, fixed 31 Aug)",
+      !!deadlineNullCourseBypassErr, deadlineNullCourseBypassErr?.message
+    );
+    await admin.sb.from("profiles").update({ course: COURSE }).eq("id", alice.userId);
 
     const { error: deadlineByBobErr } = await bob.sb.rpc("create_academic_deadline", {
       p_category: "assignment", p_title: `${marker} by-bob`, p_due_at: dueAt, p_target_scope: "course", p_target_value: COURSE,
