@@ -139,6 +139,39 @@ async function main() {
   });
   check("add_canteen_staff_account is reachable by an admin and errors cleanly on an unknown email", !!staffLinkErr, staffLinkErr?.message);
 
+  // --- 5. Onboarding tab's "Make faculty" button (AdminCMS.jsx
+  // EmailLookupSection.makeFaculty -> setUserRole -> admin_set_user_role
+  // RPC) -- added because nothing could ever grant profiles.role='faculty'
+  // before this, even though the Teacher login tab has required it since
+  // the login-split pass. Round-trips alice back to her original role
+  // (captured first, not hardcoded) so this doesn't leave shared e2e state
+  // mutated for every other live-check that uses her.
+  const aliceOriginalRole = foundProfile?.role;
+  const { error: facultyPromoteErr } = await admin.sb.rpc("admin_set_user_role", {
+    p_target_user: alice.userId,
+    p_new_role: "faculty",
+    p_reason: "live-check-college-onboarding.mjs",
+  });
+  check("admin can promote a profile to faculty via admin_set_user_role", !facultyPromoteErr, facultyPromoteErr?.message);
+
+  const { data: promotedProfile } = await admin.sb.from("profiles").select("role").eq("id", alice.userId).maybeSingle();
+  check("the profile's role is now 'faculty'", promotedProfile?.role === "faculty", promotedProfile);
+
+  const { data: hasPublishPerm, error: permErr } = await admin.sb.rpc("has_permission", {
+    p_user: alice.userId,
+    p_permission: "academics.publish",
+  });
+  check("the newly-promoted faculty account holds academics.publish", !permErr && hasPublishPerm === true, permErr?.message || hasPublishPerm);
+
+  if (aliceOriginalRole) {
+    const { error: revertErr } = await admin.sb.rpc("admin_set_user_role", {
+      p_target_user: alice.userId,
+      p_new_role: aliceOriginalRole,
+      p_reason: "live-check-college-onboarding.mjs cleanup",
+    });
+    check(`alice's role is reverted back to '${aliceOriginalRole}'`, !revertErr, revertErr?.message);
+  }
+
   // --- cleanup ---
   // Deleting an auth user needs the service_role key -- admin.sb here is a
   // normal signed-in college_admin/super_admin session, which auth.admin

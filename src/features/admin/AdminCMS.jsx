@@ -3330,7 +3330,7 @@ function OnboardingTab({ notify, campusId, can }) {
         <div>
           <h2>Onboarding</h2>
           <p>
-            Bring on a vendor owner, vendor manager or facilities-staff account without a terminal.
+            Bring on a vendor owner, vendor manager, facilities-staff or faculty account without a terminal.
             Everyone starts the same way: open CampusOS &rarr; Sign in &rarr; <b>Email link</b> &rarr; their
             institutional email. That creates their account on first sign-in &mdash; come back here once
             they&rsquo;ve done that to check their email and promote them.
@@ -3378,18 +3378,32 @@ function EmailLookupSection({ notify, vendors, campusId, isSuperAdmin, onCreateV
     }
   };
 
-  const makeFacilitiesStaff = async () => {
+  const makeFacilitiesStaff = () => promoteTo("facilities_staff", "facilities staff");
+  // Closes the "no faculty-account provisioning path" gap: the Teacher
+  // login tab (App.jsx FacultyPasswordLogin) has expected profiles.role =
+  // 'faculty' accounts to exist since the login-split pass, but nothing
+  // could ever create one short of a direct DB edit -- the roster CSV's
+  // person_type='staff' only relaxes USN-shape validation and backfills
+  // department/course, it never touches profiles.role (see
+  // 20260824000500_college_roster.sql). Same admin_set_user_role()/
+  // propose_role_change() plumbing as facilities staff; academics.publish
+  // scoping to the faculty member's own department/year/course (see
+  // 20260817000300_academic_module.sql) reads profiles.department, which
+  // roster import already backfills by email match once they've signed in.
+  const makeFaculty = () => promoteTo("faculty", "faculty");
+
+  async function promoteTo(role, label) {
     if (!status?.profile) return;
     try {
       setBusy(true);
       if (isSuperAdmin) {
-        await adminApi.setUserRole(status.profile.id, "facilities_staff");
-        notify(`${status.profile.name} is now facilities staff`);
-        setStatus({ ...status, profile: { ...status.profile, role: "facilities_staff" } });
+        await adminApi.setUserRole(status.profile.id, role);
+        notify(`${status.profile.name} is now ${label}`);
+        setStatus({ ...status, profile: { ...status.profile, role } });
       } else {
-        const reason = window.prompt(`Why should ${status.profile.name} become facilities staff? (a different admin must approve)`);
+        const reason = window.prompt(`Why should ${status.profile.name} become ${label}? (a different admin must approve)`);
         if (reason === null) return;
-        await adminApi.proposeRoleChange(status.profile.id, "facilities_staff", reason);
+        await adminApi.proposeRoleChange(status.profile.id, role, reason);
         notify("Role change submitted for approval");
       }
     } catch (err) {
@@ -3397,7 +3411,7 @@ function EmailLookupSection({ notify, vendors, campusId, isSuperAdmin, onCreateV
     } finally {
       setBusy(false);
     }
-  };
+  }
 
   const addAsManager = async () => {
     if (!status?.profile || !managerTarget) return;
@@ -3458,6 +3472,7 @@ function EmailLookupSection({ notify, vendors, campusId, isSuperAdmin, onCreateV
               {status.profile.role === "student" && (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
                   <button disabled={busy} onClick={makeFacilitiesStaff}>Make facilities staff</button>
+                  <button disabled={busy} onClick={makeFaculty}>Make faculty</button>
                   <button disabled={busy} onClick={() => onCreateVendor(status.profile.email)}>Make vendor owner (new canteen/store)</button>
                 </div>
               )}
