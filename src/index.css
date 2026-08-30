@@ -5732,8 +5732,11 @@
 /* =========================================================
    MESSAGING
 ========================================================= */
-.messages-layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 20px; overflow: hidden; min-height: 520px; }
-.messages-list { border-right: 1px solid var(--border); overflow-y: auto; max-height: 640px; }
+.messages-layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 20px; overflow: hidden; min-height: 560px; }
+.messages-list { border-right: 1px solid var(--border); overflow-y: auto; max-height: 640px; display: flex; flex-direction: column; }
+.messages-list-head { position: sticky; top: 0; background: var(--surface); z-index: 1; border-bottom: 1px solid var(--border); }
+.messages-new-actions { display: flex; gap: 8px; padding: 8px 12px 12px; }
+.messages-new-actions button { font-size: 11px; padding: 6px 10px; }
 .message-thread-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 14px 16px; text-align: left; border-bottom: 1px solid var(--border); position: relative; color: var(--text); }
 .message-thread-row.active, .message-thread-row:hover { background: var(--surface-2); }
 .message-thread-row div { min-width: 0; }
@@ -5741,20 +5744,68 @@
 .message-thread-row small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .message-thread-row small.listing-tag { color: var(--purple); font-weight: 700; }
 .message-thread-row i { position: absolute; right: 14px; top: 14px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; font-size: 10px; font-style: normal; background: var(--purple); color: #fff; display: grid; place-items: center; }
-.messages-thread { display: flex; flex-direction: column; min-height: 520px; }
-.messages-thread-head { padding: 16px; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
-.messages-thread-head b { display: block; font-size: 14px; }
-.messages-thread-head small { color: var(--muted); font-size: 11px; }
-.messages-thread-actions { display: flex; gap: 8px; flex-shrink: 0; }
-.messages-thread-actions button { font-size: 11px; padding: 6px 10px; }
-.messages-thread-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; max-height: 460px; }
-.message-bubble { max-width: 70%; padding: 10px 13px; border-radius: 14px; background: var(--surface-2); }
+.big-avatar.group { background: var(--soft, var(--surface-2)); color: var(--purple); display: grid; place-items: center; }
+.messages-thread { display: flex; flex-direction: column; min-height: 560px; }
+.messages-thread-head { padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
+.thread-back-btn { display: none; background: none; border: none; color: var(--text); padding: 6px; cursor: pointer; flex-shrink: 0; }
+.messages-thread-title { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; background: none; border: none; text-align: left; padding: 6px; cursor: default; color: var(--text); }
+.messages-thread-title.clickable { cursor: pointer; }
+.messages-thread-title.clickable:hover { background: var(--surface-2); border-radius: 10px; }
+.messages-thread-title b { display: block; font-size: 14px; }
+.messages-thread-title small { color: var(--muted); font-size: 11px; }
+.messages-thread-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.messages-thread-actions button { font-size: 11px; padding: 6px 10px; display: inline-flex; align-items: center; gap: 4px; }
+.thread-search small { white-space: nowrap; color: var(--muted); }
+/* Top padding is deliberately taller than the sides/bottom -- the
+   hover-action bar (and its inline reaction picker) is absolutely
+   positioned *above* a bubble via a negative offset, and this container's
+   own overflow-y:auto clips anything positioned outside its box regardless
+   of z-index. Without headroom, the very first message in a thread (the
+   one right after the "created the group" divider, so also the one
+   someone is most likely to react to first) had its hover actions clipped
+   half-offscreen -- caught via manual browser verification, not a test. */
+.messages-thread-body { flex: 1; overflow-y: auto; padding: 44px 16px 16px; display: flex; flex-direction: column; gap: 6px; max-height: 460px; }
+.message-date-divider { display: flex; align-items: center; justify-content: center; margin: 10px 0 4px; }
+.message-date-divider span { background: var(--surface-2); color: var(--muted); font-size: 10px; font-weight: 700; padding: 4px 12px; border-radius: 999px; }
+.message-system-row { display: flex; justify-content: center; margin: 6px 0; }
+.message-system-row span { background: var(--surface-2); color: var(--muted); font-size: 11px; padding: 5px 12px; border-radius: 999px; text-align: center; max-width: 80%; }
+.message-bubble { max-width: 70%; padding: 8px 12px 6px; border-radius: 14px; background: var(--surface-2); position: relative; }
+.message-bubble.highlighted { outline: 2px solid var(--purple); outline-offset: 2px; }
 .message-bubble p { margin: 0; font-size: 13px; white-space: pre-wrap; word-break: break-word; }
-.message-bubble small { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: var(--muted); font-size: 10px; }
+.message-bubble small { display: flex; align-items: center; gap: 4px; margin-top: 4px; color: var(--muted); font-size: 10px; }
+.message-sender-name { display: block; font-size: 11px; font-weight: 700; color: var(--purple); margin-bottom: 2px; }
 .message-bubble.mine { align-self: flex-end; background: var(--purple); }
 .message-bubble.mine p { color: #fff; }
 .message-bubble.mine small { color: #ffffffaa; }
-.message-deleted { font-style: italic; opacity: 0.75; }
+.message-deleted { font-style: italic; opacity: 0.75; margin: 0; font-size: 13px; }
+.message-reply-quote { display: block; width: 100%; text-align: left; background: #0002; border: none; border-left: 3px solid var(--purple); border-radius: 6px; padding: 4px 8px; margin-bottom: 6px; cursor: pointer; }
+.message-bubble.mine .message-reply-quote { background: #ffffff26; border-left-color: #fff; }
+.message-reply-quote b { display: block; font-size: 10px; color: var(--purple); }
+.message-bubble.mine .message-reply-quote b { color: #fff; }
+.message-reply-quote span { display: block; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.message-bubble.mine .message-reply-quote span { color: #ffffffcc; }
+.message-ticks { display: inline-flex; align-items: center; }
+.message-ticks svg { width: 12px; height: 12px; }
+.message-ticks svg.read { color: #6cd0ff; }
+.reaction-pills { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.reaction-pill { font-size: 11px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; }
+.message-bubble.mine .reaction-pill { background: #ffffff26; border-color: #ffffff40; color: #fff; }
+.reaction-pill.mine { border-color: var(--purple); }
+.message-hover-actions { position: absolute; top: -14px; right: 8px; display: none; gap: 2px; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 3px; box-shadow: 0 4px 14px #0002; }
+.message-bubble:hover .message-hover-actions { display: flex; }
+.message-hover-actions button { background: none; border: none; color: var(--muted); width: 24px; height: 24px; border-radius: 999px; display: grid; place-items: center; cursor: pointer; }
+.message-hover-actions button:hover { background: var(--surface-2); color: var(--text); }
+.message-hover-actions svg { width: 14px; height: 14px; }
+.message-hover-actions svg.starred { color: #f0a83c; }
+.reaction-picker { display: flex; gap: 2px; }
+.reaction-picker button { background: none; border: none; font-size: 15px; cursor: pointer; padding: 2px; line-height: 1; }
+.reaction-picker button:hover { transform: scale(1.2); }
+.typing-indicator-row { padding: 4px 4px 0; }
+.typing-indicator-row span { color: var(--muted); font-size: 11px; font-style: italic; }
+.reply-preview-strip { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 16px; border-top: 1px solid var(--border); background: var(--surface-2); }
+.reply-preview-strip b { display: block; font-size: 11px; color: var(--purple); }
+.reply-preview-strip span { display: block; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60vw; }
+.reply-preview-strip button { background: none; border: none; color: var(--muted); cursor: pointer; }
 .message-delete-btn { background: none; border: none; padding: 0; color: inherit; opacity: 0.7; cursor: pointer; display: inline-flex; }
 .message-delete-btn:hover { opacity: 1; }
 .message-attachment-img { display: block; max-width: 220px; max-height: 220px; border-radius: 10px; cursor: pointer; object-fit: cover; }
@@ -5766,12 +5817,39 @@
 .messages-compose.blocked { color: var(--muted); font-size: 12px; align-items: center; justify-content: center; }
 .messages-search { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--muted); }
 .messages-search input { flex: 1; border: none; background: transparent; outline: none; color: var(--text); font-size: 12px; }
+.messages-search.modal-search { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; }
 .blocked-tag { color: var(--muted); font-weight: 400; }
 .blocked-user-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .blocked-user-row:last-child { border-bottom: none; }
+.starred-message-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.starred-message-row:last-child { border-bottom: none; }
+.starred-message-row b { display: block; font-size: 13px; }
+.starred-message-row p { margin: 2px 0; font-size: 12px; color: var(--text); }
+.starred-message-row small { color: var(--muted); font-size: 10px; }
 .availability-chip { display: inline-block; margin-top: 2px; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; }
 .availability-chip.away { background: color-mix(in srgb, #f0a83c 20%, transparent); color: #b57515; }
-@media (max-width: 720px) { .messages-layout { grid-template-columns: minmax(0, 1fr); } .messages-list { max-height: 220px; } }
+.member-picker-list { max-height: 340px; overflow-y: auto; margin: 0 -6px; }
+.member-picker-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 6px; text-align: left; background: none; border: none; border-radius: 10px; cursor: pointer; color: var(--text); }
+.member-picker-row:hover { background: var(--surface-2); }
+.member-picker-row.selected { background: color-mix(in srgb, var(--purple) 12%, transparent); }
+.member-picker-row.static { cursor: default; }
+.member-picker-row.static:hover { background: none; }
+.member-picker-row div { flex: 1; min-width: 0; }
+.member-picker-row b { display: block; font-size: 13px; }
+.member-picker-row small { display: block; color: var(--muted); font-size: 11px; }
+.member-picker-check { color: var(--purple); width: 18px; display: grid; place-items: center; }
+.ghost.small { font-size: 11px; padding: 6px 10px; }
+.ghost.danger { color: #d64545; }
+.feature-modal.wide { width: min(720px, 100%); }
+@media (max-width: 720px) {
+  .messages-layout { grid-template-columns: minmax(0, 1fr); }
+  .messages-list { display: flex; max-height: none; }
+  .messages-thread { display: none; }
+  .messages-layout.thread-open .messages-list { display: none; }
+  .messages-layout.thread-open .messages-thread { display: flex; }
+  .thread-back-btn { display: inline-flex; align-items: center; justify-content: center; }
+  .reply-preview-strip span { max-width: 50vw; }
+}
 
 /* =========================================================
    GLOBAL SEARCH

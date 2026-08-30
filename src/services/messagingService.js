@@ -24,11 +24,12 @@ export async function startConversation(otherUserId, listingId = null) {
   return data;
 }
 
-export async function sendMessage(conversationId, body, attachmentPath = null) {
+export async function sendMessage(conversationId, body, attachmentPath = null, replyToMessageId = null) {
   const { data, error } = await supabase.rpc("send_message", {
     p_conversation_id: conversationId,
     p_body: body,
     p_attachment_path: attachmentPath,
+    p_reply_to_message_id: replyToMessageId,
   });
   throwIfError(error);
   return data;
@@ -137,7 +138,7 @@ export async function getUnreadMessageCount() {
 export async function getConversationMessages(conversationId) {
   const { data, error } = await supabase
     .from("messages")
-    .select("id, conversation_id, sender_id, body, attachment_path, deleted_at, deleted_by, created_at")
+    .select("id, conversation_id, sender_id, body, attachment_path, deleted_at, deleted_by, created_at, reply_to_message_id, message_type")
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: true });
 
@@ -169,7 +170,190 @@ export function subscribeToConversationMessages(conversationId, callback) {
       },
       callback
     )
+    // Reactions are denormalized with conversation_id (see the 20260830
+    // migration) purely so they can ride the same per-thread channel/filter
+    // as messages, rather than a separate broad-then-RLS-narrows subscription.
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "message_reactions",
+        filter: `conversation_id=eq.${conversationId}`,
+      },
+      callback
+    )
     .subscribe(realtimeStatusLogger("messages"));
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
+/*
+|--------------------------------------------------------------------------
+| Group chat -- create/manage N-participant conversations. DM/listing
+| conversations (start_conversation, above) stay exactly 2 participants;
+| these are the only entry points that produce/mutate a kind='group' row.
+| See 20260830000200_messaging_whatsapp_features.sql.
+|--------------------------------------------------------------------------
+*/
+
+export async function createGroupConversation(title, memberIds) {
+  const { data, error } = await supabase.rpc("create_group_conversation", {
+    p_title: title,
+    p_member_ids: memberIds,
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function addGroupMember(conversationId, userId) {
+  const { error } = await supabase.rpc("add_group_member", {
+    p_conversation_id: conversationId,
+    p_user_id: userId,
+  });
+  throwIfError(error);
+}
+
+export async function removeGroupMember(conversationId, userId) {
+  const { error } = await supabase.rpc("remove_group_member", {
+    p_conversation_id: conversationId,
+    p_user_id: userId,
+  });
+  throwIfError(error);
+}
+
+export async function leaveGroupConversation(conversationId) {
+  const { error } = await supabase.rpc("leave_group_conversation", {
+    p_conversation_id: conversationId,
+  });
+  throwIfError(error);
+}
+
+export async function renameGroupConversation(conversationId, title) {
+  const { error } = await supabase.rpc("rename_group_conversation", {
+    p_conversation_id: conversationId,
+    p_title: title,
+  });
+  throwIfError(error);
+}
+
+// Member list + roles (group info panel), sender-name lookup for group
+// bubbles, and read-receipt data (last_read_at per participant) -- one RPC
+// serves all three, see get_conversation_participants() in the migration.
+export async function getConversationParticipants(conversationId) {
+  const { data, error } = await supabase.rpc("get_conversation_participants", {
+    p_conversation_id: conversationId,
+  });
+  throwIfError(error);
+  return data || [];
+}
+
+/*
+|--------------------------------------------------------------------------
+| Reactions
+|--------------------------------------------------------------------------
+*/
+
+export async function toggleMessageReaction(messageId, emoji) {
+  const { error } = await supabase.rpc("toggle_message_reaction", {
+    p_message_id: messageId,
+    p_emoji: emoji,
+  });
+  throwIfError(error);
+}
+
+// message_reactions' own RLS (is_conversation_participant, see the
+// migration) already scopes this to conversations the caller is in -- no
+// RPC needed, same "plain table call behind the table's own RLS" pattern
+// as getConversationMessages() above.
+export async function listConversationReactions(conversationId) {
+  const { data, error } = await supabase
+    .from("message_reactions")
+    .select("message_id, user_id, emoji")
+    .eq("conversation_id", conversationId);
+  throwIfError(error);
+  return data || [];
+}
+
+/*
+|--------------------------------------------------------------------------
+| Starred messages -- plain table calls, same pattern as blocked_users
+| above: starred_messages' own RLS (own rows, and only for a conversation
+| you're actually in -- see the migration) is enough, no RPC needed.
+|--------------------------------------------------------------------------
+*/
+
+export async function starMessage(messageId) {
+  const { data: authData } = await supabase.auth.getUser();
+  const me = authData?.user?.id;
+  if (!me) throw new Error("Sign in required");
+  const { error } = await supabase.from("starred_messages").insert({ user_id: me, message_id: messageId });
+  if (error && error.code !== "23505") throwIfError(error); // already starred
+}
+
+export async function unstarMessage(messageId) {
+  const { data: authData } = await supabase.auth.getUser();
+  const me = authData?.user?.id;
+  if (!me) throw new Error("Sign in required");
+  const { error } = await supabase.from("starred_messages").delete().eq("user_id", me).eq("message_id", messageId);
+  throwIfError(error);
+}
+
+// Returns just the starred message rows (id, body, attachment_path,
+// conversation_id, created_at, starred_at) -- the caller already has the
+// conversation list loaded (for title/other-party display) and doesn't
+// need a second round trip through profiles for that.
+export async function listStarredMessages() {
+  const { data: authData } = await supabase.auth.getUser();
+  const me = authData?.user?.id;
+  if (!me) return [];
+  const { data: stars, error } = await supabase
+    .from("starred_messages")
+    .select("message_id, created_at")
+    .eq("user_id", me)
+    .order("created_at", { ascending: false });
+  throwIfError(error);
+  if (!stars || stars.length === 0) return [];
+
+  const { data: msgs, error: msgError } = await supabase
+    .from("messages")
+    .select("id, conversation_id, sender_id, body, attachment_path, deleted_at, created_at")
+    .in("id", stars.map((s) => s.message_id));
+  throwIfError(msgError);
+
+  const starredAtById = {};
+  stars.forEach((s) => { starredAtById[s.message_id] = s.created_at; });
+  return (msgs || [])
+    .map((m) => ({ ...m, starred_at: starredAtById[m.id] }))
+    .sort((a, b) => new Date(b.starred_at) - new Date(a.starred_at));
+}
+
+/*
+|--------------------------------------------------------------------------
+| Typing indicators -- ephemeral Realtime broadcast, no table. Nothing is
+| persisted; a listener just clears its own "is typing" state a few
+| seconds after the last signal (see the Messages component).
+|--------------------------------------------------------------------------
+*/
+
+export function sendTypingSignal(conversationId, name) {
+  if (!conversationId) return;
+  supabase.channel(`typing:${conversationId}`).send({
+    type: "broadcast",
+    event: "typing",
+    payload: { name },
+  });
+}
+
+export function subscribeToTyping(conversationId, callback) {
+  if (!conversationId) return () => {};
+
+  const channel = supabase
+    .channel(`typing:${conversationId}`)
+    .on("broadcast", { event: "typing" }, ({ payload }) => callback(payload))
+    .subscribe();
 
   return () => {
     supabase.removeChannel(channel);

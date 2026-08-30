@@ -25,6 +25,18 @@ import {
   unblockUser,
   listBlockedUsers,
   deleteMessage,
+  createGroupConversation,
+  addGroupMember,
+  removeGroupMember,
+  leaveGroupConversation,
+  renameGroupConversation,
+  getConversationParticipants,
+  toggleMessageReaction,
+  starMessage,
+  unstarMessage,
+  listStarredMessages,
+  sendTypingSignal,
+  subscribeToTyping,
 } from "./messagingService";
 
 describe("messagingService", () => {
@@ -69,7 +81,7 @@ describe("messagingService", () => {
     await expect(sendMessage("conv-1", "hi")).rejects.toThrow("Not a participant in this conversation");
   });
 
-  it("sendMessage defaults the attachment path to null for a text-only message", async () => {
+  it("sendMessage defaults the attachment path and reply-to to null for a plain text message", async () => {
     supabase.rpc.mockResolvedValue({ data: { id: "m1" }, error: null });
 
     await sendMessage("conv-1", "hi");
@@ -78,6 +90,7 @@ describe("messagingService", () => {
       p_conversation_id: "conv-1",
       p_body: "hi",
       p_attachment_path: null,
+      p_reply_to_message_id: null,
     });
   });
 
@@ -90,6 +103,20 @@ describe("messagingService", () => {
       p_conversation_id: "conv-1",
       p_body: "",
       p_attachment_path: "conv-1/photo.png",
+      p_reply_to_message_id: null,
+    });
+  });
+
+  it("sendMessage passes a reply-to id through when quoting another message", async () => {
+    supabase.rpc.mockResolvedValue({ data: { id: "m2" }, error: null });
+
+    await sendMessage("conv-1", "totally agree", null, "m1");
+
+    expect(supabase.rpc).toHaveBeenCalledWith("send_message", {
+      p_conversation_id: "conv-1",
+      p_body: "totally agree",
+      p_attachment_path: null,
+      p_reply_to_message_id: "m1",
     });
   });
 
@@ -262,5 +289,188 @@ describe("messagingService", () => {
     const [firstName] = supabase.channel.mock.calls[0];
     const [secondName] = supabase.channel.mock.calls[1];
     expect(firstName).not.toBe(secondName);
+  });
+
+  it("subscribeToConversationMessages also listens on message_reactions, filtered to the same conversation, on the same channel", () => {
+    const on = jest.fn().mockReturnThis();
+    const subscribe = jest.fn().mockReturnThis();
+    supabase.channel.mockReturnValue({ on, subscribe });
+
+    subscribeToConversationMessages("conv-1", jest.fn());
+
+    expect(supabase.channel).toHaveBeenCalledWith("messages:conv-1");
+    expect(on).toHaveBeenCalledWith(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "messages", filter: "conversation_id=eq.conv-1" },
+      expect.any(Function)
+    );
+    expect(on).toHaveBeenCalledWith(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "message_reactions", filter: "conversation_id=eq.conv-1" },
+      expect.any(Function)
+    );
+  });
+
+  describe("group chat", () => {
+    it("createGroupConversation calls create_group_conversation with title + members", async () => {
+      supabase.rpc.mockResolvedValue({ data: "group-1", error: null });
+
+      const result = await createGroupConversation("Hostel Block C", ["u1", "u2"]);
+
+      expect(supabase.rpc).toHaveBeenCalledWith("create_group_conversation", {
+        p_title: "Hostel Block C",
+        p_member_ids: ["u1", "u2"],
+      });
+      expect(result).toBe("group-1");
+    });
+
+    it("addGroupMember calls add_group_member with the conversation + user", async () => {
+      supabase.rpc.mockResolvedValue({ data: null, error: null });
+
+      await addGroupMember("group-1", "u3");
+
+      expect(supabase.rpc).toHaveBeenCalledWith("add_group_member", { p_conversation_id: "group-1", p_user_id: "u3" });
+    });
+
+    it("removeGroupMember throws the RPC error rather than swallowing it (e.g. non-admin caller)", async () => {
+      supabase.rpc.mockResolvedValue({ data: null, error: new Error("Only a group admin can remove members") });
+
+      await expect(removeGroupMember("group-1", "u3")).rejects.toThrow("Only a group admin can remove members");
+    });
+
+    it("leaveGroupConversation calls leave_group_conversation with the conversation id", async () => {
+      supabase.rpc.mockResolvedValue({ data: null, error: null });
+
+      await leaveGroupConversation("group-1");
+
+      expect(supabase.rpc).toHaveBeenCalledWith("leave_group_conversation", { p_conversation_id: "group-1" });
+    });
+
+    it("renameGroupConversation calls rename_group_conversation with the new title", async () => {
+      supabase.rpc.mockResolvedValue({ data: null, error: null });
+
+      await renameGroupConversation("group-1", "New name");
+
+      expect(supabase.rpc).toHaveBeenCalledWith("rename_group_conversation", { p_conversation_id: "group-1", p_title: "New name" });
+    });
+
+    it("getConversationParticipants returns [] instead of null", async () => {
+      supabase.rpc.mockResolvedValue({ data: null, error: null });
+
+      expect(await getConversationParticipants("group-1")).toEqual([]);
+      expect(supabase.rpc).toHaveBeenCalledWith("get_conversation_participants", { p_conversation_id: "group-1" });
+    });
+  });
+
+  it("toggleMessageReaction calls toggle_message_reaction with the message + emoji", async () => {
+    supabase.rpc.mockResolvedValue({ data: null, error: null });
+
+    await toggleMessageReaction("m1", "👍");
+
+    expect(supabase.rpc).toHaveBeenCalledWith("toggle_message_reaction", { p_message_id: "m1", p_emoji: "👍" });
+  });
+
+  describe("starred messages", () => {
+    it("starMessage inserts into starred_messages for the signed-in user", async () => {
+      supabase.auth.getUser.mockResolvedValue({ data: { user: { id: "me" } } });
+      const insert = jest.fn().mockResolvedValue({ error: null });
+      supabase.from.mockReturnValue({ insert });
+
+      await starMessage("m1");
+
+      expect(supabase.from).toHaveBeenCalledWith("starred_messages");
+      expect(insert).toHaveBeenCalledWith({ user_id: "me", message_id: "m1" });
+    });
+
+    it("starMessage treats an already-starred conflict (23505) as success", async () => {
+      supabase.auth.getUser.mockResolvedValue({ data: { user: { id: "me" } } });
+      const insert = jest.fn().mockResolvedValue({ error: { code: "23505" } });
+      supabase.from.mockReturnValue({ insert });
+
+      await expect(starMessage("m1")).resolves.toBeUndefined();
+    });
+
+    it("unstarMessage deletes the star row scoped to the signed-in user", async () => {
+      supabase.auth.getUser.mockResolvedValue({ data: { user: { id: "me" } } });
+      const eq2 = jest.fn().mockResolvedValue({ error: null });
+      const eq1 = jest.fn(() => ({ eq: eq2 }));
+      const del = jest.fn(() => ({ eq: eq1 }));
+      supabase.from.mockReturnValue({ delete: del });
+
+      await unstarMessage("m1");
+
+      expect(eq1).toHaveBeenCalledWith("user_id", "me");
+      expect(eq2).toHaveBeenCalledWith("message_id", "m1");
+    });
+
+    it("listStarredMessages joins starred rows with their message content, newest star first", async () => {
+      supabase.auth.getUser.mockResolvedValue({ data: { user: { id: "me" } } });
+      const order = jest.fn().mockResolvedValue({
+        data: [
+          { message_id: "m1", created_at: "2026-08-01T00:00:00Z" },
+          { message_id: "m2", created_at: "2026-08-02T00:00:00Z" },
+        ],
+        error: null,
+      });
+      const eqStars = jest.fn(() => ({ order }));
+      const selectStars = jest.fn(() => ({ eq: eqStars }));
+      const inMsgs = jest.fn().mockResolvedValue({
+        data: [
+          { id: "m1", conversation_id: "c1", body: "first" },
+          { id: "m2", conversation_id: "c1", body: "second" },
+        ],
+        error: null,
+      });
+      const selectMsgs = jest.fn(() => ({ in: inMsgs }));
+      supabase.from.mockImplementation((table) => (table === "starred_messages" ? { select: selectStars } : { select: selectMsgs }));
+
+      const result = await listStarredMessages();
+
+      expect(inMsgs).toHaveBeenCalledWith("id", ["m1", "m2"]);
+      expect(result.map((r) => r.id)).toEqual(["m2", "m1"]); // newest starred_at first
+    });
+
+    it("listStarredMessages returns [] when signed out", async () => {
+      supabase.auth.getUser.mockResolvedValue({ data: { user: null } });
+      expect(await listStarredMessages()).toEqual([]);
+    });
+  });
+
+  describe("typing indicators", () => {
+    it("sendTypingSignal broadcasts on the conversation's typing channel", () => {
+      const send = jest.fn();
+      supabase.channel.mockReturnValue({ send });
+
+      sendTypingSignal("conv-1", "Alice");
+
+      expect(supabase.channel).toHaveBeenCalledWith("typing:conv-1");
+      expect(send).toHaveBeenCalledWith({ type: "broadcast", event: "typing", payload: { name: "Alice" } });
+    });
+
+    it("sendTypingSignal is a no-op without a conversation id", () => {
+      sendTypingSignal(null, "Alice");
+      expect(supabase.channel).not.toHaveBeenCalled();
+    });
+
+    it("subscribeToTyping listens for broadcast typing events and forwards the payload", () => {
+      let handler;
+      const on = jest.fn((event, filter, cb) => { handler = cb; return { subscribe: jest.fn().mockReturnThis(), on }; });
+      const subscribe = jest.fn().mockReturnThis();
+      supabase.channel.mockReturnValue({ on, subscribe });
+
+      const cb = jest.fn();
+      subscribeToTyping("conv-1", cb);
+
+      expect(supabase.channel).toHaveBeenCalledWith("typing:conv-1");
+      expect(on).toHaveBeenCalledWith("broadcast", { event: "typing" }, expect.any(Function));
+      handler({ payload: { name: "Alice" } });
+      expect(cb).toHaveBeenCalledWith({ name: "Alice" });
+    });
+
+    it("subscribeToTyping returns a no-op unsubscribe without a conversation id", () => {
+      const unsub = subscribeToTyping(null, jest.fn());
+      expect(supabase.channel).not.toHaveBeenCalled();
+      expect(() => unsub()).not.toThrow();
+    });
   });
 });
