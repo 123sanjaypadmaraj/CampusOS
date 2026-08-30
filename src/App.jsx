@@ -5,6 +5,7 @@ import {
   getCurrentUser,
   getOrCreateProfile,
   getCampusPosts,
+  getCommunityStats,
   getCampusEvents,
   getClubs,
   getCampusFood,
@@ -26,7 +27,7 @@ import {
   signUpWithUsn,
   signInWithUsn,
   signInWithPassword,
-  signInWithGoogle,
+  getMyAccess,
   connectGithub,
   deriveGithubUrlFromIdentities,
   connectLinkedin,
@@ -135,7 +136,6 @@ import {
   SEARCH_ENTITY_LABELS,
   SEARCH_FILTER_GROUPS,
 } from "./services/searchService";
-import { mintCampusPass } from "./services/campusPassService";
 import {
   subscribeToPush,
   unsubscribeFromPush,
@@ -197,7 +197,6 @@ import {
   HiBuildingOffice2,
   HiMagnifyingGlassCircle,
   HiShoppingCart,
-  HiTicket,
   HiCpuChip,
   HiMegaphone,
   HiRocketLaunch,
@@ -214,8 +213,6 @@ import {
   HiBriefcase,
   HiExclamationTriangle,
   HiShieldCheck,
-  HiTruck,
-  HiSignal,
   HiPaperAirplane,
   HiPlus,
   HiUserPlus,
@@ -228,7 +225,6 @@ import {
   HiCheck,
   HiArrowPath,
   HiWifi,
-  HiHomeModern,
   HiBoltSlash,
   HiComputerDesktop,
   HiLightBulb,
@@ -249,7 +245,7 @@ import {
   HiArrowDownTray,
   HiBuildingStorefront,
 } from "react-icons/hi2";
-import { FaLinkedin, FaGithub, FaGoogle } from "react-icons/fa6";
+import { FaLinkedin, FaGithub } from "react-icons/fa6";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { StatusBar, Style as StatusBarStyle } from "@capacitor/status-bar";
@@ -291,9 +287,9 @@ const navItems = [
 // matching renderPage()'s own default branch.
 const ROUTABLE_KEYS = new Set([
   "home", "campus", "events", "services", "socialize", "messages", "profile",
-  "map", "legal", "people", "clubs", "food", "store", "ai", "admin", "vendor",
-  "facilities", "autonomous", "calendar", "notifications", "activity",
-  "print", "issues", "booking", "lost", "market", "pass", "hostel", "delivery", "academics",
+  "legal", "people", "clubs", "food", "store", "ai", "admin", "vendor",
+  "facilities", "calendar", "notifications", "activity",
+  "print", "issues", "booking", "lost", "market", "academics",
   "emergencydirectory", "support",
   "verify-email", "reset-password",
 ]);
@@ -444,13 +440,6 @@ const services = [
     id: "store",
   },
   {
-    icon: <HiMap />,
-    title: "Smart Campus Map",
-    text: "Find rooms, labs, offices and facilities",
-    action: "Explore",
-    id: "map",
-  },
-  {
     icon: <HiWrenchScrewdriver />,
     title: "Report an Issue",
     text: "Wi-Fi, electrical, AC, furniture and equipment",
@@ -477,27 +466,6 @@ const services = [
     text: "Buy and sell permitted items within campus",
     action: "Browse",
     id: "market",
-  },
-  {
-    icon: <HiTicket />,
-    title: "Digital Campus Pass",
-    text: "QR entry for events, workshops and pickups",
-    action: "View",
-    id: "pass",
-  },
-  {
-    icon: <HiHomeModern />,
-    title: "Hostel",
-    text: "Mess, maintenance, laundry and room services",
-    action: "Open",
-    id: "hostel",
-  },
-  {
-    icon: <HiTruck />,
-    title: "Campus Delivery",
-    text: "Move food, documents and packages around campus",
-    action: "Open",
-    id: "delivery",
   },
   {
     icon: <HiAcademicCap />,
@@ -541,7 +509,6 @@ const PAGE_TITLES = {
   admin: "Admin",
   vendor: "Vendor Dashboard",
   facilities: "Facilities",
-  autonomous: "Autonomous Campus",
   calendar: "Calendar",
   notifications: "Notifications",
   activity: "Activity",
@@ -550,59 +517,8 @@ const PAGE_TITLES = {
 };
 
 /* =========================================================
-   MAP / SYSTEM DATA
+   SYSTEM DATA
 ========================================================= */
-
-const mapLocations = [
-  {
-    id: "a",
-    name: "Block A",
-    x: 14,
-    y: 22,
-    type: "Academic",
-    rooms: 32,
-  },
-  {
-    id: "b",
-    name: "Block B",
-    x: 68,
-    y: 22,
-    type: "Academic",
-    rooms: 28,
-  },
-  {
-    id: "c",
-    name: "Block C",
-    x: 14,
-    y: 65,
-    type: "Academic",
-    rooms: 24,
-  },
-  {
-    id: "d",
-    name: "Labs",
-    x: 68,
-    y: 65,
-    type: "Laboratory",
-    rooms: 18,
-  },
-  {
-    id: "canteen",
-    name: "Food Court",
-    x: 42,
-    y: 47,
-    type: "Food",
-    rooms: 4,
-  },
-  {
-    id: "main",
-    name: "Main Auditorium",
-    x: 42,
-    y: 80,
-    type: "Events",
-    rooms: 1,
-  },
-];
 
 const notificationsSeed = [
   {
@@ -635,45 +551,6 @@ const notificationsSeed = [
   },
 ];
 
-const autonomousDevices = [
-  {
-    id: "DR-01",
-    name: "Delivery Robot #01",
-    type: "Delivery Robot",
-    status: "Online",
-    battery: 86,
-    location: "Block B",
-    icon: <HiTruck />,
-  },
-  {
-    id: "DR-02",
-    name: "Delivery Robot #02",
-    type: "Delivery Robot",
-    status: "Charging",
-    battery: 42,
-    location: "Service Bay",
-    icon: <HiTruck />,
-  },
-  {
-    id: "DL-01",
-    name: "Campus Drone #01",
-    type: "Autonomous Drone",
-    status: "Standby",
-    battery: 91,
-    location: "Drone Pad",
-    icon: <HiPaperAirplane />,
-  },
-  {
-    id: "IOT-48",
-    name: "Environmental Network",
-    type: "IoT Network",
-    status: "48 / 48 online",
-    battery: 100,
-    location: "Campus-wide",
-    icon: <HiSignal />,
-  },
-];
-
 /* =========================================================
    APP
 ========================================================= */
@@ -700,6 +577,7 @@ function App() {
   const [modal, setModal] = useState(null);
   const [posts, setPosts] = useState([]);
   const [postsLoading, setPostsLoading] = useState(false);
+  const [communityStats, setCommunityStats] = useState(null);
   const [foodCart, setFoodCart] = useState([]);
   const [storeCart, setStoreCart] = useState([]);
   const [printFile, setPrintFile] = useState(null);
@@ -1307,6 +1185,22 @@ function App() {
 
         let mounted = true;
 
+        getCommunityStats(campusId)
+          .then((stats) => {
+            if (mounted) setCommunityStats(stats);
+          })
+          .catch((error) => console.error("Community stats loading failed:", error));
+
+        return () => {
+          mounted = false;
+        };
+      }, [campusId]);
+
+      useEffect(() => {
+        if (!campusId) return;
+
+        let mounted = true;
+
         async function loadEvents() {
           try {
             setEventsLoading(true);
@@ -1786,6 +1680,7 @@ function App() {
           openModal={setModal}
           people={people}
           clubs={clubs}
+          communityStats={communityStats}
           go={go}
           authUser={authUser}
           setLoginOpen={() => setLoginOpen(true)}
@@ -1900,10 +1795,6 @@ function App() {
       );
     }
 
-    if (active === "map") {
-      return <CampusMap notify={notify} openModal={setModal} />;
-    }
-
     if (active === "legal") {
       return <LegalPage go={go} />;
     }
@@ -1995,10 +1886,6 @@ function App() {
       return <FacilitiesDashboard notify={notify} campusId={campusId} />;
     }
 
-    if (active === "autonomous") {
-      return <AutonomousCampus notify={notify} devices={autonomousDevices} />;
-    }
-
     if (active === "calendar") {
       return <MyCalendar notify={notify} events={events.length ? events : eventsSeed} />;
     }
@@ -2023,9 +1910,6 @@ function App() {
         "booking",
         "lost",
         "market",
-        "pass",
-        "hostel",
-        "delivery",
         "academics",
         "emergencydirectory",
         "support",
@@ -2039,7 +1923,6 @@ function App() {
           openModal={setModal}
           openLogin={() => setLoginOpen(true)}
           authUser={authUser}
-          user={user}
           profile={profile}
           campusId={campusId}
           resources={resources}
@@ -2293,10 +2176,6 @@ function App() {
         />
       )}
 
-      {modal === "navigation" && (
-        <NavigationModal onClose={() => setModal(null)} notify={notify} />
-      )}
-
       {toast && (
         <div className="toast" role="status" aria-live="polite">
           <HiCheckCircle />
@@ -2464,12 +2343,6 @@ function Home({
             onClick={() => go("store")}
           />
           <ActionTile
-            icon={<HiMap />}
-            title="Campus Map"
-            text="Find a room"
-            onClick={() => go("map")}
-          />
-          <ActionTile
             icon={<HiBuildingOffice2 />}
             title="Book"
             text="Rooms & resources"
@@ -2553,26 +2426,6 @@ function Home({
           Ask Campus AI <b><HiArrowRight /></b>
         </button>
       </section>
-
-      <section className="page-section autonomous-preview">
-        <div className="section-head">
-          <div>
-            <span className="section-kicker">FUTURE INFRASTRUCTURE</span>
-            <h2>Autonomous Campus</h2>
-            <p>One digital layer for people, services, AI and future hardware.</p>
-          </div>
-          <button className="text-btn" onClick={() => go("autonomous")}>
-            Explore <HiArrowRight />
-          </button>
-        </div>
-
-        <div className="device-preview-grid">
-          <DeviceMini icon={<HiTruck />} name="Delivery Robots" value="3 online" />
-          <DeviceMini icon={<HiPaperAirplane />} name="Autonomous Drones" value="1 standby" />
-          <DeviceMini icon={<HiSignal />} name="IoT Network" value="48 devices" />
-          <DeviceMini icon={<HiCpuChip />} name="Campus AI" value="Operational" />
-        </div>
-      </section>
     </>
   );
 }
@@ -2595,6 +2448,8 @@ function Campus({
   setLoginOpen,
   savedPostIds = [],
   onToggleSave,
+  clubs = [],
+  communityStats,
 }) {
   const filters = [
     "All",
@@ -2711,12 +2566,17 @@ function Campus({
           <span className="section-kicker">YOUR CAMPUS</span>
 
           <div className="mini-stat">
-            <b>6,000+</b>
+            <b>{communityStats ? communityStats.students.toLocaleString() : "—"}</b>
             <span>students</span>
           </div>
 
           <div className="mini-stat">
-            <b>20</b>
+            <b>{communityStats ? communityStats.faculty.toLocaleString() : "—"}</b>
+            <span>teachers</span>
+          </div>
+
+          <div className="mini-stat">
+            <b>{clubs.length}</b>
             <span>active clubs</span>
           </div>
         </aside>
@@ -3247,6 +3107,13 @@ function Clubs({ notify, clubs: clubList, authUser, setLoginOpen, campusId }) {
   const [managingClubId, setManagingClubId] = useState(null);
   const [applications, setApplications] = useState({}); // club_id -> latest application row
   const [applyClub, setApplyClub] = useState(null);
+  const [categoryFilter, setCategoryFilter] = useState("All");
+
+  // Preserves catalog order (technical clubs before extra-curricular ones)
+  // instead of alphabetizing categories, so the filter chips read in the
+  // same grouping the club list itself was seeded in.
+  const categories = ["All", ...new Set(clubList.map((c) => c.category).filter(Boolean))];
+  const filteredClubs = categoryFilter === "All" ? clubList : clubList.filter((c) => c.category === categoryFilter);
 
   const reloadApplications = () => {
     if (!authUser?.id) { setApplications({}); return; }
@@ -3369,8 +3236,26 @@ function Clubs({ notify, clubs: clubList, authUser, setLoginOpen, campusId }) {
         }
       />
 
+      {categories.length > 2 && (
+        <div className="chips" style={{ marginBottom: 20, flexWrap: "wrap" }}>
+          {categories.map((cat) => (
+            <button
+              key={cat}
+              className={categoryFilter === cat ? "chip active" : "chip"}
+              onClick={() => setCategoryFilter(cat)}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {filteredClubs.length === 0 && (
+        <EmptyState icon={<HiAcademicCap />} title="No clubs in this category yet" />
+      )}
+
       <div className="club-grid">
-        {clubList.map((club) => {
+        {filteredClubs.map((club) => {
           const isMember = Boolean(joinedClubs[club.id]);
           return (
             <article className="club-card" key={club.id}>
@@ -4113,22 +3998,10 @@ function Services({ go, storeCart, printFile, openModal }) {
           onClick={() => go("store")}
         />
         <MiniService
-          icon={<HiMap />}
-          title="Campus Map"
-          text="Find rooms & facilities"
-          onClick={() => go("map")}
-        />
-        <MiniService
           icon={<HiExclamationTriangle />}
           title="Emergency"
           text="Campus SOS"
           onClick={() => openModal?.("sos")}
-        />
-        <MiniService
-          icon={<HiTruck />}
-          title="Delivery"
-          text="Move items around campus"
-          onClick={() => go("delivery")}
         />
       </div>
     </section>
@@ -7048,24 +6921,6 @@ const serviceDetailData = {
     text: "Buy and sell permitted items inside the verified campus network.",
     icon: <HiShoppingCart />,
   },
-  pass: {
-    kicker: "DIGITAL CAMPUS PASS",
-    title: "Campus Pass",
-    text: "One QR companion for events, workshops and pickups.",
-    icon: <HiTicket />,
-  },
-  hostel: {
-    kicker: "HOSTEL",
-    title: "Hostel Services",
-    text: "Mess, laundry, maintenance and room workflows.",
-    icon: <HiHomeModern />,
-  },
-  delivery: {
-    kicker: "CAMPUS DELIVERY",
-    title: "Campus Delivery",
-    text: "Move food, documents and packages across campus.",
-    icon: <HiTruck />,
-  },
   academics: {
     kicker: "ACADEMICS",
     title: "Academic Announcements",
@@ -7166,7 +7021,7 @@ function PrintJobsPanel({ jobs, notify, onChange }) {
   );
 }
 
-function ServiceDetail({ serviceId, notify, go, openModal, openLogin, authUser, user, profile, campusId, resources, bookings, serviceRequests, printJobs, lostItems, lostItemsLoaded, marketListings, onBookingsChange, onRequestsChange, onLostItemsChange, onMarketListingsChange, onPrintJobsChange, onOpenConversation, can, isAdmin }) {
+function ServiceDetail({ serviceId, notify, go, openModal, openLogin, authUser, profile, campusId, resources, bookings, serviceRequests, printJobs, lostItems, lostItemsLoaded, marketListings, onBookingsChange, onRequestsChange, onLostItemsChange, onMarketListingsChange, onPrintJobsChange, onOpenConversation, can, isAdmin }) {
   const data = serviceDetailData[serviceId];
 
   return (
@@ -7240,18 +7095,6 @@ function ServiceDetail({ serviceId, notify, go, openModal, openLogin, authUser, 
 
       {serviceId === "market" && (
         <Marketplace notify={notify} authUser={authUser} openLogin={openLogin} campusId={campusId} listings={marketListings} onChange={onMarketListingsChange} onOpenConversation={onOpenConversation} />
-      )}
-
-      {serviceId === "pass" && (
-        <PassService notify={notify} user={user} authUser={authUser} openLogin={openLogin} />
-      )}
-
-      {serviceId === "hostel" && (
-        <HostelService notify={notify} go={go} />
-      )}
-
-      {serviceId === "delivery" && (
-        <DeliveryService notify={notify} />
       )}
 
       {serviceId === "academics" && (
@@ -7605,201 +7448,6 @@ function LostService({ notify, authUser, openLogin, campusId, items: dbItems = [
   );
 }
 
-// Real signed, short-lived pass -- mint_campus_pass()/verify_campus_pass()
-// (supabase/migrations/20260814004400_digital_campus_pass.sql) HMAC-sign a
-// ~90s token entirely in Postgres. This used to be a static <HiQrCode/>
-// icon with a hardcoded fallback name/USN and a "Download" button that only
-// fired a toast -- nothing here was real. Now the QR is a real token that
-// visibly rotates while the modal is open, so a screenshot of it is
-// worthless a minute later.
-function PassService({ notify, user, authUser, openLogin }) {
-  const [showPassModal, setShowPassModal] = useState(false);
-  const [pass, setPass] = useState(null);
-  const [qrDataUrl, setQrDataUrl] = useState("");
-  const [secondsLeft, setSecondsLeft] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const mintingRef = useRef(false);
-  const tickTimer = useRef(null);
-
-  const refreshPass = async () => {
-    if (mintingRef.current) return;
-    mintingRef.current = true;
-    try {
-      setLoading(true);
-      setError("");
-      const row = await mintCampusPass();
-      setPass(row);
-    } catch (err) {
-      setError(err.message || "Could not generate your pass");
-    } finally {
-      setLoading(false);
-      mintingRef.current = false;
-    }
-  };
-
-  useEffect(() => {
-    if (!showPassModal) return;
-    refreshPass();
-    return () => clearInterval(tickTimer.current);
-  }, [showPassModal]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (!pass?.token) { setQrDataUrl(""); return; }
-    let cancelled = false;
-    QRCode.toDataURL(pass.token, { width: 240, margin: 1, color: { dark: "#17151f", light: "#ffffff" } })
-      .then((url) => { if (!cancelled) setQrDataUrl(url); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [pass?.token]);
-
-  useEffect(() => {
-    if (!pass?.expires_at) return;
-    clearInterval(tickTimer.current);
-    const tick = () => {
-      const secs = Math.max(0, Math.round((new Date(pass.expires_at).getTime() - Date.now()) / 1000));
-      setSecondsLeft(secs);
-      if (secs <= 4) refreshPass();
-    };
-    tick();
-    tickTimer.current = setInterval(tick, 1000);
-    return () => clearInterval(tickTimer.current);
-  }, [pass?.expires_at]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const displayName = pass?.holder_name || user?.name || "";
-  const displayUsn = pass?.holder_usn || user?.usn || "";
-
-  return (
-    <div className="digital-pass-card">
-      <div className="qr-placeholder">
-        <HiQrCode />
-      </div>
-      <div>
-        <span className="section-kicker">STUDENT PASS</span>
-        <h2>NHCE{displayName ? ` · ${displayName.toUpperCase()}` : ""}</h2>
-        <p>A signed pass that refreshes every few seconds -- valid for events, workshops, pickups and facilities check-ins.</p>
-        <button
-          className="primary"
-          onClick={() => {
-            if (!authUser) { openLogin?.(); notify("Sign in to get your campus pass"); return; }
-            setShowPassModal(true);
-          }}
-        >
-          Display QR <HiQrCode />
-        </button>
-      </div>
-
-      {showPassModal && (
-        <ModalShell kicker="VERIFIED CAMPUS PASS" title="Digital Identity Pass" onClose={() => setShowPassModal(false)}>
-          <div style={{ textAlign: "center", padding: "16px 0" }}>
-            {loading && !pass && <p style={{ color: "var(--muted)" }}>Generating your pass…</p>}
-            {error && !pass && <p style={{ color: "#c23a3a" }}>{error}</p>}
-            {qrDataUrl && (
-              <div style={{ width: "180px", height: "180px", margin: "0 auto 16px", background: "#fff", borderRadius: "16px", display: "grid", placeItems: "center", border: "2px solid #6e48ed", padding: "10px" }}>
-                <img src={qrDataUrl} alt="Campus pass QR code" style={{ width: "100%", height: "100%" }} />
-              </div>
-            )}
-            <h3 style={{ margin: "4px 0", font: "800 20px Manrope" }}>{displayName}</h3>
-            <p style={{ margin: "0 0 12px", color: "var(--muted)", fontSize: "13px" }}>
-              {displayUsn ? `USN: ${displayUsn} · ` : ""}NHCE
-            </p>
-            <span style={{ background: "#e4f7ef", color: "#13845b", padding: "6px 14px", borderRadius: "999px", fontSize: "11px", fontWeight: "800" }}>
-              ACTIVE · VERIFIED
-            </span>
-            {pass && (
-              <p style={{ marginTop: "14px", fontSize: "11px", color: "var(--muted)" }}>
-                <HiArrowPath style={{ verticalAlign: "-2px" }} /> Refreshes in {secondsLeft}s -- this code changes automatically, a screenshot won&apos;t work for long.
-              </p>
-            )}
-          </div>
-          <button className="primary wide" disabled={loading} onClick={refreshPass}>
-            {loading ? "Refreshing…" : "Refresh now"} <HiArrowPath />
-          </button>
-        </ModalShell>
-      )}
-    </div>
-  );
-}
-
-function HostelService({ notify, go }) {
-  const [showRoomModal, setShowRoomModal] = useState(false);
-  const [showLaundryModal, setShowLaundryModal] = useState(false);
-  const [laundrySlot, setLaundrySlot] = useState("4:00 PM - 5:00 PM");
-
-  return (
-    <div className="hostel-grid">
-      <WorkflowCard icon={<HiHomeModern />} title="Room" text="B-204 · Occupied" button="Open" onClick={() => setShowRoomModal(true)} />
-      <WorkflowCard icon={<HiShoppingBag />} title="Mess" text="Today's menu available." button="View menu" onClick={() => go?.("food")} />
-      <WorkflowCard icon={<HiWrenchScrewdriver />} title="Maintenance" text="2 open requests." button="Track" onClick={() => go?.("issues")} />
-      <WorkflowCard icon={<HiArrowPath />} title="Laundry" text="12 slots available." button="Book" onClick={() => setShowLaundryModal(true)} />
-
-      {showRoomModal && (
-        <ModalShell kicker="HOSTEL ROOM" title="Room B-204 Details" onClose={() => setShowRoomModal(false)}>
-          <div style={{ padding: "12px 0" }}>
-            <p><strong>Block:</strong> Boys Hostel Block B (2nd Floor)</p>
-            <p><strong>Roommate:</strong> Rahul Sharma (CSE 3rd Year)</p>
-            <p><strong>Wi-Fi:</strong> Hostel_5G_Zone (Connected)</p>
-            <p><strong>Status:</strong> All fees cleared for current semester</p>
-          </div>
-          <button className="primary wide" onClick={() => setShowRoomModal(false)}>Close</button>
-        </ModalShell>
-      )}
-
-      {showLaundryModal && (
-        <ModalShell kicker="LAUNDRY BOOKING" title="Reserve Laundry Machine" onClose={() => setShowLaundryModal(false)}>
-          <label>Select Time Slot
-            <select value={laundrySlot} onChange={(e) => setLaundrySlot(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "6px", borderRadius: "8px", border: "1px solid var(--line)" }}>
-              <option>2:00 PM - 3:00 PM</option>
-              <option>4:00 PM - 5:00 PM</option>
-              <option>5:00 PM - 6:00 PM</option>
-              <option>7:00 PM - 8:00 PM</option>
-            </select>
-          </label>
-          <button className="primary wide" style={{ marginTop: "16px" }} onClick={() => { notify(`Laundry reserved for ${laundrySlot}`); setShowLaundryModal(false); }}>
-            Confirm Booking <HiArrowRight />
-          </button>
-        </ModalShell>
-      )}
-    </div>
-  );
-}
-
-function DeliveryService({ notify }) {
-  const [activeDelivery, setActiveDelivery] = useState(null);
-
-  return (
-    <div className="delivery-panel">
-      <div className="delivery-route">
-        <div><span>FROM</span><b>Udupi Canteen</b></div>
-        <div className="route-line"><i /></div>
-        <div><span>TO</span><b>Block C · 302</b></div>
-      </div>
-      <div className="route-stats">
-        <span><HiClock /> 7 min</span>
-        <span><HiTruck /> Robot available</span>
-        <span><HiBolt /> Low traffic</span>
-      </div>
-      {activeDelivery ? (
-        <div style={{ background: "#eee9ff", color: "#6241db", padding: "14px", borderRadius: "14px", margin: "16px 0", textAlign: "center" }}>
-          <b>Delivery En Route!</b>
-          <p style={{ margin: "4px 0", fontSize: "12px" }}>ETA: 6 minutes · Code: {activeDelivery.code}</p>
-        </div>
-      ) : null}
-      <button className="primary" onClick={() => {
-        const code = Math.floor(1000 + Math.random() * 9000).toString();
-        setActiveDelivery({ code });
-        notify(`Delivery order dispatched · Code ${code}`);
-      }}>
-        Request delivery <HiTruck />
-      </button>
-    </div>
-  );
-}
-
-/* =========================================================
-   MAP
-========================================================= */
-
 /* =========================================================
    PRIVACY POLICY & TERMS OF SERVICE (doc §102)
    Written specifically for what CampusOS actually collects/does today, not
@@ -8039,129 +7687,6 @@ function ResetPasswordPage({ go, notify }) {
             <HiArrowLeft /> Back to CampusOS
           </button>
         )}
-      </div>
-    </section>
-  );
-}
-
-function CampusMap({ notify, openModal }) {
-  const [selected, setSelected] = useState(null);
-  const [q, setQ] = useState("");
-
-  const results = mapLocations.filter((location) =>
-    location.name.toLowerCase().includes(q.toLowerCase())
-  );
-
-  return (
-    <section className="page-section map-page">
-      <PageHeader
-        kicker="SMART CAMPUS"
-        title="Campus Map"
-        text="Find buildings, rooms, services and future autonomous routes."
-        action={
-          <button
-            className="primary"
-            onClick={() => openModal("navigation")}
-          >
-            <HiMapPin /> Navigate
-          </button>
-        }
-      />
-
-      <div className="map-search-row">
-        <div className="searchbar compact">
-          <HiMagnifyingGlass />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search Lab 302, canteen, auditorium..."
-            aria-label="Search campus map"
-          />
-        </div>
-
-        <div className="map-quick">
-          {["Lab 302", "Innovation Lab", "Canteen 4", "Main Auditorium"].map(
-            (item) => (
-              <button
-                key={item}
-                onClick={() => {
-                  setQ(item);
-                  notify(`${item} selected`);
-                }}
-              >
-                {item}
-              </button>
-            )
-          )}
-        </div>
-      </div>
-
-      <div className="map-layout">
-        <div className="campus-map">
-          <div className="map-roads" />
-
-          {mapLocations.map((location) => (
-            <button
-              key={location.id}
-              className={`map-marker ${
-                selected?.id === location.id ? "selected" : ""
-              }`}
-              style={{
-                left: `${location.x}%`,
-                top: `${location.y}%`,
-              }}
-              onClick={() => setSelected(location)}
-            >
-              <span>
-                {location.type === "Food" ? (
-                  <HiShoppingBag />
-                ) : location.type === "Events" ? (
-                  <HiCalendarDays />
-                ) : location.type === "Laboratory" ? (
-                  <HiCpuChip />
-                ) : (
-                  <HiBuildingOffice2 />
-                )}
-              </span>
-              <b>{location.name}</b>
-            </button>
-          ))}
-
-          <div className="you-marker">
-            <span />
-            <small>You are here</small>
-          </div>
-        </div>
-
-        <aside className="map-panel">
-          <span className="section-kicker">LOCATIONS</span>
-
-          {results.map((location) => (
-            <button
-              className={selected?.id === location.id ? "selected" : ""}
-              key={location.id}
-              onClick={() => setSelected(location)}
-            >
-              <span>{location.name}</span>
-              <small>{location.type}</small>
-              <HiChevronRight />
-            </button>
-          ))}
-
-          {selected && (
-            <div className="location-detail">
-              <span className="section-kicker">{selected.type}</span>
-              <h3>{selected.name}</h3>
-              <p>{selected.rooms} rooms / facilities</p>
-              <button
-                onClick={() => openModal("navigation")}
-                className="primary"
-              >
-                Get Directions <HiArrowRight />
-              </button>
-            </div>
-          )}
-        </aside>
       </div>
     </section>
   );
@@ -8495,7 +8020,6 @@ function CampusAI({ notify, go, authUser, profile, campusId, addFood, openLogin 
         <Capability icon={<HiUserGroup />} title="People" text="Find teammates and mentors" />
         <Capability icon={<HiMap />} title="Places" text="Search campus locations" />
         <Capability icon={<HiWrenchScrewdriver />} title="Services" text="Start campus workflows" />
-        <Capability icon={<HiCpuChip />} title="Hardware" text="Monitor connected devices" />
       </div>
 
       <div className="opportunity">
@@ -8509,10 +8033,6 @@ function CampusAI({ notify, go, authUser, profile, campusId, addFood, openLogin 
             anything real happens.
           </p>
         </div>
-
-        <button onClick={() => go("autonomous")}>
-          Explore Autonomous Campus <HiArrowRight />
-        </button>
       </div>
     </section>
   );
@@ -8524,134 +8044,6 @@ function Capability({ icon, title, text }) {
       <span>{icon}</span>
       <b>{title}</b>
       <small>{text}</small>
-    </div>
-  );
-}
-
-/* =========================================================
-   AUTONOMOUS CAMPUS
-========================================================= */
-
-function AutonomousCampus({ notify, devices }) {
-  return (
-    <section className="page-section autonomous-page">
-      <PageHeader
-        kicker="FUTURE INFRASTRUCTURE"
-        title="Autonomous Campus"
-        text="A digital control layer for robots, drones, IoT and AI systems."
-        action={
-          <button
-            className="primary"
-            onClick={() => notify("Device provisioning opened")}
-          >
-            <HiPlus /> Add device
-          </button>
-        }
-      />
-
-      <div className="autonomous-hero">
-        <div>
-          <span className="section-kicker">CAMPUS DIGITAL TWIN</span>
-          <h2>People, services and machines in one system.</h2>
-          <p>
-            Future hardware can plug into the same campus identity, location,
-            permissions and event infrastructure.
-          </p>
-        </div>
-
-        <div className="system-pulse">
-          <span />
-          <b>System operational</b>
-          <small>99.8% simulated uptime</small>
-        </div>
-      </div>
-
-      <div className="device-grid">
-        {devices.map((device) => (
-          <DeviceCard key={device.id} device={device} notify={notify} />
-        ))}
-      </div>
-
-      <div className="hardware-flow">
-        <div>
-          <span className="section-kicker">REFERENCE ARCHITECTURE</span>
-          <h2>Hardware → Campus OS → AI → Action</h2>
-        </div>
-
-        <div className="flow-row">
-          <Flow icon={<HiSignal />} title="Telemetry" />
-          <HiArrowRight />
-          <Flow icon={<HiCpuChip />} title="Campus OS" />
-          <HiArrowRight />
-          <Flow icon={<HiSparkles />} title="AI" />
-          <HiArrowRight />
-          <Flow icon={<HiRocketLaunch />} title="Action" />
-        </div>
-      </div>
-
-      <div className="autonomous-grid">
-        <StatCard label="IoT devices" value="48" icon={<HiSignal />} />
-        <StatCard label="Robots" value="3" icon={<HiTruck />} />
-        <StatCard label="Drones" value="1" icon={<HiPaperAirplane />} />
-        <StatCard label="Automation events" value="284" icon={<HiBolt />} />
-      </div>
-    </section>
-  );
-}
-
-function DeviceCard({ device, notify }) {
-  return (
-    <article className="device-card">
-      <div className="device-head">
-        <span>{device.icon}</span>
-        <div>
-          <span className="event-club">{device.type}</span>
-          <h3>{device.name}</h3>
-        </div>
-        <span className="online-dot" />
-      </div>
-
-      <div className="device-data">
-        <div>
-          <small>Status</small>
-          <b>{device.status}</b>
-        </div>
-        <div>
-          <small>Battery</small>
-          <b>{device.battery}%</b>
-        </div>
-        <div>
-          <small>Location</small>
-          <b>{device.location}</b>
-        </div>
-      </div>
-
-      <div className="battery-bar">
-        <i style={{ width: `${device.battery}%` }} />
-      </div>
-
-      <button onClick={() => notify(`${device.name} control panel opened`)}>
-        Open control panel <HiArrowRight />
-      </button>
-    </article>
-  );
-}
-
-function Flow({ icon, title }) {
-  return (
-    <div className="flow-item">
-      <span>{icon}</span>
-      <b>{title}</b>
-    </div>
-  );
-}
-
-function StatCard({ label, value, icon }) {
-  return (
-    <div className="stat-card">
-      <span>{icon}</span>
-      <small>{label}</small>
-      <b>{value}</b>
     </div>
   );
 }
@@ -9500,8 +8892,13 @@ function PostComposer({ onClose, onCreate, user, authUser, notify }) {
 }
 
 function LoginModal({ onClose, notify }) {
-  const [mode, setMode] = useState("magic-link"); // 'magic-link' | 'usn' | 'vendor'
-  const [googleLoading, setGoogleLoading] = useState(false);
+  // 'magic-link' | 'usn' | 'vendor' | 'club' | 'admin' | 'teacher' -- one tab
+  // per account type (doc: "separate logins for students, clubs, admin and
+  // teachers"). The tab only picks which form/copy is shown; the actual
+  // access grant always comes from profiles.role in the database (see
+  // AdminPasswordLogin/FacultyPasswordLogin's post-sign-in getMyAccess()
+  // check below) -- picking a tab never grants a role by itself.
+  const [mode, setMode] = useState("magic-link");
 
   return (
     <ModalShell
@@ -9509,25 +8906,6 @@ function LoginModal({ onClose, notify }) {
       title="Welcome to Campus OS"
       onClose={onClose}
     >
-      <button
-        className="ghost wide google-signin-button"
-        disabled={googleLoading}
-        onClick={async () => {
-          try {
-            setGoogleLoading(true);
-            await signInWithGoogle(); // redirects the browser away on success
-          } catch (error) {
-            console.error("Google sign-in:", error);
-            notify(error.message || "Unable to sign in with Google");
-            setGoogleLoading(false);
-          }
-        }}
-      >
-        <FaGoogle /> {googleLoading ? "Redirecting…" : "Continue with Google"}
-      </button>
-
-      <div className="login-divider"><span>or</span></div>
-
       <div className="chips" style={{ marginBottom: 16 }}>
         <button
           className={mode === "magic-link" ? "chip active" : "chip"}
@@ -9547,12 +8925,169 @@ function LoginModal({ onClose, notify }) {
         >
           Vendor login
         </button>
+        <button
+          className={mode === "club" ? "chip active" : "chip"}
+          onClick={() => setMode("club")}
+        >
+          Club login
+        </button>
+        <button
+          className={mode === "teacher" ? "chip active" : "chip"}
+          onClick={() => setMode("teacher")}
+        >
+          Teacher login
+        </button>
+        <button
+          className={mode === "admin" ? "chip active" : "chip"}
+          onClick={() => setMode("admin")}
+        >
+          Admin login
+        </button>
       </div>
 
       {mode === "magic-link" && <MagicLinkLogin notify={notify} onClose={onClose} />}
       {mode === "usn" && <UsnPasswordLogin notify={notify} onClose={onClose} />}
       {mode === "vendor" && <VendorPasswordLogin notify={notify} onClose={onClose} />}
+      {mode === "club" && <ClubPasswordLogin notify={notify} onClose={onClose} />}
+      {mode === "teacher" && <FacultyPasswordLogin notify={notify} onClose={onClose} />}
+      {mode === "admin" && <AdminPasswordLogin notify={notify} onClose={onClose} />}
     </ModalShell>
+  );
+}
+
+// Shared by AdminPasswordLogin/FacultyPasswordLogin: sign in with
+// email+password like every other role-scoped tab, then confirm against the
+// database -- via get_my_access(), the same RBAC read every RLS policy and
+// RPC already enforces against, not just a client-side guess -- that the
+// account picked the *right* tab. A vendor or student who wanders into the
+// admin/teacher tab still authenticates (their password is valid), so the
+// only thing left to gate is the role, and that has to come from the
+// database, not from which chip was clicked. On a mismatch (or a failed
+// access check) the session is torn back down immediately.
+async function signInAndVerifyRole({ email, password, allow, mismatchMessage }) {
+  await signInWithPassword(email, password);
+  const access = await getMyAccess();
+  const ok = allow(access);
+  if (!ok) {
+    await signOut();
+    throw new Error(mismatchMessage);
+  }
+}
+
+function AdminPasswordLogin({ onClose, notify }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async () => {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) { notify("Enter your admin email"); return; }
+    if (!password) { notify("Enter your password"); return; }
+
+    try {
+      setLoading(true);
+      await signInAndVerifyRole({
+        email: cleanEmail,
+        password,
+        allow: (access) => access.is_admin,
+        mismatchMessage: "This account isn't registered as a campus admin.",
+      });
+      notify("Signed in");
+      onClose();
+    } catch (error) {
+      console.error("Admin login:", error);
+      notify(error.message || "Unable to sign in");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <p>For college_admin / super_admin accounts only -- verified against the database after sign-in.</p>
+      <label>
+        Admin email
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="admin@nhce.edu.in"
+          autoFocus
+        />
+      </label>
+      <label>
+        Password
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+        />
+      </label>
+      <button className="primary wide" disabled={loading} onClick={handleSubmit} data-testid="admin-login-button">
+        {loading ? "Signing in…" : "Sign in"}
+      </button>
+    </>
+  );
+}
+
+// Faculty accounts (profiles.role = 'faculty', doc: "Teacher login") -- same
+// email+password grant as the other role-scoped tabs, gated the same way as
+// AdminPasswordLogin above.
+function FacultyPasswordLogin({ onClose, notify }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async () => {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) { notify("Enter your faculty email"); return; }
+    if (!password) { notify("Enter your password"); return; }
+
+    try {
+      setLoading(true);
+      await signInAndVerifyRole({
+        email: cleanEmail,
+        password,
+        allow: (access) => access.roles.includes("faculty"),
+        mismatchMessage: "This account isn't registered as a faculty account.",
+      });
+      notify("Signed in");
+      onClose();
+    } catch (error) {
+      console.error("Teacher login:", error);
+      notify(error.message || "Unable to sign in");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <p>For faculty accounts -- verified against the database after sign-in.</p>
+      <label>
+        Faculty email
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="yourname@nhce.edu.in"
+          autoFocus
+        />
+      </label>
+      <label>
+        Password
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+        />
+      </label>
+      <button className="primary wide" disabled={loading} onClick={handleSubmit} data-testid="teacher-login-button">
+        {loading ? "Signing in…" : "Sign in"}
+      </button>
+    </>
   );
 }
 
@@ -9589,6 +9124,64 @@ function VendorPasswordLogin({ onClose, notify }) {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="udupi.canteen@nhce.edu.in"
+          autoFocus
+        />
+      </label>
+      <label>
+        Password
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+        />
+      </label>
+      <button className="primary wide" disabled={loading} onClick={handleSubmit}>
+        {loading ? "Signing in…" : "Sign in"}
+      </button>
+    </>
+  );
+}
+
+// Same plain email+password sign-in as VendorPasswordLogin -- club
+// leadership isn't a global account role (it's a per-club club_members.role,
+// see src/features/clubs/ClubManage.jsx), so there's nothing special this
+// mode needs to do beyond a friendlier label and placeholder for the
+// dedicated club-lead accounts (scripts/setup-club-accounts.mjs). Once
+// signed in, "Manage club" appears on that club's card in the Clubs Hub.
+function ClubPasswordLogin({ onClose, notify }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async () => {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) { notify("Enter your club email"); return; }
+    if (!password) { notify("Enter your password"); return; }
+
+    try {
+      setLoading(true);
+      await signInWithPassword(cleanEmail, password);
+      notify("Signed in");
+      onClose();
+    } catch (error) {
+      console.error("Club login:", error);
+      notify(error.message || "Unable to sign in");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <p>For club leadership accounts -- opens straight into Manage Club from the Clubs Hub.</p>
+      <label>
+        Club email
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="foss.club@nhce.edu.in"
           autoFocus
         />
       </label>
@@ -10193,40 +9786,6 @@ function PrintModal({ onClose, setPrintFile, notify, authUser, user, campusId })
   );
 }
 
-function NavigationModal({ onClose, notify }) {
-  const [destination, setDestination] = useState("Innovation Lab");
-
-  return (
-    <ModalShell kicker="CAMPUS MAP" title="Navigation & Route" onClose={onClose}>
-      <label>
-        Destination
-        <select value={destination} onChange={(e) => setDestination(e.target.value)}>
-          <option>Innovation Lab</option>
-          <option>Food Court</option>
-          <option>Main Auditorium</option>
-          <option>Seminar Hall 2</option>
-          <option>Library</option>
-        </select>
-      </label>
-
-      <div className="route-stats" style={{ margin: "16px 0", display: "flex", gap: "12px" }}>
-        <span><HiClock /> 4 min walk</span>
-        <span><HiMapPin /> Block C, 2nd Floor</span>
-      </div>
-
-      <button
-        className="primary wide"
-        onClick={() => {
-          notify(`Navigation started to ${destination}`);
-          onClose();
-        }}
-      >
-        Start Directions <HiArrowRight />
-      </button>
-    </ModalShell>
-  );
-}
-
 function CartModal({ title,cart,onClose,notify,type,onCheckout,onUpdateQuantity,onRemove}) {
   const total = cart.reduce((sum, item) => sum + Number(item.price) * Number(item.quantity || 1), 0);
 
@@ -10457,19 +10016,6 @@ function ActionTile({ icon, title, text, onClick }) {
       <small>{text}</small>
       <HiArrowRight />
     </button>
-  );
-}
-
-function DeviceMini({ icon, name, value }) {
-  return (
-    <div className="device-mini">
-      <span>{icon}</span>
-      <div>
-        <b>{name}</b>
-        <small>{value}</small>
-      </div>
-      <HiSignal />
-    </div>
   );
 }
 

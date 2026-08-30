@@ -311,6 +311,24 @@ export async function getPostCounts(
 }
 
 
+// Real counts for the Campus Feed sidebar ("YOUR CAMPUS"). Club count isn't
+// included here -- callers already have the campus's active club list
+// loaded (getClubs()) and can just use its length, so this only covers
+// student/faculty counts, which need to bypass profiles RLS (doc §42) via
+// the get_community_stats() SECURITY DEFINER RPC.
+export async function getCommunityStats(campusId) {
+  const { data, error } = await supabase
+    .rpc("get_community_stats", { p_campus_id: campusId || null })
+    .maybeSingle();
+
+  throwIfError(error);
+
+  return {
+    students: Number(data?.student_count || 0),
+    faculty: Number(data?.faculty_count || 0),
+  };
+}
+
 export async function getPostComments(
   postId
 ) {

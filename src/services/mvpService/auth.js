@@ -1,8 +1,9 @@
 /**
  * AUTH
  *
- * Sign-in/sign-up (magic link, USN+password, Google), session lookup,
- * sign-out, and linking secondary identities (GitHub, LinkedIn).
+ * Sign-in/sign-up (magic link, USN+password, role-scoped email+password for
+ * vendor/club/admin/faculty accounts), session lookup, sign-out, and linking
+ * secondary identities (GitHub, LinkedIn).
  */
 
 import { supabase } from "../../lib/supabase";
@@ -92,22 +93,6 @@ export async function signInWithPassword(email, password) {
   });
   if (error) throw error;
   return data;
-}
-
-/*
- * signInWithGoogle — OAuth login via Google. Redirects the browser to
- * Google's consent screen and back; subscribeToAuthChanges() picks up the
- * resulting session exactly like every other login method, no separate
- * handling needed. Does nothing on its own until the 'google' provider is
- * enabled with real credentials in the Supabase project's Auth settings --
- * until then this surfaces Supabase's "Unsupported provider" error.
- */
-export async function signInWithGoogle() {
-  const { error } = await supabase.auth.signInWithOAuth({
-    provider: "google",
-    options: { redirectTo: `${window.location.origin}/` },
-  });
-  if (error) throw error;
 }
 
 /*

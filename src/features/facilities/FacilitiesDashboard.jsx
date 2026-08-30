@@ -1,7 +1,6 @@
-import React, { useEffect, useRef, useState } from "react";
-import { HiCheck, HiXCircle, HiClock, HiWrenchScrewdriver, HiCalendarDays, HiQrCode, HiCamera, HiShieldCheck, HiXMark, HiPhone } from "react-icons/hi2";
+import React, { useEffect, useState } from "react";
+import { HiCheck, HiXCircle, HiClock, HiWrenchScrewdriver, HiCalendarDays, HiShieldCheck, HiPhone } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
-import { verifyCampusPass } from "../../services/campusPassService";
 import * as facilitiesApi from "./api";
 import SosAlertsPanel from "./SosAlerts";
 import { EmergencyContactsTab, EmergencyDirectoryTab, ResourcesTab } from "../admin/AdminCMS";
@@ -24,7 +23,6 @@ export default function FacilitiesDashboard({ notify, campusId }) {
         <button className={tab === "tickets" ? "chip active" : "chip"} onClick={() => setTab("tickets")}>Tickets</button>
         <button className={tab === "bookings" ? "chip active" : "chip"} onClick={() => setTab("bookings")}>Booking Approvals</button>
         <button className={tab === "resources" ? "chip active" : "chip"} onClick={() => setTab("resources")}>Resources</button>
-        <button className={tab === "pass" ? "chip active" : "chip"} onClick={() => setTab("pass")}><HiQrCode /> Verify Pass</button>
         <button className={tab === "emergencycontacts" ? "chip active" : "chip"} onClick={() => setTab("emergencycontacts")}><HiPhone /> Emergency Contacts</button>
         <button className={tab === "emergencydirectory" ? "chip active" : "chip"} onClick={() => setTab("emergencydirectory")}><HiPhone /> Emergency Directory</button>
       </div>
@@ -33,138 +31,9 @@ export default function FacilitiesDashboard({ notify, campusId }) {
       {tab === "tickets" && <TicketQueue notify={notify} campusId={campusId} />}
       {tab === "bookings" && <BookingApprovals notify={notify} />}
       {tab === "resources" && <ResourcesTab notify={notify} campusId={campusId} />}
-      {tab === "pass" && <VerifyPassPanel notify={notify} />}
       {tab === "emergencycontacts" && <EmergencyContactsTab notify={notify} />}
       {tab === "emergencydirectory" && <EmergencyDirectoryTab notify={notify} />}
     </section>
-  );
-}
-
-// Scans a digital campus pass QR (mint_campus_pass()/verify_campus_pass(),
-// see supabase/migrations/20260814004400_digital_campus_pass.sql). Uses the
-// browser's native BarcodeDetector where available (Chrome/Edge) so no extra
-// scanning library is needed; a manual paste field is always available too
-// (works everywhere, and doubles as the fallback when a camera isn't handy).
-function VerifyPassPanel({ notify }) {
-  const [manualToken, setManualToken] = useState("");
-  const [checking, setChecking] = useState(false);
-  const [result, setResult] = useState(null);
-  const [scanning, setScanning] = useState(false);
-  const [cameraError, setCameraError] = useState("");
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
-  const detectTimer = useRef(null);
-  const detectorSupported = typeof window !== "undefined" && "BarcodeDetector" in window;
-
-  const check = async (token) => {
-    const value = (token || "").trim();
-    if (!value) return;
-    try {
-      setChecking(true);
-      const row = await verifyCampusPass(value);
-      setResult(row);
-      if (!row.valid) notify(row.reason || "Invalid pass");
-    } catch (err) {
-      setResult({ valid: false, reason: err.message || "Could not verify this pass" });
-      notify(err.message || "Could not verify this pass");
-    } finally {
-      setChecking(false);
-    }
-  };
-
-  const stopScan = () => {
-    clearInterval(detectTimer.current);
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-    setScanning(false);
-  };
-
-  const startScan = async () => {
-    setCameraError("");
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-      setScanning(true);
-
-      const detector = new window.BarcodeDetector({ formats: ["qr_code"] });
-      detectTimer.current = setInterval(async () => {
-        if (!videoRef.current) return;
-        try {
-          const codes = await detector.detect(videoRef.current);
-          if (codes.length > 0) {
-            stopScan();
-            check(codes[0].rawValue);
-          }
-        } catch {
-          // A single failed detect() (e.g. a blank frame) isn't fatal --
-          // just try again on the next tick.
-        }
-      }, 400);
-    } catch (err) {
-      setCameraError(err.message || "Could not access the camera");
-    }
-  };
-
-  useEffect(() => () => stopScan(), []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  return (
-    <div className="verify-pass-panel">
-      <div className="verify-pass-scan">
-        {detectorSupported ? (
-          <>
-            {scanning ? (
-              <>
-                <video ref={videoRef} muted playsInline className="verify-pass-video" />
-                <button className="ghost wide" onClick={stopScan}><HiXMark /> Stop camera</button>
-              </>
-            ) : (
-              <button className="primary wide" onClick={startScan}><HiCamera /> Scan with camera</button>
-            )}
-            {cameraError && <p style={{ color: "#c23a3a", fontSize: 12 }}>{cameraError}</p>}
-          </>
-        ) : (
-          <p style={{ color: "var(--muted)", fontSize: 12 }}>
-            Camera scanning isn&apos;t supported in this browser -- paste the pass token below instead.
-          </p>
-        )}
-      </div>
-
-      <label>Or paste the pass token
-        <textarea
-          rows={2}
-          value={manualToken}
-          onChange={(e) => setManualToken(e.target.value)}
-          placeholder="Paste the token shown under the student's QR code…"
-        />
-      </label>
-      <button className="primary wide" disabled={checking || !manualToken.trim()} onClick={() => check(manualToken)}>
-        {checking ? "Verifying…" : "Verify pass"}
-      </button>
-
-      {result && (
-        <div className={`verify-pass-result ${result.valid ? "valid" : "invalid"}`}>
-          {result.valid ? (
-            <>
-              <div className="big-avatar small">{result.holder_name?.[0] || "?"}</div>
-              <div>
-                <b>{result.holder_name}</b>
-                <small>{result.holder_usn ? `USN: ${result.holder_usn} · ` : ""}{result.holder_course}</small>
-                {result.verified_student && <span className="verified-pill"><HiShieldCheck /> VERIFIED STUDENT</span>}
-              </div>
-            </>
-          ) : (
-            <>
-              <HiXCircle style={{ fontSize: 22 }} />
-              <div><b>Not valid</b><small>{result.reason}</small></div>
-            </>
-          )}
-        </div>
-      )}
-    </div>
   );
 }
 

@@ -23,6 +23,7 @@ import { TrendChart, StatTile } from "../../components/ui/Charts";
 import * as clubApi from "./api";
 import { getEventRoster, checkinEventTicket, uploadEventCoverImage } from "../../services/mvpService";
 import { useModalA11y } from "../../hooks/useModalA11y";
+import { downloadCsv } from "../../utils/csv";
 
 function Modal({ title, kicker, onClose, children }) {
   const titleId = useId();
@@ -105,8 +106,8 @@ export default function ClubManage({ clubId, campusId, authUser, notify, onBack 
       </div>
 
       {tab === "overview" && <OverviewTab club={data.club} canEdit={isAdminRole} notify={notify} onSaved={reload} />}
-      {tab === "members" && <MembersTab members={data.members} canManage={isAdminRole} authUser={authUser} notify={notify} onChange={reload} />}
-      {tab === "applications" && <ApplicationsTab applications={data.applications} notify={notify} onChange={reload} />}
+      {tab === "members" && <MembersTab club={data.club} members={data.members} canManage={isAdminRole} authUser={authUser} notify={notify} onChange={reload} />}
+      {tab === "applications" && <ApplicationsTab club={data.club} applications={data.applications} notify={notify} onChange={reload} />}
       {tab === "events" && <EventsTab clubId={clubId} campusId={campusId} events={data.events} authUser={authUser} notify={notify} onChange={reload} />}
       {tab === "meetings" && <MeetingsTab clubId={clubId} meetings={data.meetings} members={data.members} authUser={authUser} notify={notify} onChange={reload} />}
       {tab === "announcements" && <AnnouncementsTab clubId={clubId} announcements={data.announcements} notify={notify} onChange={reload} />}
@@ -215,9 +216,20 @@ function OverviewTab({ club, canEdit, notify, onSaved }) {
   );
 }
 
-function MembersTab({ members, canManage, authUser, notify, onChange }) {
+function MembersTab({ club, members, canManage, authUser, notify, onChange }) {
   const [busyId, setBusyId] = useState(null);
   const ownerCount = members.filter((m) => m.role === "owner").length;
+
+  const exportCsv = () => {
+    if (!members.length) { notify("No members yet to export"); return; }
+    const header = ["Name", "Role", "USN", "Course", "Year", "Email", "Phone", "Joined at"];
+    const rows = members.map((m) => [
+      m.name || "", ROLE_LABEL[m.role] || m.role, m.usn || "", m.course || "", m.year || "",
+      m.email || "", m.phone || "",
+      m.joined_at ? new Date(m.joined_at).toLocaleString() : "",
+    ]);
+    downloadCsv(`${(club?.name || "club").replace(/[^a-zA-Z0-9._-]/g, "_")}-members.csv`, header, rows);
+  };
 
   const changeRole = async (member, role) => {
     try {
@@ -250,6 +262,11 @@ function MembersTab({ members, canManage, authUser, notify, onChange }) {
 
   return (
     <div className="profile-box">
+      {canManage && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+          <button onClick={exportCsv}><HiArrowDownTray /> Export members CSV</button>
+        </div>
+      )}
       {members.map((m) => (
         <div className="club-roster-row" key={m.id}>
           <div>
@@ -449,18 +466,7 @@ function EventRosterModal({ event, onClose, notify }) {
       r.checked_in_at ? new Date(r.checked_in_at).toLocaleString() : "",
       r.registered_at ? new Date(r.registered_at).toLocaleString() : "",
     ]);
-    const csv = [header, ...rows]
-      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${event.title.replace(/[^a-zA-Z0-9._-]/g, "_")}-attendance.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    downloadCsv(`${event.title.replace(/[^a-zA-Z0-9._-]/g, "_")}-attendance.csv`, header, rows);
   };
 
   const confirmed = (roster || []).filter((r) => r.status === "confirmed");
@@ -616,7 +622,7 @@ function AnalyticsTab({ club, events, growth, meetings, applications }) {
   );
 }
 
-function ApplicationsTab({ applications, notify, onChange }) {
+function ApplicationsTab({ club, applications, notify, onChange }) {
   const [busyId, setBusyId] = useState(null);
 
   const decide = async (app, decision) => {
@@ -632,12 +638,25 @@ function ApplicationsTab({ applications, notify, onChange }) {
     }
   };
 
+  const exportCsv = () => {
+    if (!applications.length) { notify("No applications to export"); return; }
+    const header = ["Name", "USN", "Course", "Year", "Email", "Phone", "Message", "Applied at"];
+    const rows = applications.map((a) => [
+      a.name || "", a.usn || "", a.course || "", a.year || "", a.email || "", a.phone || "",
+      a.message || "", a.created_at ? new Date(a.created_at).toLocaleString() : "",
+    ]);
+    downloadCsv(`${(club?.name || "club").replace(/[^a-zA-Z0-9._-]/g, "_")}-applications.csv`, header, rows);
+  };
+
   if (!applications.length) {
     return <EmptyState icon={<HiClipboardDocumentCheck />} title="No pending applications" text="New requests to join will show up here." />;
   }
 
   return (
     <div className="resource-list">
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+        <button onClick={exportCsv}><HiArrowDownTray /> Export applications CSV</button>
+      </div>
       {applications.map((app) => (
         <article className="resource-row" key={app.id}>
           <div className="resource-icon"><HiClipboardDocumentCheck /></div>

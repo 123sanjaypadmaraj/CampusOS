@@ -1,6 +1,6 @@
 // One-off live verification script (not part of the automated suite) --
-// exercises messaging, global search and the digital campus pass directly
-// against the production Supabase project using real signed-in sessions,
+// exercises messaging and global search directly against the production
+// Supabase project using real signed-in sessions,
 // the same way prior rounds of this codebase's live testing worked
 // (scripts/setup-test-users.mjs). Prints PASS/FAIL per assertion; does not
 // delete any of the accounts/messages it uses.
@@ -37,17 +37,6 @@ const isProduction = SUPABASE_URL.includes("dzjzjlylsfpmymkcavrq");
 const e2eCredsFile = isProduction
   ? ".e2e-credentials.local.json"
   : ".e2e-credentials.staging.local.json";
-// Bug fix: this used to hardcode the PRODUCTION facilities-credentials
-// filename regardless of target, so a default (staging) run signed in with
-// prod's facilities.staff password against the staging project and failed
-// with "Invalid login credentials" -- same class of bug live-check-campus-
-// store.mjs already had fixed, this script never got the same fix.
-const facilitiesCredsFile = isProduction
-  ? ".facilities-credentials.local.json"
-  : ".facilities-credentials.staging.local.json";
-const facilitiesCreds = JSON.parse(
-  fs.readFileSync(path.join(root, "scripts", facilitiesCredsFile), "utf8")
-);
 const e2eCreds = JSON.parse(fs.readFileSync(path.join(root, "scripts", e2eCredsFile), "utf8"));
 const e2ePassword = (email) => {
   const password = e2eCreds.find((r) => r.email === email)?.password;
@@ -125,32 +114,6 @@ async function main() {
 
   const { data: shortResults, error: shortErr } = await alice.sb.rpc("global_search", { p_query: "a" });
   check("global_search rejects a 1-char query (returns no rows, not an error)", !shortErr && (shortResults || []).length === 0, { shortErr, shortResults });
-
-  console.log("\n=== Digital campus pass ===");
-  const { data: passRows, error: mintErr } = await alice.sb.rpc("mint_campus_pass");
-  const pass = Array.isArray(passRows) ? passRows[0] : passRows;
-  check("mint_campus_pass succeeds", !mintErr && !!pass?.token, mintErr);
-  check("minted pass has a ~90s expiry", pass?.expires_at && new Date(pass.expires_at).getTime() - Date.now() < 100000, pass?.expires_at);
-  check("minted pass carries the holder's real name", pass?.holder_name === "Alice Test", pass);
-
-  const { error: unauthorizedErr } = await bob.sb.rpc("verify_campus_pass", { p_token: pass?.token });
-  check("verify_campus_pass rejects a non-staff caller", !!unauthorizedErr, unauthorizedErr?.message);
-
-  const facilities = await signIn(facilitiesCreds.email, facilitiesCreds.password);
-
-  const { data: verifyRows, error: verifyErr } = await facilities.sb.rpc("verify_campus_pass", { p_token: pass?.token });
-  const verify = Array.isArray(verifyRows) ? verifyRows[0] : verifyRows;
-  check("facilities staff can verify a fresh pass", !verifyErr && verify?.valid === true, { verifyErr, verify });
-  check("verified pass reports the correct holder", verify?.holder_id === alice.userId && verify?.holder_name === "Alice Test", verify);
-
-  const tampered = pass.token.slice(0, -2) + (pass.token.slice(-2) === "AA" ? "BB" : "AA");
-  const { data: tamperedRows } = await facilities.sb.rpc("verify_campus_pass", { p_token: tampered });
-  const tamperedResult = Array.isArray(tamperedRows) ? tamperedRows[0] : tamperedRows;
-  check("a tampered token is rejected as invalid, not thrown as a 500", tamperedResult?.valid === false, tamperedResult);
-
-  const { data: malformedRows } = await facilities.sb.rpc("verify_campus_pass", { p_token: "not-a-real-token" });
-  const malformedResult = Array.isArray(malformedRows) ? malformedRows[0] : malformedRows;
-  check("a malformed token is rejected as invalid, not thrown as a 500", malformedResult?.valid === false, malformedResult);
 
   console.log(`\n${passCount} passed, ${failCount} failed`);
   process.exit(failCount > 0 ? 1 : 0);

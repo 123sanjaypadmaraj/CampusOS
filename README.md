@@ -127,22 +127,6 @@ Potential products include:
 
 ---
 
-### 🗺️ Smart Campus Map
-
-Students can search for:
-
-- Classrooms
-- Laboratories
-- Departments
-- Offices
-- Seminar halls
-- Printing facilities
-- Campus services
-
-Future versions can support accessibility-aware navigation.
-
----
-
 ### 🛠️ Campus Issue Reporting
 
 Students can report:

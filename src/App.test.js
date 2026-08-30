@@ -12,6 +12,7 @@ jest.mock("./services/mvpService", () => ({
   getCurrentUser: jest.fn(() => Promise.resolve(null)),
   getOrCreateProfile: jest.fn(() => Promise.resolve({ name: "Sanjay", usn: "", course: "Computer Science & Engineering", year: "2nd Year" })),
   getCampusPosts: jest.fn(() => Promise.resolve([])),
+  getCommunityStats: jest.fn(() => Promise.resolve({ students: 0, faculty: 0 })),
   getCampusEvents: jest.fn(() => Promise.resolve([])),
   getClubs: jest.fn(() => Promise.resolve([])),
   getCampusFood: jest.fn(() => Promise.resolve({ canteens: [], items: [] })),
@@ -24,7 +25,6 @@ jest.mock("./services/mvpService", () => ({
   getMyEventTicket: jest.fn(() => Promise.resolve(null)),
   getMyEventFeedback: jest.fn(() => Promise.resolve(null)),
   submitEventFeedback: jest.fn(() => Promise.resolve(null)),
-  signInWithGoogle: jest.fn(() => Promise.resolve(undefined)),
   connectGithub: jest.fn(() => Promise.resolve(undefined)),
   deriveGithubUrlFromIdentities: jest.fn(() => null),
   connectLinkedin: jest.fn(() => Promise.resolve(undefined)),
@@ -54,6 +54,7 @@ jest.mock("./services/mvpService", () => ({
   leaveClub: jest.fn(() => Promise.resolve(null)),
   getMyClubs: jest.fn(() => Promise.resolve([])),
   signOut: jest.fn(() => Promise.resolve(null)),
+  signInWithPassword: jest.fn(() => Promise.resolve({ user: { id: "user-1" }, session: {} })),
   getPeople: jest.fn(() => Promise.resolve([])),
   updateProfile: jest.fn(() => Promise.resolve(null)),
   getMyPrintJobs: jest.fn(() => Promise.resolve([])),
@@ -225,16 +226,63 @@ describe("App button interactions", () => {
     });
   });
 
-  test("starts Google OAuth sign-in from the login modal", async () => {
-    const { signInWithGoogle } = require("./services/mvpService");
+  test("admin login only completes once the database confirms the account is actually an admin", async () => {
+    const { signInWithPassword, getMyAccess } = require("./services/mvpService");
+    getMyAccess.mockResolvedValueOnce({ permissions: [], roles: ["college_admin"], is_admin: true });
     render(<App />);
     fireEvent.click(await screen.findByTestId("sign-in-button"));
+    fireEvent.click(await screen.findByRole("button", { name: /Admin login/i }));
 
-    fireEvent.click(await screen.findByRole("button", { name: /Continue with Google/i }));
+    fireEvent.change(await screen.findByPlaceholderText(/admin@nhce.edu.in/i), { target: { value: "admin@nhce.edu.in" } });
+    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: "correct-password" } });
+    fireEvent.click(screen.getByTestId("admin-login-button"));
 
     await waitFor(() => {
-      expect(signInWithGoogle).toHaveBeenCalled();
+      expect(signInWithPassword).toHaveBeenCalledWith("admin@nhce.edu.in", "correct-password");
     });
+    await waitFor(() => {
+      expect(getMyAccess).toHaveBeenCalled();
+    });
+    // The modal closes only on a verified admin -- proves the grant came
+    // from the database, not just from a correct password on this tab.
+    await waitFor(() => {
+      expect(screen.queryByText(/Welcome to Campus OS/i)).not.toBeInTheDocument();
+    });
+  });
+
+  test("a valid password on the admin tab is not enough on its own -- a non-admin account is signed back out", async () => {
+    const { getMyAccess, signOut } = require("./services/mvpService");
+    getMyAccess.mockResolvedValueOnce({ permissions: [], roles: ["student"], is_admin: false });
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("sign-in-button"));
+    fireEvent.click(await screen.findByRole("button", { name: /Admin login/i }));
+
+    fireEvent.change(await screen.findByPlaceholderText(/admin@nhce.edu.in/i), { target: { value: "student@nhce.edu.in" } });
+    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: "correct-password" } });
+    fireEvent.click(screen.getByTestId("admin-login-button"));
+
+    await waitFor(() => {
+      expect(signOut).toHaveBeenCalled();
+    });
+    // Modal stays open -- the login never actually completed.
+    expect(screen.getByText(/Welcome to Campus OS/i)).toBeInTheDocument();
+  });
+
+  test("teacher login is likewise rejected for an account the database doesn't mark as faculty", async () => {
+    const { getMyAccess, signOut } = require("./services/mvpService");
+    getMyAccess.mockResolvedValueOnce({ permissions: [], roles: [], is_admin: false });
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("sign-in-button"));
+    fireEvent.click(await screen.findByRole("button", { name: /Teacher login/i }));
+
+    fireEvent.change(await screen.findByPlaceholderText(/yourname@nhce.edu.in/i), { target: { value: "someone@nhce.edu.in" } });
+    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: "correct-password" } });
+    fireEvent.click(screen.getByTestId("teacher-login-button"));
+
+    await waitFor(() => {
+      expect(signOut).toHaveBeenCalled();
+    });
+    expect(screen.getByText(/Welcome to Campus OS/i)).toBeInTheDocument();
   });
 
   describe("event registration confirmation dialog", () => {

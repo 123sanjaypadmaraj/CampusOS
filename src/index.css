@@ -431,7 +431,6 @@
 .subnav button,
 .event-tabs button,
 .category-row button,
-.map-quick button,
 .issue-categories button {
   border: 1px solid var(--line);
   background: #fff;
@@ -448,16 +447,14 @@
 }
 
 .quick-grid,
-.action-grid,
-.device-preview-grid {
+.action-grid {
   display: grid;
   gap: 14px;
   grid-template-columns: repeat(4, 1fr);
 }
 
 .quick-metric,
-.action-tile,
-.device-mini {
+.action-tile {
   border: 1px solid var(--line);
   background: #fff;
   border-radius: 16px;
@@ -474,7 +471,6 @@
 
 .quick-metric > span,
 .action-tile > span,
-.device-mini > span,
 .mini-service > span {
   width: 38px;
   height: 38px;
@@ -513,38 +509,6 @@
 .action-tile small {
   grid-column: 2;
   color: var(--muted);
-}
-
-.autonomous-preview {
-  padding-bottom: 35px;
-}
-
-.device-preview-grid {
-  grid-template-columns: repeat(4, 1fr);
-}
-
-.device-mini {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.device-mini > div {
-  flex: 1;
-}
-
-.device-mini b,
-.device-mini small {
-  display: block;
-}
-
-.device-mini small {
-  color: var(--muted);
-  margin-top: 3px;
-}
-
-.device-mini > svg {
-  color: var(--green);
 }
 
 /* ---------- People ---------- */
@@ -1155,145 +1119,6 @@
   font-weight: 800;
 }
 
-/* ---------- Map ---------- */
-
-.map-search-row {
-  margin-bottom: 18px;
-}
-
-.map-quick {
-  display: flex;
-  gap: 7px;
-  margin-top: 10px;
-  overflow-x: auto;
-}
-
-.map-layout {
-  display: grid;
-  grid-template-columns: 1fr 310px;
-  gap: 15px;
-}
-
-.campus-map {
-  min-height: 570px;
-  position: relative;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  background: #fff;
-}
-
-.campus-map::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(var(--line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--line) 1px, transparent 1px);
-  background-size: 50px 50px;
-  opacity: .45;
-}
-
-.map-roads {
-  position: absolute;
-  inset: 10% 20%;
-  border: 18px solid #f1eef6;
-  transform: rotate(-8deg);
-}
-
-.map-marker {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  z-index: 3;
-  border: 1px solid var(--line);
-  background: #fff;
-  border-radius: 12px;
-  padding: 8px 10px;
-  box-shadow: 0 10px 25px #0001;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.map-marker span {
-  color: var(--purple);
-}
-
-.map-marker b {
-  font-size: 10px;
-  white-space: nowrap;
-}
-
-.map-marker.selected {
-  border-color: var(--purple);
-}
-
-.you-marker {
-  position: absolute;
-  z-index: 4;
-  left: 50%;
-  top: 40%;
-  display: grid;
-  place-items: center;
-}
-
-.you-marker span {
-  width: 16px;
-  height: 16px;
-  background: var(--purple);
-  border: 4px solid #fff;
-  border-radius: 50%;
-  box-shadow: 0 0 0 7px #6945e828;
-}
-
-.you-marker small {
-  margin-top: 7px;
-  white-space: nowrap;
-}
-
-.map-panel {
-  border: 1px solid var(--line);
-  border-radius: 17px;
-  background: #fff;
-  padding: 18px;
-}
-
-.map-panel > button {
-  width: 100%;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  text-align: left;
-  padding: 11px 0;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  background: transparent;
-}
-
-.map-panel > button small {
-  grid-row: 2;
-  color: var(--muted);
-}
-
-.map-panel > button.selected {
-  color: var(--purple);
-}
-
-.location-detail {
-  margin-top: 20px;
-  padding: 15px;
-  background: var(--soft);
-  border-radius: 13px;
-}
-
-.location-detail h3 {
-  font: 700 16px Manrope;
-  margin: 6px 0;
-}
-
-.location-detail p {
-  color: var(--muted);
-}
-
 /* ---------- Calendar ---------- */
 
 .calendar-layout {
@@ -1568,195 +1393,6 @@
   margin-top: 4px;
 }
 
-/* ---------- Autonomous campus ---------- */
-
-.autonomous-hero {
-  padding: 27px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 25px;
-  margin-bottom: 20px;
-  border: 1px solid var(--line);
-  background: #fff;
-  border-radius: 20px;
-}
-
-.autonomous-hero h2 {
-  font: 800 24px Manrope;
-  margin: 7px 0;
-}
-
-.autonomous-hero p {
-  color: var(--muted);
-  max-width: 680px;
-}
-
-.system-pulse {
-  text-align: right;
-  white-space: nowrap;
-}
-
-.system-pulse span {
-  display: inline-block;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--green);
-  margin-right: 6px;
-}
-
-.system-pulse b,
-.system-pulse small {
-  display: block;
-}
-
-.system-pulse small {
-  color: var(--muted);
-  margin-top: 3px;
-}
-
-.device-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 14px;
-}
-
-.device-card {
-  border: 1px solid var(--line);
-  background: #fff;
-  border-radius: 17px;
-  padding: 20px;
-}
-
-.device-head {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-}
-
-.device-head > span:first-child {
-  width: 46px;
-  height: 46px;
-  border-radius: 13px;
-  background: var(--soft);
-  color: var(--purple);
-  display: grid;
-  place-items: center;
-  font-size: 21px;
-}
-
-.device-head > div {
-  flex: 1;
-}
-
-.device-head h3 {
-  font: 700 15px Manrope;
-  margin: 3px 0;
-}
-
-.online-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--green);
-}
-
-.device-data {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  margin: 18px 0;
-}
-
-.device-data div {
-  padding: 10px;
-  background: #f7f5f9;
-  border-radius: 10px;
-}
-
-.device-data small,
-.device-data b {
-  display: block;
-}
-
-.device-data small {
-  color: var(--muted);
-  margin-bottom: 4px;
-}
-
-.device-card > button {
-  margin-top: 15px;
-  border: 1px solid var(--line);
-  background: #fff;
-  border-radius: 9px;
-  padding: 9px 12px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.battery-bar {
-  height: 6px;
-  border-radius: 99px;
-  background: #eeeaf3;
-  overflow: hidden;
-}
-
-.battery-bar i {
-  height: 100%;
-  display: block;
-  background: var(--green);
-  border-radius: 99px;
-}
-
-.hardware-flow {
-  margin-top: 28px;
-  padding: 25px;
-  border: 1px solid var(--line);
-  background: #fff;
-  border-radius: 17px;
-}
-
-.hardware-flow h2 {
-  font: 800 21px Manrope;
-}
-
-.flow-row {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 15px;
-  margin-top: 25px;
-}
-
-.flow-item {
-  min-width: 120px;
-  padding: 15px;
-  border: 1px solid var(--line);
-  border-radius: 13px;
-  text-align: center;
-}
-
-.flow-item span,
-.flow-item b {
-  display: block;
-}
-
-.flow-item span {
-  color: var(--purple);
-  margin-bottom: 6px;
-}
-
-.autonomous-grid {
-  margin-top: 15px;
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-}
-
 .stat-card {
   border: 1px solid var(--line);
   background: #fff;
@@ -1906,33 +1542,6 @@
   font-size: 12px;
   font-weight: 700;
   margin: 4px 0 0;
-}
-
-.google-signin-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  font-weight: 700;
-}
-
-.login-divider {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 16px 0;
-  color: var(--muted, #6b6b76);
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.login-divider::before,
-.login-divider::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--line);
 }
 
 .file-chip {
@@ -2110,69 +1719,6 @@
   border: 1px solid #eab8bd;
 }
 
-.route-preview {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: 10px;
-  padding: 25px 5px;
-}
-
-.route-node {
-  padding: 15px;
-  border: 1px solid var(--line);
-  border-radius: 13px;
-  background: #f7f5f9;
-}
-
-.route-node span,
-.route-node b {
-  display: block;
-}
-
-.route-node span {
-  color: var(--purple);
-  font-size: 9px;
-  font-weight: 800;
-}
-
-.route-line {
-  width: 80px;
-  height: 4px;
-  background: #eeeaf3;
-  position: relative;
-}
-
-.route-line i {
-  position: absolute;
-  inset: 0;
-  width: 65%;
-  background: var(--purple);
-}
-
-.route-stats {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin: 12px 0 17px;
-}
-
-.route-stats span {
-  padding: 8px 10px;
-  background: var(--soft);
-  border-radius: 9px;
-  font-size: 10px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.hostel-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 9px;
-}
-
 .lost-item {
   display: grid;
   grid-template-columns: 40px 1fr auto;
@@ -2215,7 +1761,6 @@
 .app-shell.dark-mode .command-card,
 .app-shell.dark-mode .quick-metric,
 .app-shell.dark-mode .action-tile,
-.app-shell.dark-mode .device-mini,
 .app-shell.dark-mode .person-card,
 .app-shell.dark-mode .club-card,
 .app-shell.dark-mode .opportunity-card,
@@ -2224,15 +1769,10 @@
 .app-shell.dark-mode .mini-service,
 .app-shell.dark-mode .canteen-status,
 .app-shell.dark-mode .product-card,
-.app-shell.dark-mode .campus-map,
-.app-shell.dark-mode .map-panel,
 .app-shell.dark-mode .calendar-box,
 .app-shell.dark-mode .calendar-agenda,
 .app-shell.dark-mode .ai-shell,
 .app-shell.dark-mode .capability,
-.app-shell.dark-mode .autonomous-hero,
-.app-shell.dark-mode .device-card,
-.app-shell.dark-mode .hardware-flow,
 .app-shell.dark-mode .stat-card,
 .app-shell.dark-mode .notification-card,
 .app-shell.dark-mode .feature-modal {
@@ -2244,28 +1784,23 @@
 .app-shell.dark-mode .command-card > span,
 .app-shell.dark-mode .quick-metric > span,
 .app-shell.dark-mode .action-tile > span,
-.app-shell.dark-mode .device-mini > span,
 .app-shell.dark-mode .mini-service > span,
 .app-shell.dark-mode .club-icon,
 .app-shell.dark-mode .product-placeholder,
-.app-shell.dark-mode .device-head > span:first-child,
 .app-shell.dark-mode .notification-card > span,
 .app-shell.dark-mode .ai-large-icon,
-.app-shell.dark-mode .capability,
-.app-shell.dark-mode .location-detail {
+.app-shell.dark-mode .capability {
   background: var(--surface-2);
 }
 
 .app-shell.dark-mode .subnav button,
 .app-shell.dark-mode .event-tabs button,
 .app-shell.dark-mode .category-row button,
-.app-shell.dark-mode .map-quick button,
 .app-shell.dark-mode .issue-categories button,
 .app-shell.dark-mode .chip,
 .app-shell.dark-mode .opportunity-card button,
 .app-shell.dark-mode .mentor-card button,
 .app-shell.dark-mode .service-dash-card > button:not(.primary),
-.app-shell.dark-mode .device-card > button,
 .app-shell.dark-mode .lost-item button,
 .app-shell.dark-mode .emergency-actions button {
   background: var(--surface);
@@ -2273,8 +1808,7 @@
   border-color: var(--border);
 }
 
-.app-shell.dark-mode .ai-message p,
-.app-shell.dark-mode .device-data div {
+.app-shell.dark-mode .ai-message p {
   background: var(--surface-2);
 }
 
@@ -2307,8 +1841,7 @@
   border-color: rgba(139,108,255,.28);
 }
 
-.app-shell.dark-mode .mini-canteens > div,
-.app-shell.dark-mode .route-node {
+.app-shell.dark-mode .mini-canteens > div {
   background: var(--surface-2);
   border-color: var(--border);
 }
@@ -2318,9 +1851,7 @@
 @media (max-width: 1050px) {
   .quick-grid,
   .action-grid,
-  .device-preview-grid,
-  .service-footer-grid,
-  .autonomous-grid {
+  .service-footer-grid {
     grid-template-columns: repeat(2, 1fr);
   }
 
@@ -2332,16 +1863,11 @@
   }
 
   .service-dashboard,
-  .calendar-layout,
-  .map-layout {
+  .calendar-layout {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .campus-command-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .device-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 }
@@ -2349,7 +1875,6 @@
 @media (max-width: 720px) {
   .quick-grid,
   .action-grid,
-  .device-preview-grid,
   .service-footer-grid,
   .pulse-grid,
   .feature-row,
@@ -2358,8 +1883,7 @@
   .club-grid,
   .people-grid,
   .mentor-grid,
-  .ai-capabilities,
-  .autonomous-grid {
+  .ai-capabilities {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -2381,38 +1905,11 @@
     justify-self: start;
   }
 
-  .autonomous-hero {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .system-pulse {
-    text-align: left;
-  }
-
-  .flow-row {
-    flex-wrap: wrap;
-  }
-
-  .route-preview {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .route-line {
-    width: 4px;
-    height: 45px;
-    margin: auto;
-  }
-
   .emergency-actions {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .form-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .hostel-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 }
@@ -3056,92 +2553,13 @@
   color: #fff;
 }
 
-.digital-pass-card {
-  display: flex;
-  align-items: center;
-  gap: 22px;
-  padding: 28px;
-  border: 1px solid #ddd3ff;
-  border-radius: 20px;
-  background: linear-gradient(100deg,#eee9ff,#f8f5ff);
-}
-
-.qr-placeholder {
-  width: 150px;
-  height: 150px;
-  border-radius: 17px;
-  background: #fff;
-  color: var(--ink);
-  display: grid;
-  place-items: center;
-  font-size: 85px;
-  border: 1px solid var(--line);
-}
-
-.digital-pass-card h2 {
-  font: 800 21px Manrope;
-}
-
-.digital-pass-card p {
-  color: var(--muted);
-  line-height: 1.55;
-  max-width: 580px;
-}
-
-.delivery-panel {
-  padding: 25px;
-  border: 1px solid var(--line);
-  background: #fff;
-  border-radius: 20px;
-}
-
-.delivery-route {
-  display: grid;
-  grid-template-columns: 1fr 100px 1fr;
-  align-items: center;
-  gap: 14px;
-}
-
-.delivery-route div:not(.route-line) {
-  padding: 15px;
-  background: #f7f5f9;
-  border-radius: 12px;
-}
-
-.delivery-route span {
-  display: block;
-  font-size: 9px;
-  font-weight: 800;
-  color: var(--purple);
-  margin-bottom: 5px;
-}
-
-.route-line {
-  width: 100px;
-  height: 4px;
-  background: #eeeaf3;
-  position: relative;
-}
-
-.route-line i {
-  position: absolute;
-  inset: 0;
-  width: 65%;
-  background: var(--purple);
-}
-
-.delivery-panel .primary {
-  margin-top: 18px;
-}
-
 /* ---------- Dark mode additions ---------- */
 
 .app-shell.dark-mode .linkedin-main-card,
 .app-shell.dark-mode .socialize-sidebar,
 .app-shell.dark-mode .service-detail-hero,
 .app-shell.dark-mode .workflow-card,
-.app-shell.dark-mode .resource-row,
-.app-shell.dark-mode .delivery-panel {
+.app-shell.dark-mode .resource-row {
   background: var(--surface);
   color: var(--text);
   border-color: var(--border);
@@ -3181,19 +2599,8 @@
   border-color: var(--accent);
 }
 
-.app-shell.dark-mode .resource-row > div:not(.resource-icon),
-.app-shell.dark-mode .delivery-route div:not(.route-line) {
+.app-shell.dark-mode .resource-row > div:not(.resource-icon) {
   background: var(--surface-2);
-}
-
-.app-shell.dark-mode .qr-placeholder {
-  background: var(--surface);
-  border-color: var(--border);
-}
-
-.app-shell.dark-mode .digital-pass-card {
-  background: linear-gradient(100deg,#211a39,#17131f);
-  border-color: rgba(139,108,255,.28);
 }
 
 /* ---------- Responsive ---------- */
@@ -3271,21 +2678,6 @@
   .resource-row strong {
     grid-column: 2;
     justify-self: start;
-  }
-
-  .digital-pass-card {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .delivery-route {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .route-line {
-    width: 4px;
-    height: 45px;
-    margin: auto;
   }
 }
 /* =========================================================
@@ -5896,19 +5288,10 @@
 .contact-recovery-row input { flex: 1; }
 .contact-recovery-row .chip { flex-shrink: 0; }
 
-/* =========================================================
-   FACILITIES: VERIFY PASS
-========================================================= */
-.verify-pass-panel { max-width: 480px; display: flex; flex-direction: column; gap: 14px; }
-.verify-pass-scan { display: flex; flex-direction: column; gap: 10px; }
-.verify-pass-video { width: 100%; border-radius: 16px; background: #000; max-height: 320px; object-fit: cover; }
-.verify-pass-panel label { display: block; font-size: 11px; font-weight: 800; color: var(--muted); }
-.verify-pass-panel textarea { width: 100%; margin-top: 6px; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--surface); color: var(--text); font: inherit; resize: vertical; }
-
 /* Plain (non-modal) settings form -- AdminCMS Campus Settings tab. Bare
    <label>Text<input/></label> markup only gets block layout inside
-   .feature-modal/.login-modal/.verify-pass-panel elsewhere in this file;
-   this is the same shape for a settings panel that isn't a modal. */
+   .feature-modal/.login-modal elsewhere in this file; this is the same
+   shape for a settings panel that isn't a modal. */
 .settings-form { max-width: 480px; display: flex; flex-direction: column; gap: 14px; }
 .settings-form label { display: block; font-size: 11px; font-weight: 800; color: var(--muted); }
 .settings-form input, .settings-form textarea, .settings-form select {
@@ -5918,11 +5301,6 @@
 .settings-form textarea { resize: vertical; font-family: monospace; }
 .settings-form .checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: var(--text); }
 .settings-form .checkbox-row input { width: auto; margin-top: 0; }
-.verify-pass-result { display: flex; align-items: center; gap: 14px; padding: 16px; border-radius: 14px; border: 1px solid var(--border); }
-.verify-pass-result.valid { background: #e4f7ef22; border-color: #13845b55; }
-.verify-pass-result.invalid { background: #ef444422; border-color: #c23a3a55; color: #c23a3a; }
-.verify-pass-result b { display: block; font-size: 14px; }
-.verify-pass-result small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
 .verified-pill { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; background: #e4f7ef; color: #13845b; padding: 4px 10px; border-radius: 999px; font-size: 10px; font-weight: 800; }
 
 /* =========================================================
