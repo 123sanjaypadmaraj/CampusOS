@@ -645,11 +645,13 @@ function App() {
   // which still works unchanged since it just reuses/reawaits whatever
   // registration is already in place by the time someone opts in).
   useEffect(() => {
-    // Inside a Capacitor native shell the app already ships its assets
-    // locally (no need for an offline app-shell cache) and Web Push -- the
-    // other half of what public/sw.js does -- doesn't work in a native
-    // WebView at all (iOS) or reliably (Android); registering it there
-    // would just be dead weight, so skip it entirely on native.
+    // Inside a Capacitor native shell, skip registering our own sw.js:
+    // Web Push -- half of what public/sw.js does -- doesn't work in a
+    // native WebView at all (iOS) or reliably (Android), and the native
+    // shell now loads production directly over the network (see
+    // capacitor.config.ts) rather than a bundled offline build, so there's
+    // no separate offline app-shell to protect here either -- registering
+    // it there would just be dead weight, so skip it entirely on native.
     if (IS_NATIVE) return;
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
     navigator.serviceWorker.register("/sw.js").catch(() => {});

@@ -38,12 +38,22 @@ which is what makes those `env()` values non-zero in the first place.
 
 - **Service worker** (`public/sw.js`, offline app-shell cache + Web Push):
   skipped entirely on native (`if (IS_NATIVE) return;` before
-  `navigator.serviceWorker.register(...)`) — a native app already bundles
-  its assets locally, and Web Push doesn't work in an iOS WebView at all.
-  Native push notifications are a separate, not-yet-built follow-up (would
-  need `@capacitor/push-notifications` + APNs/FCM credentials + extending
-  `push_subscriptions`/`supabase/functions/send-push` to route native
-  tokens, not just Web Push endpoints).
+  `navigator.serviceWorker.register(...)`) — Web Push doesn't work in an
+  iOS WebView at all, and there's no separate offline app-shell to protect
+  on native either now that the shell loads production directly (see
+  below). Native push notifications are a separate, not-yet-built
+  follow-up (would need `@capacitor/push-notifications` + APNs/FCM
+  credentials + extending `push_subscriptions`/`supabase/functions/send-push`
+  to route native tokens, not just Web Push endpoints).
+- **Auto-updating on push to production**: `capacitor.config.ts` sets
+  `server.url` to `https://campusos-amber.vercel.app` instead of bundling
+  `dist/` offline, so the installed app always shows whatever is live in
+  production — no separate APK rebuild/republish needed for web-only
+  changes, and no Play Store listing needed for that either (there isn't
+  one yet — see `android/RELEASE_BACKUP_CHECKLIST.md`). Trade-off: the app
+  now needs network on cold start; there's no offline shell anymore. A
+  new APK build/publish is still only needed for *native*-level changes
+  (icons, permissions, native plugins, this config file itself).
 - **Android hardware/gesture back button**: `@capacitor/app`'s
   `backButton` listener reuses the app's existing history-based navigation
   (`go()` → `history.pushState`, a `popstate` listener → `setActive(...)`)
