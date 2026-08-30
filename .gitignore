@@ -12,6 +12,11 @@ dist
 .parcel-cache
 .trunk
 coverage
+*.apk
+*.aab
+# Scratch/local Playwright configs (e.g. crossbrowser runs on a non-default
+# port) are dev-machine conveniences, not part of the committed suite.
+playwright.crossbrowser.config.cjs
 .env
 .env.local
 .env.*.local

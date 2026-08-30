@@ -48,7 +48,6 @@ async function seedCapturedPayment(orderId, amount) {
 }
 
 test.describe.serial('Vendor order-ops depth', () => {
-  let seededItemName;
   test.beforeAll(async () => {
     // Roster entries this spec adds ("E2E Staff <timestamp>") aren't touched
     // by seedFreshVendorTestOrder()'s own dedup (that only clears stale
@@ -56,7 +55,10 @@ test.describe.serial('Vendor order-ops depth', () => {
     // assertions stay meaningful.
     const { data: udupi } = await admin.from('canteens').select('id').ilike('name', '%udupi%').limit(1).single();
     if (udupi) await admin.from('canteen_staff').delete().eq('canteen_id', udupi.id).like('name', 'E2E Staff %');
-    ({ itemName: seededItemName } = await seedFreshVendorTestOrder());
+    // The queue tests below locate this seeded order by its fixed name
+    // ("Live vendor-queue test order"), not by the return value, so nothing
+    // here needs the { orderId, itemName } seedFreshVendorTestOrder() returns.
+    await seedFreshVendorTestOrder();
   });
 
   test('Kitchen / Pickup / All tabs filter the queue', async ({ page, context }) => {

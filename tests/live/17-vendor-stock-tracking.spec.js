@@ -27,7 +27,6 @@ function readEnvVar(name) {
 }
 
 const SUPABASE_URL = readEnvVar('VITE_SUPABASE_URL');
-const ANON_KEY = readEnvVar('VITE_SUPABASE_PUBLISHABLE_KEY');
 const SERVICE_ROLE_KEY = resolveServiceRoleKey(root, SUPABASE_URL);
 
 const UDUPI_VENDOR = 'udupi.canteen@nhce.edu.in';

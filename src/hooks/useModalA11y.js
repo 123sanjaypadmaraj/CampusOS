@@ -39,6 +39,12 @@ export function useModalA11y(onClose) {
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return undefined;
+    // Copied out of the ref up front: it never changes after mount (see the
+    // useRef initializer above), but reading .current directly inside the
+    // cleanup below is what react-hooks/exhaustive-deps warns about in
+    // general (a ref *could* be reassigned by the time cleanup runs), so
+    // capture it as a plain variable to match the rule's own suggested fix.
+    const previouslyFocused = previouslyFocusedRef.current;
 
     const [first] = focusableElements(dialog);
     (first || dialog).focus({ preventScroll: true });
@@ -75,7 +81,6 @@ export function useModalA11y(onClose) {
     document.addEventListener("keydown", onKeyDown, true);
     return () => {
       document.removeEventListener("keydown", onKeyDown, true);
-      const previouslyFocused = previouslyFocusedRef.current;
       if (previouslyFocused instanceof HTMLElement && document.contains(previouslyFocused)) {
         previouslyFocused.focus({ preventScroll: true });
       }

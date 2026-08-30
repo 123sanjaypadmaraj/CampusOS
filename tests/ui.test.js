@@ -90,8 +90,14 @@ test('4 - Create Marketplace Listing', async ({ page }) => {
   await page.getByRole('button', { name: /Create listing/i }).click();
 
   // Fill form
+  // The marketplace page also has a "Maximum price" filter input mounted
+  // in the DOM at the same time as the create-listing form (it's a filter
+  // bar above the listing grid, not a modal that replaces it) -- a loose
+  // /Price/i match resolves to both that filter and the form's own "Price
+  // (₹)" field. Anchor to the start of the label so only the form field
+  // (which starts with "Price", unlike "Maximum price") matches.
   await page.getByLabel(/Title/i).fill('Test Book');
-  await page.getByLabel(/Price/i).fill('150');
+  await page.getByLabel(/^Price/i).fill('150');
 
   await page.screenshot({ path: 'screenshots/marketplace_form.png' });
   await page.getByRole('button', { name: /Publish listing/i }).click();

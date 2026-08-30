@@ -57,10 +57,44 @@ const FAKE_PROFILE = {
   open_to_projects: false,
 };
 
+// base64url-encode without padding, matching the format @supabase/auth-js's
+// decodeJWT() expects (it validates each segment against BASE64URL_REGEX).
+function base64url(obj) {
+  return Buffer.from(JSON.stringify(obj))
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
 function fakeSession() {
   const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+  // access_token has to be a *real 3-part JWT shape* -- not just any string.
+  // @supabase/auth-js's GoTrueClient calls decodeJWT() on the session's
+  // access_token during its own internal session/expiry bookkeeping (e.g.
+  // getClaims(), the periodic auto-refresh check), independent of anything
+  // this test mocks at the network level. A plain string like
+  // "e2e-fake-access-token" makes that decode throw ("Expected 3 parts in
+  // JWT; got 1"), which the app's own error handling then surfaces as real
+  // failures (food menu won't load, checkout silently never reaches the
+  // order-creation RPC) -- found because it's timing-dependent on exactly
+  // when GoTrueClient's internal check runs, so it passed on Chromium/
+  // Firefox but reliably broke on WebKit in the same suite. The signature
+  // segment is never verified client-side (this app has no real Supabase
+  // project behind it in tests), so any base64url string there is fine.
+  const header = base64url({ alg: "HS256", typ: "JWT" });
+  const payload = base64url({
+    sub: FAKE_USER.id,
+    email: FAKE_USER.email,
+    role: FAKE_USER.role,
+    aud: "authenticated",
+    exp: expiresAt,
+    iat: Math.floor(Date.now() / 1000),
+  });
+  const signature = base64url({ fake: true });
+
   return {
-    access_token: "e2e-fake-access-token",
+    access_token: `${header}.${payload}.${signature}`,
     refresh_token: "e2e-fake-refresh-token",
     expires_at: expiresAt,
     expires_in: 3600,
@@ -85,6 +119,25 @@ async function mockSignedInSession(page, { supabaseUrl = readSupabaseUrlFromEnv(
     },
     { key: `sb-${projectRef}-auth-token`, session: fakeSession() }
   );
+
+  // Disable the app's own service-worker registration (public/sw.js) for
+  // the duration of the test. It has its own fetch handler that re-issues
+  // requests via its own fetch() call inside the worker's execution
+  // context -- found live because that passthrough can bypass Playwright's
+  // page.route() mocking entirely (a real request escapes to the actual
+  // network the test never intended to touch), which showed up as
+  // supposedly-mocked RPC calls like get_my_access() coming back with a
+  // genuine PGRST301 "wrong key type" error from the real Supabase project
+  // instead of the fulfilled mock. It reproduced reliably under WebKit in
+  // this suite; a Chromium/Firefox run happening not to trip it on a given
+  // day is a timing accident, not proof the passthrough can't happen there
+  // too. Offline/caching behavior is exactly what the service worker is
+  // for, not something these UI tests are trying to exercise.
+  await page.addInitScript(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register = () => Promise.reject(new Error("disabled for tests"));
+    }
+  });
 
   // Stub Razorpay's Checkout.js so payment tests never depend on the real
   // external script or a live gateway -- see src/features/payments/razorpay.ts.

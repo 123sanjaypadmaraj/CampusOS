@@ -230,7 +230,6 @@ import {
   HiPlus,
   HiUserPlus,
   HiChevronRight,
-  HiChevronDown,
   HiPhone,
   HiShoppingBag,
   HiDocumentArrowUp,
@@ -241,12 +240,10 @@ import {
   HiWifi,
   HiHomeModern,
   HiBoltSlash,
-  HiCamera,
   HiComputerDesktop,
   HiLightBulb,
   HiStar,
   HiFire,
-  HiFaceSmile,
   HiOutlineBuildingLibrary,
   HiChatBubbleLeftRight,
   HiCog6Tooth,
@@ -345,152 +342,8 @@ const PLATFORM = Capacitor.getPlatform();
 const IS_NATIVE = Capacitor.isNativePlatform();
 
 /* =========================================================
-   FREE DEMO FOOD IMAGES
-   Unsplash images are linked remotely so the demo stays light.
-========================================================= */
-
-const FOOD_IMAGES = {
-
-  // ==========================================================
-  // UDUPI — SOUTH INDIAN
-  // ==========================================================
-
-  masalaDosa:
-    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ40JxSkHbTrsOvnDZBifOAPCP3z4QD3aTh7kZEgDc-VdQ7FNyuQuwT38Bg3NC-ieKXZ7C9ff5vmISLL2uQxK-F-ufEFT6Cw3Jrv2e64w3cCg&s=10",
-
-  idliVada:
-    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS_PW83NBAEUdXYUoZVTWuP24YzRmhkwiR11AqBELTvW2Glf9Rz2tYS4lvCPymSdPMx-nF95V61yxgVXqpBjwrEjQa69qi8uaxbf1anaIZMmw&s=10",
-
-  paneerMasalaDosa:
-    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSD1wmrt96nNOATDSWyDbuzSMy9IAbARYT4GCmcxmQh6w&s=10",
-
-  setDosa:
-    "https://images.pexels.com/photos/5560763/pexels-photo-5560763.jpeg?auto=compress&cs=tinysrgb&w=900",
-
-
-  // ==========================================================
-  // TANGO — ROLLS / NOODLES / BIRYANI / PASTA / SANDWICH
-  // ==========================================================
-
-  chickenRoll:
-    "https://images.pexels.com/photos/461198/pexels-photo-461198.jpeg?auto=compress&cs=tinysrgb&w=900",
-
-  vegNoodles:
-    "https://images.pexels.com/photos/2347311/pexels-photo-2347311.jpeg?auto=compress&cs=tinysrgb&w=900",
-
-  chickenBiryani:
-    "https://images.pexels.com/photos/1624487/pexels-photo-1624487.jpeg?auto=compress&cs=tinysrgb&w=900",
-
-  pennePasta:
-    "https://images.pexels.com/photos/1437267/pexels-photo-1437267.jpeg?auto=compress&cs=tinysrgb&w=900",
-
-  grilledSandwich:
-    "https://images.pexels.com/photos/1600711/pexels-photo-1600711.jpeg?auto=compress&cs=tinysrgb&w=900",
-
-
-  // ==========================================================
-  // MUNCH — FRIED RICE / NOODLES / CHINESE
-  // ==========================================================
-
-  chickenFriedRice:
-    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRpgOm6aMKAmMOynkpok2yQNAQUvxm5J-ss3kaLZ57cXA&s=10",
-
-  schezwanFriedRice:
-    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS5QRjF57ry-JUWJRPmbnIG3fMJeQDrzUmac0AdFJ_l8g&s=10",
-
-  schezwanNoodles:
-    "https://images.pexels.com/photos/2347311/pexels-photo-2347311.jpeg?auto=compress&cs=tinysrgb&w=900",
-
-  chilliChicken:
-    "https://images.pexels.com/photos/2338407/pexels-photo-2338407.jpeg?auto=compress&cs=tinysrgb&w=900",
-
-  vegManchurian:
-    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTtyNdC_i7_vVpaxbyn4uO9LZ2s5vUw-j9x689Sh_VaFQ&s=10",
-
-
-  // ==========================================================
-  // NESCAFE — COFFEE / MAGGI / SNACKS
-  // ==========================================================
-
-  classicCoffee:
-    "https://images.pexels.com/photos/312418/pexels-photo-312418.jpeg?auto=compress&cs=tinysrgb&w=900",
-
-  coldCoffee:
-    "https://images.pexels.com/photos/302899/pexels-photo-302899.jpeg?auto=compress&cs=tinysrgb&w=900",
-
-  masalaMaggi:
-    "https://images.pexels.com/photos/2347311/pexels-photo-2347311.jpeg?auto=compress&cs=tinysrgb&w=900",
-
-  chickenMaggi:
-    "https://images.pexels.com/photos/2347311/pexels-photo-2347311.jpeg?auto=compress&cs=tinysrgb&w=900",
-
-  chickenNuggets:
-    "https://images.pexels.com/photos/6941010/pexels-photo-6941010.jpeg?auto=compress&cs=tinysrgb&w=900",
-
-  frenchFries:
-    "https://images.pexels.com/photos/1583884/pexels-photo-1583884.jpeg?auto=compress&cs=tinysrgb&w=900",
-};
-
-
-/* =========================================================
    COMMUNITY
 ========================================================= */
-
-const postsSeed = [
-  {
-    id: "00000000-0000-4000-a000-000000000001",
-    type: "Hackathon",
-    icon: <HiBolt />,
-    title: "Need 2 Flutter developers for Smart India Hackathon",
-    author: "Tech Innovators Club",
-    time: "12 min ago",
-    likes: 42,
-    comments: 8,
-    accent: "violet",
-    tags: ["Flutter", "ML", "Team"],
-    verified: true,
-  },
-  {
-    id: "00000000-0000-4000-a000-000000000002",
-    type: "Event",
-    icon: <HiCalendarDays />,
-    title: "Generative AI Workshop — registrations are open",
-    author: "AI Club",
-    time: "1 hr ago",
-    likes: 76,
-    comments: 14,
-    accent: "blue",
-    tags: ["Workshop", "AI"],
-    verified: true,
-  },
-  {
-    id: "00000000-0000-4000-a000-000000000003",
-    type: "Help Needed",
-    icon: <HiUserGroup />,
-    title: "Does anyone have a Type-C charger near Block C?",
-    author: "Ananya • CSE 2",
-    time: "2 hrs ago",
-    likes: 18,
-    comments: 6,
-    accent: "orange",
-    tags: ["Help", "Block C"],
-    verified: true,
-  },
-  {
-    id: "00000000-0000-4000-a000-000000000004",
-    type: "Achievement",
-    icon: <HiTrophy />,
-    title:
-      "Congratulations to the robotics team for winning the regional challenge!",
-    author: "Robotics Club",
-    time: "Today",
-    likes: 119,
-    comments: 21,
-    accent: "green",
-    tags: ["Achievement"],
-    verified: true,
-  },
-];
 
 /* =========================================================
    EVENTS
@@ -536,76 +389,6 @@ const eventsSeed = [
 ];
 
 
-const peopleSeed = [
-  {
-    id: 1,
-    name: "Rahul Krishnan",
-    course: "CSE",
-    year: "3rd Year",
-    match: 87,
-    skills: ["Flutter", "Firebase", "ML", "UI/UX"],
-  },
-  {
-    id: 2,
-    name: "Megha Nair",
-    course: "ISE",
-    year: "2nd Year",
-    match: 82,
-    skills: ["React", "Node", "Figma", "MongoDB"],
-  },
-  {
-    id: 3,
-    name: "Aditya Rao",
-    course: "ECE",
-    year: "3rd Year",
-    match: 79,
-    skills: ["ESP32", "Embedded C", "IoT", "PCB"],
-  },
-  {
-    id: 4,
-    name: "Nikhil Varma",
-    course: "AIML",
-    year: "2nd Year",
-    match: 74,
-    skills: ["Python", "PyTorch", "CV", "LLMs"],
-  },
-];
-
-const clubs = [
-  {
-    id: 1,
-    name: "AI Club",
-    category: "Technology",
-    members: 426,
-    events: 12,
-    description: "AI workshops, research projects and paper discussions.",
-  },
-  {
-    id: 2,
-    name: "Robotics Club",
-    category: "Technology",
-    members: 218,
-    events: 8,
-    description: "Build robots, autonomous systems and embedded projects.",
-  },
-  {
-    id: 3,
-    name: "Coding Club",
-    category: "Technology",
-    members: 612,
-    events: 16,
-    description: "Hackathons, DSA sessions, open source and team formation.",
-  },
-  {
-    id: 4,
-    name: "Design Club",
-    category: "Creative",
-    members: 188,
-    events: 9,
-    description: "UI/UX, branding, motion and creative technology.",
-  },
-];
-
 /* =========================================================
    FOUR CANTEENS
 ========================================================= */
@@ -649,248 +432,6 @@ const canteens = [
   },
 ];
 
-
-const foodItems = [
-
-  // ==========================================================
-  // UDUPI
-  // ==========================================================
-
-  {
-    id: "udupi-1",
-    name: "Masala Dosa",
-    price: 55,
-    image: FOOD_IMAGES.masalaDosa,
-    category: "Udupi",
-    description:
-      "Crispy dosa with spiced potato masala, chutney and sambar",
-    veg: true,
-  },
-
-  {
-    id: "udupi-2",
-    name: "Idli Vada",
-    price: 45,
-    image: FOOD_IMAGES.idliVada,
-    category: "Udupi",
-    description:
-      "Soft idlis with crispy vada, sambar and coconut chutney",
-    veg: true,
-  },
-
-  {
-    id: "udupi-3",
-    name: "Paneer Masala Dosa",
-    price: 85,
-    image: FOOD_IMAGES.paneerMasalaDosa,
-    category: "Udupi",
-    description:
-      "Crispy dosa filled with paneer and masala",
-    veg: true,
-  },
-
-  {
-    id: "udupi-4",
-    name: "Set Dosa",
-    price: 50,
-    image: FOOD_IMAGES.setDosa,
-    category: "Udupi",
-    description:
-      "Soft fluffy set dosas served with chutney and sambar",
-    veg: true,
-  },
-
-
-  // ==========================================================
-  // TANGO
-  // ==========================================================
-
-  {
-    id: "tango-1",
-    name: "Chicken Roll",
-    price: 90,
-    image: FOOD_IMAGES.chickenRoll,
-    category: "Tango",
-    description:
-      "Spiced chicken wrapped in a soft roll with fresh vegetables",
-    veg: false,
-  },
-
-  {
-    id: "tango-2",
-    name: "Veg Noodles",
-    price: 75,
-    image: FOOD_IMAGES.vegNoodles,
-    category: "Tango",
-    description:
-      "Wok-tossed noodles with fresh vegetables",
-    veg: true,
-  },
-
-  {
-    id: "tango-3",
-    name: "Chicken Biryani",
-    price: 120,
-    image: FOOD_IMAGES.chickenBiryani,
-    category: "Tango",
-    description:
-      "Aromatic chicken biryani with fragrant basmati rice",
-    veg: false,
-  },
-
-  {
-    id: "tango-4",
-    name: "Penne Pasta",
-    price: 95,
-    image: FOOD_IMAGES.pennePasta,
-    category: "Tango",
-    description:
-      "Penne pasta tossed in a rich, creamy sauce",
-    veg: true,
-  },
-
-  {
-    id: "tango-5",
-    name: "Grilled Sandwich",
-    price: 70,
-    image: FOOD_IMAGES.grilledSandwich,
-    category: "Tango",
-    description:
-      "Crispy grilled sandwich with a cheesy vegetable filling",
-    veg: true,
-  },
-
-
-  // ==========================================================
-  // MUNCH
-  // ==========================================================
-
-  {
-    id: "munch-1",
-    name: "Chicken Fried Rice",
-    price: 100,
-    image: FOOD_IMAGES.chickenFriedRice,
-    category: "Munch",
-    description:
-      "Wok-fried rice with chicken, vegetables and seasoning",
-    veg: false,
-  },
-
-  {
-    id: "munch-2",
-    name: "Schezwan Fried Rice",
-    price: 90,
-    image: FOOD_IMAGES.schezwanFriedRice,
-    category: "Munch",
-    description:
-      "Spicy Schezwan-style fried rice with vegetables",
-    veg: true,
-  },
-
-  {
-    id: "munch-3",
-    name: "Schezwan Noodles",
-    price: 90,
-    image: FOOD_IMAGES.schezwanNoodles,
-    category: "Munch",
-    description:
-      "Spicy wok-tossed noodles with Schezwan sauce",
-    veg: true,
-  },
-
-  {
-    id: "munch-4",
-    name: "Chilli Chicken",
-    price: 120,
-    image: FOOD_IMAGES.chilliChicken,
-    category: "Munch",
-    description:
-      "Crispy chicken tossed with peppers, onions and chilli sauce",
-    veg: false,
-  },
-
-  {
-    id: "munch-5",
-    name: "Veg Manchurian",
-    price: 90,
-    image: FOOD_IMAGES.vegManchurian,
-    category: "Munch",
-    description:
-      "Crispy vegetable balls in a savoury Indo-Chinese sauce",
-    veg: true,
-  },
-
-
-  // ==========================================================
-  // NESCAFE
-  // ==========================================================
-
-  {
-    id: "nescafe-1",
-    name: "Classic Coffee",
-    price: 35,
-    image: FOOD_IMAGES.classicCoffee,
-    category: "Nescafe",
-    description:
-      "Hot, creamy college-style coffee",
-    veg: true,
-  },
-
-  {
-    id: "nescafe-2",
-    name: "Cold Coffee",
-    price: 60,
-    image: FOOD_IMAGES.coldCoffee,
-    category: "Nescafe",
-    description:
-      "Chilled creamy coffee served cold",
-    veg: true,
-  },
-
-  {
-    id: "nescafe-3",
-    name: "Masala Maggi",
-    price: 50,
-    image: FOOD_IMAGES.masalaMaggi,
-    category: "Nescafe",
-    description:
-      "Hot Maggi noodles tossed with Indian masala",
-    veg: true,
-  },
-
-  {
-    id: "nescafe-4",
-    name: "Chicken Maggi",
-    price: 80,
-    image: FOOD_IMAGES.chickenMaggi,
-    category: "Nescafe",
-    description:
-      "Maggi noodles with spicy chicken pieces",
-    veg: false,
-  },
-
-  {
-    id: "nescafe-5",
-    name: "Chicken Nuggets",
-    price: 85,
-    image: FOOD_IMAGES.chickenNuggets,
-    category: "Nescafe",
-    description:
-      "Crispy golden chicken nuggets",
-    veg: false,
-  },
-
-  {
-    id: "nescafe-6",
-    name: "French Fries",
-    price: 60,
-    image: FOOD_IMAGES.frenchFries,
-    category: "Nescafe",
-    description:
-      "Crispy golden fries with seasoning",
-    veg: true,
-  },
-];
 /* =========================================================
    STORE
 ========================================================= */
@@ -1739,9 +1280,11 @@ function App() {
         }
 
         loadClubs();
+        const unsub = subscribeToClubs(() => loadClubs());
 
         return () => {
           mounted = false;
+          unsub?.();
         };
       }, [campusId]);
 
@@ -2236,8 +1779,6 @@ function App() {
           search={search}
           setSearch={setSearch}
           notify={notify}
-          notifications={notifications}
-          openModal={setModal}
           foodCart={foodCart}
           storeCart={storeCart}
           authUser={authUser}
@@ -2293,10 +1834,8 @@ function App() {
     if (active === "services") {
       return (
         <Services
-          notify={notify}
           go={go}
           openModal={setModal}
-          foodCart={foodCart}
           storeCart={storeCart}
           printFile={printFile}
         />
@@ -2532,7 +2071,7 @@ function App() {
       );
     }
 
-    return <Home go={go} search={search} setSearch={setSearch} notify={notify} />;
+    return <Home go={go} search={search} setSearch={setSearch} notify={notify} foodCart={foodCart} storeCart={storeCart} authUser={authUser} />;
   };
 
   return (
@@ -2787,8 +2326,6 @@ function Home({
   search,
   setSearch,
   notify,
-  notifications,
-  openModal,
   foodCart,
   storeCart,
   authUser,
@@ -4505,7 +4042,7 @@ function EventRegistrationConfirmModal({ event, profile, authUser, onClose, onCo
    SERVICES
 ========================================================= */
 
-function Services({ go, notify, foodCart, storeCart, printFile, openModal }) {
+function Services({ go, storeCart, printFile, openModal }) {
   return (
     <section className="page-section services-page">
       <PageHeader
@@ -5004,85 +4541,6 @@ function Food({ canteens: vendorList, items, cart, addFood, openModal, loading, 
   );
 }
 
-
-/* =========================================================
-   TRADITIONAL FOOD MENU ITEM
-========================================================= */
-
-function TraditionalFoodItem({ item, add }) {
-
-  return (
-
-    <article className="traditional-food-item">
-
-      {/* SMALL FOOD IMAGE */}
-
-      <div className="traditional-food-image">
-
-        <img
-          src={item.image}
-          alt={item.name}
-          loading="lazy"
-        />
-
-      </div>
-
-
-      {/* FOOD INFORMATION */}
-
-      <div className="traditional-food-info">
-
-        <div className="traditional-food-title-row">
-
-          <div className="traditional-food-name">
-
-            <span
-              className={`veg-indicator ${
-                item.veg ? "veg" : "non-veg"
-              }`}
-            />
-
-            <h3>
-              {item.name}
-            </h3>
-
-          </div>
-
-          <span className="traditional-food-price">
-            ₹{item.price}
-          </span>
-
-        </div>
-
-
-        <p>
-          {item.description ||
-            `${item.category} from ${item.vendor}`}
-        </p>
-
-
-        <div className="traditional-food-meta">
-
-          <span>
-            {item.category}
-          </span>
-
-          <button
-            onClick={() => add(item)}
-            className="traditional-add-button"
-          >
-            <HiPlus />
-            Add
-          </button>
-
-        </div>
-
-      </div>
-
-    </article>
-
-  );
-}
 /* =========================================================
    FOOD CARD
 ========================================================= */

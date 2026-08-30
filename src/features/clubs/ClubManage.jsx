@@ -17,7 +17,6 @@ import {
   HiArrowDownTray,
   HiQrCode,
   HiCamera,
-  HiStar,
 } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import { TrendChart, StatTile } from "../../components/ui/Charts";

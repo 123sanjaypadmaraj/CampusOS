@@ -25,7 +25,6 @@ const SUPABASE_URL = readEnvVar('VITE_SUPABASE_URL');
 const SERVICE_ROLE_KEY = resolveServiceRoleKey(root, SUPABASE_URL);
 
 const ALICE = 'e2e.alice@nhce.edu.in';
-const ADMIN = '1nh25cs265@usn.campusos.internal';
 
 test.describe.serial('Recommended for you (dashboard personalization)', () => {
   let admin;
