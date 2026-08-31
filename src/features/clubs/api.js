@@ -283,3 +283,29 @@ export async function getMeetingAttendance(meetingId) {
   throwIfError(error);
   return data || [];
 }
+
+/* =========================================================================
+   PAYOUTS -- self-service reconciliation for a paid event. Payout GENERATION
+   is admin-only (generate_event_payout/mark_event_payout_paid, see
+   supabase/migrations/20260831001400_event_payouts.sql) -- this is read-only
+   for the club, same posture as vendor payouts (src/features/vendor/api.js).
+========================================================================= */
+
+// Itemized (one row per paid registration + one per completed refund) for a
+// single event -- lets a club officer check their own numbers at any time,
+// not just after an admin generates a payout.
+export async function getEventSettlementReport(eventId) {
+  const { data, error } = await supabase.rpc("event_settlement_report", { p_event_id: eventId });
+  throwIfError(error);
+  return data || [];
+}
+
+export async function getClubEventPayouts(clubId) {
+  const { data, error } = await supabase
+    .from("event_payouts")
+    .select("*, events(title, event_date)")
+    .eq("club_id", clubId)
+    .order("created_at", { ascending: false });
+  throwIfError(error);
+  return data || [];
+}
