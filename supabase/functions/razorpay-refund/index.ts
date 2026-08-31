@@ -77,7 +77,7 @@ Deno.serve(async (req: Request) => {
     if (!keyId || !keySecret) {
       await logServerError(serviceClient, "razorpay-refund: Razorpay keys not configured", { category: "payment", severity: "fatal" });
       return jsonResponse(
-        { code: "GATEWAY_NOT_CONFIGURED", message: "Razorpay test keys are not configured on this deployment yet." },
+        { code: "GATEWAY_NOT_CONFIGURED", message: "Razorpay keys are not configured on this deployment yet." },
         503
       );
     }
