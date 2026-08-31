@@ -252,6 +252,7 @@ import {
   HiOutlineBookmark,
   HiArrowDownTray,
   HiBuildingStorefront,
+  HiSwatch,
 } from "react-icons/hi2";
 import { FaLinkedin, FaGithub } from "react-icons/fa6";
 import { Capacitor } from "@capacitor/core";
@@ -559,6 +560,19 @@ const notificationsSeed = [
   },
 ];
 
+// Selectable accent palettes -- each pairs a mid + light swatch color for
+// the picker UI itself; the actual app-wide recoloring lives in index.css
+// under ".app-shell.theme-<id>" (see "COLOR THEMES" section there). All are
+// muted/abstract rather than neon, in keeping with the app's tone -- "violet"
+// is the original, unmodified default look.
+const COLOR_THEMES = [
+  { id: "violet", label: "Violet", swatchA: "#6945e8", swatchB: "#8b6cff" },
+  { id: "ocean", label: "Ocean", swatchA: "#2f6fed", swatchB: "#6b93ff" },
+  { id: "terracotta", label: "Terracotta", swatchA: "#c05a35", swatchB: "#e08a5c" },
+  { id: "sage", label: "Sage", swatchA: "#4f7a52", swatchB: "#7ba57e" },
+  { id: "rosewood", label: "Rosewood", swatchA: "#b5486e", swatchB: "#d97fa0" },
+];
+
 /* =========================================================
    APP
 ========================================================= */
@@ -581,6 +595,12 @@ function App() {
   const [darkMode, setDarkMode] = useState(
     () => localStorage.getItem("campus-theme") === "dark"
   );
+  const [colorTheme, setColorTheme] = useState(() => {
+    const saved = localStorage.getItem("campus-color-theme");
+    return COLOR_THEMES.some((t) => t.id === saved) ? saved : "violet";
+  });
+  const [themePickerOpen, setThemePickerOpen] = useState(false);
+  const themePickerRef = useRef(null);
   const [notifications, setNotifications] = useState(notificationsSeed);
   const [modal, setModal] = useState(null);
   const [posts, setPosts] = useState([]);
@@ -864,6 +884,28 @@ function App() {
       return next;
     });
   };
+
+  const selectColorTheme = (id) => {
+    setColorTheme(id);
+    localStorage.setItem("campus-color-theme", id);
+    // Deliberately left open (unlike a native <select>) -- picking a color
+    // theme is step one of this panel, with light/dark right underneath it,
+    // so closing here would force a re-open just to reach that toggle.
+  };
+
+  // Close the color-theme popover on an outside click/tap, same idea as a
+  // native <select> -- there's no shared outside-click hook in this codebase
+  // yet, so it's local to this one popover.
+  useEffect(() => {
+    if (!themePickerOpen) return;
+    const onPointerDown = (e) => {
+      if (themePickerRef.current && !themePickerRef.current.contains(e.target)) {
+        setThemePickerOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [themePickerOpen]);
 
   const filteredPosts = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -2039,7 +2081,7 @@ function App() {
   };
 
   return (
-    <div className={`app-shell ${darkMode ? "dark-mode" : "light-mode"} platform-${PLATFORM}`}>
+    <div className={`app-shell ${darkMode ? "dark-mode" : "light-mode"} theme-${colorTheme} platform-${PLATFORM}`}>
       <a href="#main-content" className="skip-link">
         Skip to main content
       </a>
@@ -2090,19 +2132,59 @@ function App() {
             <i>{notifications.filter((n) => n.unread).length}</i>
           </button>
 
-          <button
-            className="theme-toggle"
-            onClick={toggleTheme}
-            aria-label={
-              darkMode ? "Switch to light mode" : "Switch to dark mode"
-            }
-          >
-            <span className="theme-track">
-              <span className="theme-thumb">
-                {darkMode ? <HiMoon /> : <HiSun />}
-              </span>
-            </span>
-          </button>
+          <div className="theme-picker" ref={themePickerRef}>
+            <button
+              className="icon-btn"
+              onClick={() => setThemePickerOpen((open) => !open)}
+              aria-label="Theme settings"
+              aria-haspopup="true"
+              aria-expanded={themePickerOpen}
+            >
+              <HiSwatch />
+            </button>
+            {themePickerOpen && (
+              <div className="theme-picker-panel" role="menu">
+                <span className="theme-picker-label">Color theme</span>
+                <div className="theme-swatch-row">
+                  {COLOR_THEMES.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={colorTheme === t.id}
+                      className={`theme-swatch${colorTheme === t.id ? " active" : ""}`}
+                      style={{ "--swatch-a": t.swatchA, "--swatch-b": t.swatchB }}
+                      onClick={() => selectColorTheme(t.id)}
+                      title={t.label}
+                    >
+                      <span className="sr-only">{t.label}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <span className="theme-picker-label theme-picker-label-appearance">
+                  Appearance
+                </span>
+                <button
+                  type="button"
+                  className="theme-toggle"
+                  onClick={toggleTheme}
+                  aria-label={
+                    darkMode ? "Switch to light mode" : "Switch to dark mode"
+                  }
+                >
+                  <span className="theme-track">
+                    <span className="theme-thumb">
+                      {darkMode ? <HiMoon /> : <HiSun />}
+                    </span>
+                  </span>
+                  <span className="theme-toggle-label">
+                    {darkMode ? "Dark" : "Light"}
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
 
           {user ? (
             <button className="profile-mini" onClick={() => go("profile")}>

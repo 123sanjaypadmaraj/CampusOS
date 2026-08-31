@@ -105,12 +105,17 @@ describe("App button interactions", () => {
   test("renders Sign in and theme toggle buttons", async () => {
     render(<App />);
     expect(await screen.findByText(/Sign in/i)).toBeInTheDocument();
+
+    // The light/dark toggle lives inside the color-theme popover now, so it
+    // has to be opened first -- see [[campusos-color-themes-pass]].
+    fireEvent.click(screen.getByLabelText(/theme settings/i));
     expect(screen.getByLabelText(/switch to dark mode/i)).toBeInTheDocument();
   });
 
   test("toggles theme mode when the theme button is clicked", async () => {
     render(<App />);
-    const themeButton = await screen.findByLabelText(/switch to dark mode/i);
+    fireEvent.click(await screen.findByLabelText(/theme settings/i));
+    const themeButton = screen.getByLabelText(/switch to dark mode/i);
 
     fireEvent.click(themeButton);
 

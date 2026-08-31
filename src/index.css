@@ -158,9 +158,19 @@
   border: none;
   background: transparent;
 
-  padding: 4px;
+  padding: 4px 0;
+
+  display: flex;
+  align-items: center;
+  gap: 10px;
 
   cursor: pointer;
+}
+
+.theme-toggle-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
 }
 
 .theme-track {
@@ -202,6 +212,72 @@
 
 .dark-mode .theme-thumb {
   transform: translateX(22px);
+}
+
+/* =========================================================
+   COLOR THEME PICKER
+========================================================= */
+
+.theme-picker {
+  position: relative;
+}
+
+.theme-picker-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 45;
+  min-width: 200px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px;
+  box-shadow: var(--shadow);
+  animation: modal-fade 0.15s var(--ease);
+}
+
+.theme-picker-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+.theme-picker-label-appearance {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.theme-swatch-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.theme-swatch {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: linear-gradient(135deg, var(--swatch-a), var(--swatch-b));
+  border: 2px solid transparent;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+  transition: transform 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+
+.theme-swatch:hover {
+  transform: translateY(-2px) scale(1.06);
+}
+
+.theme-swatch.active {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--swatch-a),
+    0 2px 6px rgba(0, 0, 0, 0.18);
 }
 
 /* =========================================================
@@ -5463,4 +5539,229 @@
   cursor: not-allowed;
   transform: none !important;
   box-shadow: none !important;
+}
+
+/* =========================================================
+   COLOR THEMES
+
+   Palette variants layered on top of the original "violet" look,
+   selectable independently of light/dark mode (theme-picker in the
+   topbar). "violet" itself has no rules here -- it *is* the untouched
+   default defined earlier in this file.
+
+   Each theme mainly overrides the --purple/--purple2/--purple-deep/
+   --soft/--ring/--accent custom properties, which the vast majority of
+   accent-colored UI already reads via var(...) -- buttons, chips,
+   links, icons, focus rings, dashboard/activity accents, etc. all
+   recolor for free from that alone.
+
+   A short list of decorative elements (hero banner, orbit graphic,
+   profile/social cover gradients, a couple of soft-tinted pill/badge
+   backgrounds) were hand-authored with literal hex colors rather than
+   variables, so each gets one matching override below, all selectors
+   scoped under .app-shell.theme-<id> which out-specifies both the base
+   rule and the existing .dark-mode overrides -- so a single block
+   here (not duplicated per light/dark) already wins in both modes.
+   --accent is the one exception: it already has separate light/dark
+   values today, so each theme gets a light value here plus a
+   .dark-mode combo for the dark value.
+
+   Surface/background/text/border tokens are deliberately left alone --
+   they're the result of a dedicated contrast pass (WCAG 4.5:1) and
+   reskinning them per theme isn't worth risking that.
+========================================================= */
+
+.app-shell.theme-ocean {
+  --purple: #2f6fed;
+  --purple2: #6b93ff;
+  --purple-deep: #1f4fc4;
+  --soft: #eaf1ff;
+  --ring: rgba(47, 111, 237, 0.3);
+  --accent: #2f6fed;
+}
+.app-shell.dark-mode.theme-ocean {
+  --accent: #7c9dff;
+}
+
+.app-shell.theme-terracotta {
+  --purple: #c05a35;
+  --purple2: #e08a5c;
+  --purple-deep: #93411f;
+  --soft: #fbeee5;
+  --ring: rgba(192, 90, 53, 0.3);
+  --accent: #c05a35;
+}
+.app-shell.dark-mode.theme-terracotta {
+  --accent: #e69166;
+}
+
+.app-shell.theme-sage {
+  --purple: #4f7a52;
+  --purple2: #7ba57e;
+  --purple-deep: #34573a;
+  --soft: #eaf3ea;
+  --ring: rgba(79, 122, 82, 0.3);
+  --accent: #4f7a52;
+}
+.app-shell.dark-mode.theme-sage {
+  --accent: #8fc093;
+}
+
+.app-shell.theme-rosewood {
+  --purple: #b5486e;
+  --purple2: #d97fa0;
+  --purple-deep: #7f2c4a;
+  --soft: #fbeaf0;
+  --ring: rgba(181, 72, 110, 0.3);
+  --accent: #b5486e;
+}
+.app-shell.dark-mode.theme-rosewood {
+  --accent: #e08bab;
+}
+
+/* Decorative elements that use literal hex colors instead of the
+   variables above -- one matching override per theme. */
+
+.app-shell.theme-ocean .hero {
+  background:
+    radial-gradient(circle at 80% 20%, #a9c4ff 0, transparent 24%),
+    radial-gradient(circle at 8% 92%, #1f4fc4 0, transparent 30%),
+    linear-gradient(135deg, #0e1626 0%, #152036 50%, #1f3d73 100%);
+}
+.app-shell.theme-ocean .hero:after { background: #6b93ff22; }
+.app-shell.theme-ocean .hero h1 span,
+.app-shell.theme-ocean .hero-links b { color: #a9c4ff; }
+.app-shell.theme-ocean .orbit-core {
+  background: linear-gradient(145deg, #4a7ff2, #16255c);
+  box-shadow: 0 0 90px #6b93ff77;
+}
+.app-shell.theme-ocean .date-box.purple,
+.app-shell.theme-ocean .profile-tags span,
+.app-shell.theme-ocean .status-pill.archived,
+.app-shell.theme-ocean .order-status-pill.tone-default {
+  background: #eaf1ff;
+  color: #1f4fc4;
+}
+.app-shell.theme-ocean .tags span { color: #3f6fd6; }
+.app-shell.theme-ocean .service-demo,
+.app-shell.theme-ocean .ai-banner,
+.app-shell.theme-ocean .store-banner {
+  background: linear-gradient(100deg, #e9f0ff, #f7faff);
+  border-color: #cfdcff;
+}
+.app-shell.theme-ocean .opportunity button { background: #3f7cf0; }
+.app-shell.theme-ocean .canteen-status.selected { box-shadow: 0 0 0 2px #2f6fed1c; }
+.app-shell.theme-ocean .linkedin-cover,
+.app-shell.theme-ocean .socialize-hero {
+  background:
+    radial-gradient(circle at 80% 22%, #6b93ff 0, transparent 26%),
+    linear-gradient(135deg, #0e1626 0%, #152036 55%, #1f3d73 100%);
+}
+
+.app-shell.theme-terracotta .hero {
+  background:
+    radial-gradient(circle at 80% 20%, #f0c3a0 0, transparent 24%),
+    radial-gradient(circle at 8% 92%, #93411f 0, transparent 30%),
+    linear-gradient(135deg, #241510 0%, #33201a 50%, #7a3a20 100%);
+}
+.app-shell.theme-terracotta .hero:after { background: #e08a5c22; }
+.app-shell.theme-terracotta .hero h1 span,
+.app-shell.theme-terracotta .hero-links b { color: #f0c3a0; }
+.app-shell.theme-terracotta .orbit-core {
+  background: linear-gradient(145deg, #d9713f, #5c2712);
+  box-shadow: 0 0 90px #e08a5c77;
+}
+.app-shell.theme-terracotta .date-box.purple,
+.app-shell.theme-terracotta .profile-tags span,
+.app-shell.theme-terracotta .status-pill.archived,
+.app-shell.theme-terracotta .order-status-pill.tone-default {
+  background: #fbeee5;
+  color: #93411f;
+}
+.app-shell.theme-terracotta .tags span { color: #b5602f; }
+.app-shell.theme-terracotta .service-demo,
+.app-shell.theme-terracotta .ai-banner,
+.app-shell.theme-terracotta .store-banner {
+  background: linear-gradient(100deg, #fbeee5, #fff8f4);
+  border-color: #f0d2bd;
+}
+.app-shell.theme-terracotta .opportunity button { background: #d9713f; }
+.app-shell.theme-terracotta .canteen-status.selected { box-shadow: 0 0 0 2px #c05a351c; }
+.app-shell.theme-terracotta .linkedin-cover,
+.app-shell.theme-terracotta .socialize-hero {
+  background:
+    radial-gradient(circle at 80% 22%, #e08a5c 0, transparent 26%),
+    linear-gradient(135deg, #241510 0%, #33201a 55%, #7a3a20 100%);
+}
+
+.app-shell.theme-sage .hero {
+  background:
+    radial-gradient(circle at 80% 20%, #cfe6cf 0, transparent 24%),
+    radial-gradient(circle at 8% 92%, #34573a 0, transparent 30%),
+    linear-gradient(135deg, #121a12 0%, #1c261c 50%, #3c5a3e 100%);
+}
+.app-shell.theme-sage .hero:after { background: #7ba57e22; }
+.app-shell.theme-sage .hero h1 span,
+.app-shell.theme-sage .hero-links b { color: #cfe6cf; }
+.app-shell.theme-sage .orbit-core {
+  background: linear-gradient(145deg, #5f9463, #24401f);
+  box-shadow: 0 0 90px #7ba57e77;
+}
+.app-shell.theme-sage .date-box.purple,
+.app-shell.theme-sage .profile-tags span,
+.app-shell.theme-sage .status-pill.archived,
+.app-shell.theme-sage .order-status-pill.tone-default {
+  background: #eaf3ea;
+  color: #34573a;
+}
+.app-shell.theme-sage .tags span { color: #4c7a4f; }
+.app-shell.theme-sage .service-demo,
+.app-shell.theme-sage .ai-banner,
+.app-shell.theme-sage .store-banner {
+  background: linear-gradient(100deg, #eaf3ea, #f6faf6);
+  border-color: #cfe0cf;
+}
+.app-shell.theme-sage .opportunity button { background: #5f9463; }
+.app-shell.theme-sage .canteen-status.selected { box-shadow: 0 0 0 2px #4f7a521c; }
+.app-shell.theme-sage .linkedin-cover,
+.app-shell.theme-sage .socialize-hero {
+  background:
+    radial-gradient(circle at 80% 22%, #7ba57e 0, transparent 26%),
+    linear-gradient(135deg, #121a12 0%, #1c261c 55%, #3c5a3e 100%);
+}
+
+.app-shell.theme-rosewood .hero {
+  background:
+    radial-gradient(circle at 80% 20%, #f0c3d6 0, transparent 24%),
+    radial-gradient(circle at 8% 92%, #7f2c4a 0, transparent 30%),
+    linear-gradient(135deg, #1c1216 0%, #2a1620 50%, #5c2a41 100%);
+}
+.app-shell.theme-rosewood .hero:after { background: #d97fa022; }
+.app-shell.theme-rosewood .hero h1 span,
+.app-shell.theme-rosewood .hero-links b { color: #f0c3d6; }
+.app-shell.theme-rosewood .orbit-core {
+  background: linear-gradient(145deg, #c65f85, #4a1830);
+  box-shadow: 0 0 90px #d97fa077;
+}
+.app-shell.theme-rosewood .date-box.purple,
+.app-shell.theme-rosewood .profile-tags span,
+.app-shell.theme-rosewood .status-pill.archived,
+.app-shell.theme-rosewood .order-status-pill.tone-default {
+  background: #fbeaf0;
+  color: #7f2c4a;
+}
+.app-shell.theme-rosewood .tags span { color: #a4436b; }
+.app-shell.theme-rosewood .service-demo,
+.app-shell.theme-rosewood .ai-banner,
+.app-shell.theme-rosewood .store-banner {
+  background: linear-gradient(100deg, #fbeaf0, #fff5f9);
+  border-color: #f0cfdc;
+}
+.app-shell.theme-rosewood .opportunity button { background: #c65f85; }
+.app-shell.theme-rosewood .canteen-status.selected { box-shadow: 0 0 0 2px #b5486e1c; }
+.app-shell.theme-rosewood .linkedin-cover,
+.app-shell.theme-rosewood .socialize-hero {
+  background:
+    radial-gradient(circle at 80% 22%, #d97fa0 0, transparent 26%),
+    linear-gradient(135deg, #1c1216 0%, #2a1620 55%, #5c2a41 100%);
 }
