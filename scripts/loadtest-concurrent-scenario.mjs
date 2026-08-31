@@ -288,12 +288,18 @@ async function main() {
     callRpc(u.token, "register_for_event", { p_event_id: eventId, p_contact_phone: "9999999999", p_contact_name: u.email, p_roll_number: null, p_department: null })
   ));
   report.phases.push(summarize("events: concurrent register_for_event", regResults));
+  // Waitlisted registrants don't get a row in event_registrations at all --
+  // register_for_event() routes them into the separate event_waitlist table
+  // instead (see supabase/migrations/20260831000800_paid_events.sql) -- so
+  // checking both is required for an honest "nothing got lost" invariant.
   const { data: regRows } = await restSelect(adminToken, "event_registrations", `event_id=eq.${eventId}&select=status`);
+  const { data: waitlistRows } = await restSelect(adminToken, "event_waitlist", `event_id=eq.${eventId}&select=user_id`);
   const confirmedCount = (regRows || []).filter((r) => r.status === "confirmed").length;
-  const waitlistedCount = (regRows || []).filter((r) => r.status === "waitlisted").length;
+  const waitlistedCount = (waitlistRows || []).length;
   const oversold = confirmedCount > eventCapacity;
-  console.log(`  invariant check: confirmed=${confirmedCount}, waitlisted=${waitlistedCount}, capacity=${eventCapacity} -> ${oversold ? "OVERSOLD -- BUG" : "capacity respected under concurrency"}`);
-  report.eventCapacityCheck = { capacity: eventCapacity, confirmed: confirmedCount, waitlisted: waitlistedCount, oversold };
+  const lost = users.length - confirmedCount - waitlistedCount;
+  console.log(`  invariant check: confirmed=${confirmedCount}, waitlisted=${waitlistedCount}, capacity=${eventCapacity} -> ${oversold ? "OVERSOLD -- BUG" : "capacity respected under concurrency"}${lost !== 0 ? ` -- ${lost} registrants UNACCOUNTED FOR (neither confirmed nor waitlisted) -- BUG` : ""}`);
+  report.eventCapacityCheck = { capacity: eventCapacity, confirmed: confirmedCount, waitlisted: waitlistedCount, oversold, lost };
 
   // -----------------------------------------------------------------
   // Phase 6: LOST & FOUND -- a subset (every 5th user) files a report
