@@ -41,10 +41,25 @@ which is what makes those `env()` values non-zero in the first place.
   `navigator.serviceWorker.register(...)`) — Web Push doesn't work in an
   iOS WebView at all, and there's no separate offline app-shell to protect
   on native either now that the shell loads production directly (see
-  below). Native push notifications are a separate, not-yet-built
-  follow-up (would need `@capacitor/push-notifications` + APNs/FCM
-  credentials + extending `push_subscriptions`/`supabase/functions/send-push`
-  to route native tokens, not just Web Push endpoints).
+  below).
+- **Native push notifications**: built via `@capacitor/push-notifications`
+  (see `src/services/pushService.js`'s `IS_NATIVE` branches and
+  `registerNativePushListeners()`, wired from `src/App.jsx`). The same
+  `PushToggle` UI, `push_subscriptions` table, and `create_notification()` →
+  trigger → `send-push` pipeline used for Web Push now also carries native
+  tokens — the 20260831001200 migration added a `platform` column
+  (`web`/`android`/`ios`) so `send-push` can route each subscription to the
+  right gateway (Web Push, FCM, or APNs). **This is all code/plumbing only
+  right now**: FCM needs a real Firebase project + `google-services.json` in
+  `android/app/` + the `FCM_SERVICE_ACCOUNT_JSON` Edge Function secret, and
+  APNs needs a Mac-built iOS app + an Apple Developer `.p8` key (
+  `APNS_AUTH_KEY`/`APNS_KEY_ID`/`APNS_TEAM_ID`/`APNS_BUNDLE_ID` secrets) —
+  see the comment block at the top of `supabase/functions/send-push/index.ts`
+  for the exact secret names and where to get each one. Until those are
+  set, native push registration attempts fail gracefully (a clear in-app
+  error, not a crash) and `send-push` just skips that platform's
+  subscriptions with `GATEWAY_NOT_CONFIGURED`/`skipped` — Web Push
+  continues to work unaffected either way.
 - **Auto-updating on push to production**: `capacitor.config.ts` sets
   `server.url` to `https://campusos-amber.vercel.app` instead of bundling
   `dist/` offline, so the installed app always shows whatever is live in
@@ -92,6 +107,8 @@ npx cap sync        # copies dist/ into android/ and ios/, updates plugin config
   1024×1024 icon with no transparency; replace `assets/*.png` with real art
   and re-run `npx capacitor-assets generate` before submitting to either
   store. See `assets/README.md`.
-- **Native push notifications** — not built yet, see above.
+- **Native push notifications** — the client and server code is built (see
+  above); only the FCM/APNs credentials themselves are missing, and those
+  need a Firebase project + (for iOS) a Mac-built app first.
 - **App Store / Play Store listings, signing keys, submission** — not
   attempted from this repo.

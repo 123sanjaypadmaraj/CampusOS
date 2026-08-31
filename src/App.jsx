@@ -148,6 +148,7 @@ import {
   unsubscribeFromPush,
   getPushSubscriptionStatus,
   isPushSupported,
+  registerNativePushListeners,
   getNotificationCategoryPreferences,
   setNotificationCategoryPreference,
   getNotificationChannelPreferences,
@@ -842,7 +843,18 @@ function App() {
       }
     };
     navigator.serviceWorker?.addEventListener?.("message", onServiceWorkerMessage);
-    return () => navigator.serviceWorker?.removeEventListener?.("message", onServiceWorkerMessage);
+
+    // Native equivalent of the sw.js "notification-click" relay above --
+    // no-ops on web (see registerNativePushListeners's IS_NATIVE guard).
+    const unregisterNativePush = registerNativePushListeners({
+      onNotificationTapped: routeNotificationAction,
+      notify,
+    });
+
+    return () => {
+      navigator.serviceWorker?.removeEventListener?.("message", onServiceWorkerMessage);
+      unregisterNativePush();
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- mount-once by design, same as the popstate/SW-register effects above
 
   const toggleTheme = () => {

@@ -37,6 +37,16 @@ const config: CapacitorConfig = {
       androidSplashResourceName: 'splash',
       androidScaleType: 'CENTER_CROP',
     },
+    // Without this, iOS silently drops a push that arrives while the app is
+    // already in the foreground -- no banner, no sound, nothing (the OS
+    // assumes the app itself will handle it, which is what
+    // pushNotificationReceived in src/services/pushService.js does with an
+    // in-app toast, but the system alert is still worth showing too).
+    // Android has no such flag; it always needs local handling to show
+    // anything in the foreground, which is the same listener's job.
+    PushNotifications: {
+      presentationOptions: ['badge', 'sound', 'alert'],
+    },
   },
 };
 
