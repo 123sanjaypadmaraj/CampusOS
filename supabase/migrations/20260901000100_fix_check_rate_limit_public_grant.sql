@@ -1,0 +1,48 @@
+-- SECURITY FIX (found while scoping the 1 Sep load/concurrency re-verify
+-- pass, before the load test itself ran): check_rate_limit() -- the shared
+-- rate-limiting primitive underlying send_message, register_for_event,
+-- publish_club_announcement, broadcast_vendor_message, create_support_ticket,
+-- and every other rate-limited write path in this schema -- was created back
+-- in 20260814001000_notifications_map_ratelimit.sql with no explicit
+-- `revoke execute ... from public, anon, authenticated`, unlike every other
+-- internal-only helper in this codebase (adjust_stock_for_order,
+-- record_payment_event, restore_store_order_stock, mark_refund_completed,
+-- ...). Postgres grants EXECUTE on a newly created function to PUBLIC by
+-- default, and nothing in this schema's setup revokes that project-wide --
+-- so check_rate_limit was directly callable by ANY authenticated user via
+-- PostgREST the whole time, confirmed live against staging:
+--
+--   POST /rest/v1/rpc/check_rate_limit
+--   { "p_user": "<victim's id>", "p_bucket": "messages", "p_max_hits": 1,
+--     "p_window_seconds": 999999999 }
+--
+-- p_user is a plain parameter, not derived from auth.uid() -- the function
+-- has no notion of "self" at all, by design (it's meant to be called
+-- internally by another SECURITY DEFINER function that already validated
+-- the caller). Called directly like this, any authenticated account (a
+-- compromised session, a malicious student/vendor account, ...) can insert
+-- poison rows into rate_limit_hits under an arbitrary victim's user_id and
+-- an arbitrary bucket name, with an arbitrarily large window -- a real,
+-- repeatable, targeted denial-of-service: the victim's own next genuine
+-- send_message/register_for_event/publish_club_announcement/... call
+-- re-runs the exact same count query, sees the attacker's planted hits, and
+-- gets rejected as "rate limited" even though the victim never did anything.
+-- Since the attacker controls p_window_seconds, this isn't self-healing on
+-- prune_rate_limit_hits()'s 1-day rolling window either -- it can be
+-- re-applied indefinitely.
+--
+-- Fix: revoke execute from public/anon/authenticated, matching this
+-- codebase's established convention for internal-only SECURITY DEFINER
+-- helpers. Every real caller (send_message, register_for_event,
+-- publish_club_announcement, broadcast_vendor_message,
+-- create_support_ticket, ...) is itself SECURITY DEFINER and calls
+-- check_rate_limit() from inside its own PL/pgSQL body -- that call runs as
+-- the function's owner, which already has full rights, so this revoke
+-- changes nothing for any legitimate call path. Verified: re-ran the same
+-- direct-RPC probe after applying this migration and it now gets rejected
+-- (permission denied for function check_rate_limit), and a real
+-- send_message() call (which calls check_rate_limit() internally) still
+-- succeeds.
+-- =============================================================================
+
+revoke execute on function public.check_rate_limit(uuid, text, integer, integer) from public, anon, authenticated;
