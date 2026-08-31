@@ -103,7 +103,7 @@ self.addEventListener("notificationclick", (event) => {
 
   const { actionType, actionId } = event.notification.data || {};
   // The app itself resolves actionType/actionId into a tab once open (see
-  // NOTIFICATION_ACTION_ROUTES in src/App.jsx) -- the service worker just
+  // routeNotificationAction in src/App.jsx) -- the service worker just
   // needs to get a window open/focused with that hint in the URL.
   const targetUrl =
     actionType && actionId ? `/?notif_action=${actionType}&notif_id=${actionId}` : "/";

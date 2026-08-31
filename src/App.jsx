@@ -784,6 +784,56 @@ function App() {
     go("messages");
   };
 
+  // Tapping a push notification is supposed to land you on whatever it was
+  // about -- sw.js's notificationclick handler already carries the
+  // notification's {actionType, actionId} through two channels (a
+  // postMessage to a focused existing tab, or a fresh tab opened at
+  // ?notif_action=&notif_id= when none was open) and says as much in its
+  // own comment ("the app itself resolves actionType/actionId ... see
+  // NOTIFICATION_ACTION_ROUTES in src/App.jsx"). That resolver never
+  // existed -- neither channel was ever consumed here, so every push
+  // notification, of every type, was dead on tap: it just left you on
+  // whatever tab the app happened to already be on (or the default tab on
+  // a cold start), silently dropping the deep link the whole pipeline
+  // (create_notification -> send-push -> sw.js) went to the trouble of
+  // carrying. 'conversation' gets its exact destination (the same
+  // goToConversation the in-app Notifications list already uses for a
+  // message notification); every other actionType (order, event, club,
+  // ticket, lost-and-found match, ...) lands on the Notifications page
+  // itself rather than guessing a screen -- there are ~20 different
+  // actionType/action_id conventions across the notification call sites,
+  // and routing those without auditing each one risks sending someone to
+  // the wrong place, which is worse than the safe, always-correct fallback.
+  const routeNotificationAction = (actionType, actionId) => {
+    if (!actionType || !actionId) return;
+    if (actionType === "conversation") {
+      goToConversation(actionId);
+    } else {
+      go("notifications");
+    }
+  };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const notifAction = params.get("notif_action");
+    const notifId = params.get("notif_id");
+    if (notifAction && notifId) {
+      routeNotificationAction(notifAction, notifId);
+      params.delete("notif_action");
+      params.delete("notif_id");
+      const rest = params.toString();
+      window.history.replaceState({}, "", window.location.pathname + (rest ? `?${rest}` : ""));
+    }
+
+    const onServiceWorkerMessage = (event) => {
+      if (event.data?.type === "notification-click") {
+        routeNotificationAction(event.data.actionType, event.data.actionId);
+      }
+    };
+    navigator.serviceWorker?.addEventListener?.("message", onServiceWorkerMessage);
+    return () => navigator.serviceWorker?.removeEventListener?.("message", onServiceWorkerMessage);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- mount-once by design, same as the popstate/SW-register effects above
+
   const toggleTheme = () => {
     setDarkMode((current) => {
       const next = !current;
