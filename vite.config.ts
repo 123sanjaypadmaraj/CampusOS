@@ -15,5 +15,23 @@ export default defineConfig({
   build: {
     outDir: "dist",
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        // Split third-party deps out of the app bundle into their own
+        // vendor chunks: they change far less often than app code, so this
+        // lets the browser cache them across CampusOS deploys instead of
+        // re-downloading React/Supabase/etc. on every release.
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          if (id.includes("react-dom") || /[\\/]react[\\/]/.test(id) || id.includes("scheduler")) {
+            return "vendor-react";
+          }
+          if (id.includes("@supabase")) return "vendor-supabase";
+          if (id.includes("@tanstack")) return "vendor-query";
+          if (id.includes("react-icons")) return "vendor-icons";
+          return "vendor";
+        },
+      },
+    },
   },
 });
