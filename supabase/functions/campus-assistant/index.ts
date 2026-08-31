@@ -601,14 +601,19 @@ async function runTool(
       const id = String(args.event_id ?? "");
       const { data: event, error } = await userClient
         .from("events_with_counts")
-        .select("id, title, event_date, place, published")
+        .select("id, title, event_date, place, published, price")
         .eq("id", id)
         .maybeSingle();
       if (error) return { result: { error: error.message } };
       if (!event || !event.published) return { result: { error: "That event doesn't exist -- call get_upcoming_events again to find the right id." } };
+      // Surface the price (paid_events.sql) in what the model tells the
+      // student BEFORE they hit Confirm -- register_event in App.jsx already
+      // handles the payment_pending response correctly after confirming, but
+      // that's too late to be the first the student hears this costs money.
+      const priceNote = event.price != null && Number(event.price) > 0 ? ` (₹${event.price})` : "";
       return {
-        result: { proposed: true, summary: `Registration for "${event.title}" on ${new Date(event.event_date as string).toLocaleString()}` },
-        pendingAction: { type: "register_event", label: `Register for "${event.title}"`, eventId: event.id, eventTitle: event.title, eventDate: event.event_date, eventPlace: event.place },
+        result: { proposed: true, summary: `Registration for "${event.title}"${priceNote} on ${new Date(event.event_date as string).toLocaleString()}` },
+        pendingAction: { type: "register_event", label: `Register for "${event.title}"${priceNote}`, eventId: event.id, eventTitle: event.title, eventDate: event.event_date, eventPlace: event.place, price: event.price ?? null },
       };
     }
     case "propose_apply_to_team": {
