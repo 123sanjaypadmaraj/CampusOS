@@ -6,7 +6,8 @@ connected to this session). Here's exactly what's left, in order.
 ## 0. Rotate the credentials in `SECURITY.md` first
 
 Do this before anything else — a password and a Supabase key are sitting in
-this repo's git history. See `SECURITY.md`.
+this repo's git history. See `SECURITY.md` and, for the legacy JWT /
+Razorpay / Groq / Resend rotation specifically, `docs/CREDENTIAL_ROTATION.md`.
 
 ## 1. Apply the database schema
 
@@ -23,6 +24,13 @@ Skip `0013_seed_dev_data.sql` for a real campus — it inserts demo
 canteens/food items/clubs/events tagged to the `nhce` campus slug.
 
 ## 2. Get Razorpay test keys and deploy the payment Edge Functions
+
+First time setting these up (or rotating an existing set -- see
+`docs/CREDENTIAL_ROTATION.md` for the full masked-input, verified version
+of this): `node scripts/rotate-credentials.mjs razorpay-keys --env=<staging|production> [--yes-production]`
+and `... razorpay-webhook-secret ... --generate`. The raw form below still
+works but puts the value on the command line (shell history, process
+list) -- prefer the script.
 
 ```bash
 npx supabase secrets set RAZORPAY_KEY_ID=rzp_test_xxxxxxxx
@@ -186,7 +194,9 @@ steps use `--project-ref` directly, not a locally-linked project.
 - **Staging's edge function secrets** (`RAZORPAY_KEY_ID` etc.) — `supabase
   secrets set` is a one-time-per-project setup step, not a per-deploy one;
   `deploy.yml` deploys function *code*, not function *config*. Run it by
-  hand once per project per §2 above if it hasn't been.
+  hand once per project per §2 above if it hasn't been (`node
+  scripts/rotate-credentials.mjs status` shows what's actually set on each
+  project right now).
 - **A manual-approval gate on the production job** — right now the staging
   live-check passing is the only gate; there's no "someone clicks Approve"
   step before production. Add a GitHub `environment` protection rule on the

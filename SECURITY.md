@@ -123,21 +123,25 @@ doesn't have, or a decision only you should make):
   function secrets), but the **legacy keys are still active** and nothing in
   the CLI can roll or disable them -- that's Dashboard -> Project Settings
   -> API -> Legacy API Keys, for both `dzjzjlylsfpmymkcavrq` (production)
-  and `qmfmziilgkktwnqoxakk` (staging). Rolling/disabling breaks anything
-  still coded against the legacy key by name until updated, so check what
-  in this codebase still reads `SUPABASE_SERVICE_ROLE_KEY` as a static JWT
-  before disabling outright.
-- **Razorpay key secret + webhook secret** (production only -- staging never
-  had its own, see `docs/DEPLOYMENT.md` §3): regenerate in the Razorpay
-  Dashboard, then run `supabase secrets set RAZORPAY_KEY_SECRET=... 
-  RAZORPAY_WEBHOOK_SECRET=... --project-ref dzjzjlylsfpmymkcavrq` **yourself,
-  directly in your own terminal** rather than pasting the new value into a
-  chat session -- the whole point of rotating is to stop a value from
-  sitting somewhere it doesn't need to.
-- **`GROQ_API_KEY`** (production): same reasoning, same fix -- regenerate at
-  console.groq.com, `supabase secrets set` it yourself.
-- **`RESEND_API_KEY` / Fast2SMS key**: same, whichever dashboards those come
-  from (email/SMS dispatch infra, see the 2026-08-18 hardening entry above).
+  and `qmfmziilgkktwnqoxakk` (staging).
+- **Razorpay key secret + webhook secret, `GROQ_API_KEY`, `RESEND_API_KEY` /
+  Fast2SMS key**: same pattern -- regenerate in the relevant dashboard,
+  never paste the new value into a chat session.
+
+**2026-09-01: reduced all of the above to one script.**
+`scripts/rotate-credentials.mjs` does every part of each rotation that
+doesn't require clicking a dashboard button -- masked-input prompts (never
+a CLI arg, never echoed), propagates the value to the right local file or
+`supabase secrets set --env-file` call, and verifies the change actually
+took before declaring success. It also corrected a real inaccuracy this
+section used to imply: `RAZORPAY_WEBHOOK_SECRET`, `RESEND_API_KEY`, and the
+Fast2SMS key were never actually set in production at all (confirmed live
+via `supabase secrets list`) -- rotating them is really a first-time setup,
+not a rotation, and until it happens `razorpay-webhook`/`send-email`
+fail closed (503, logged to `error_logs`) rather than silently pretending
+to work. Full ordered checklist, including exactly which two steps still
+need a human either way (a GitHub repo secret, the Razorpay webhook
+config): **`docs/CREDENTIAL_ROTATION.md`**.
 - **GitHub Actions repository secrets**: this session has no `gh` CLI/token
   to check or rotate them. `.github/workflows/backup.yml` references
   `SUPABASE_ACCESS_TOKEN` and `PROD_SUPABASE_SERVICE_ROLE_KEY` -- check

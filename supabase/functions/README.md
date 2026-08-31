@@ -16,6 +16,11 @@ wrapper would add nothing to. Call it directly via
 
 ## Deploying
 
+Setting or rotating the payment secrets themselves: prefer `node
+scripts/rotate-credentials.mjs razorpay-keys` / `razorpay-webhook-secret`
+(masked input, verifies the change took — see `docs/CREDENTIAL_ROTATION.md`)
+over typing the raw value into `supabase secrets set` below.
+
 ```bash
 npx supabase login
 npx supabase link --project-ref <ref>

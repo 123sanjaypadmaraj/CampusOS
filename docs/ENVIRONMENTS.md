@@ -150,6 +150,10 @@ notification secrets (`PUSH_DISPATCH_SECRET`, `VAPID_*`) were freshly
 generated, not copied from production (no reason to share them — push
 subscriptions are project-specific anyway). Razorpay test keys for staging
 need to be set separately from production's — see `docs/DEPLOYMENT.md`.
+Rotating (or first-time-setting) any of these: `node
+scripts/rotate-credentials.mjs status` shows what's actually configured on
+each project right now; `docs/CREDENTIAL_ROTATION.md` has the full
+per-secret rotation flow.
 
 ## What's NOT duplicated
 
