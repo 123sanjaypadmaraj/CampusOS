@@ -145,6 +145,20 @@ async function main() {
   const { data: carolConvsAfter } = await carol.sb.rpc("list_conversations");
   check("Non-member still doesn't get the channel thread itself", !(carolConvsAfter || []).some((c) => c.title === marker));
 
+  // Spam/storage-exhaustion hardening (20260831001300): an oversized title or
+  // body must be rejected before any row is written or any recipient is
+  // notified -- checked ahead of check_rate_limit in the RPC, so these calls
+  // don't burn any of the 20/hour budget the success calls above already used.
+  const { error: longTitleErr } = await alice.sb.rpc("publish_club_announcement", {
+    p_club_id: club.id, p_title: "x".repeat(201), p_body: null, p_pinned: false, p_audience: "members",
+  });
+  check("Guard: an oversized club announcement title is rejected", !!longTitleErr && /too long/i.test(longTitleErr.message || ""), longTitleErr);
+
+  const { error: longBodyErr } = await alice.sb.rpc("publish_club_announcement", {
+    p_club_id: club.id, p_title: "Fine title", p_body: "x".repeat(4001), p_pinned: false, p_audience: "members",
+  });
+  check("Guard: an oversized club announcement body is rejected", !!longBodyErr && /too long/i.test(longBodyErr.message || ""), longBodyErr);
+
   // --- Cleanup: cascades to club_members, club_announcements, the channel
   // conversation (club_id FK), its messages, and its notifications' action_id
   // reference (notifications themselves are untouched, harmless test rows).
@@ -180,6 +194,19 @@ async function main() {
     const vendorChannel = (vendorConvs || []).find((c) => c.title === canteenRow.name);
     check("Vendor's Messages list includes their channel", !!vendorChannel);
     check("Vendor channel can_post:true for the owner", vendorChannel?.can_post === true, vendorChannel);
+
+    // Same spam/storage-exhaustion hardening as the club side, checked ahead
+    // of check_rate_limit so this doesn't burn any of the 20/hour budget the
+    // successful broadcast above already used one of.
+    const { error: longVendorTitleErr } = await vendor.sb.rpc("broadcast_vendor_message", {
+      p_canteen_id: canteenRow.id, p_title: "x".repeat(201), p_body: null,
+    });
+    check("Guard: an oversized vendor broadcast title is rejected", !!longVendorTitleErr && /too long/i.test(longVendorTitleErr.message || ""), longVendorTitleErr);
+
+    const { error: longVendorBodyErr } = await vendor.sb.rpc("broadcast_vendor_message", {
+      p_canteen_id: canteenRow.id, p_title: "Fine title", p_body: "x".repeat(4001),
+    });
+    check("Guard: an oversized vendor broadcast body is rejected", !!longVendorBodyErr && /too long/i.test(longVendorBodyErr.message || ""), longVendorBodyErr);
   }
 
   console.log(`\n${passCount} passed, ${failCount} failed`);
