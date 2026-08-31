@@ -110,7 +110,7 @@ async function main() {
   const { data: orderAfterMismatch } = await svc.from("orders").select("status, payment_status").eq("id", order.id).single();
   check("An amount-mismatched capture does NOT flip the order to PAID", orderAfterMismatch?.status === "PAYMENT_PENDING" && orderAfterMismatch?.payment_status !== "paid", orderAfterMismatch);
 
-  const { data: mismatchLog } = await svc.from("error_logs").select("*").eq("category", "payment").ilike("message", "%does not match the payment owed%").order("created_at", { ascending: false }).limit(1);
+  const { data: mismatchLog } = await svc.from("error_logs").select("*").eq("category", "payment").ilike("message", `%${fakeGatewayOrderId}%`).order("created_at", { ascending: false }).limit(1);
   check("The mismatch is logged to error_logs for the observability alert to pick up", (mismatchLog?.length ?? 0) > 0, mismatchLog);
 
   const { error: correctErr } = await svc.rpc("record_payment_event", {

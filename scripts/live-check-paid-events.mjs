@@ -91,6 +91,8 @@ async function main() {
     event_date: new Date(Date.now() + 7 * 86400_000).toISOString(), place: "Live Check Hall", price: 250, capacity: 1,
   }).select().single();
 
+  let mismatchEvent; // fixture created mid-try, declared here so `finally`'s cleanup loop can see it
+
   try {
     // ---------------------------------------------------------------
     // Free event -- unchanged behaviour
@@ -169,6 +171,51 @@ async function main() {
     check("A 'Payment confirmed' notification was sent", (notif?.length ?? 0) > 0, notif);
 
     // ---------------------------------------------------------------
+    // record_payment_event: amount-integrity check on the event_registration
+    // branch. 20260831000800_paid_events.sql's record_payment_event was based
+    // on a stale copy that predated 20260824000700_payment_webhook_hardening.sql
+    // and silently dropped this check for ALL THREE targets (see
+    // 20260831001100_restore_payment_amount_integrity_check.sql) -- this is
+    // the event-registration-specific regression test scripts/live-check-
+    // payment-and-store-billing.mjs's order-branch equivalent didn't cover.
+    // ---------------------------------------------------------------
+    console.log("\n--- record_payment_event: amount integrity (event_registration branch) ---");
+    const carolPassword = e2ePassword("e2e.carol@nhce.edu.in");
+    const carol = await signIn("e2e.carol@nhce.edu.in", carolPassword);
+    ({ data: mismatchEvent } = await svc.from("events").insert({
+      campus_id: campusId, title: `LiveCheck Amount-Mismatch Event ${stamp}`, category: "Workshop",
+      event_date: new Date(Date.now() + 7 * 86400_000).toISOString(), place: "Live Check Hall", price: 300, capacity: 5,
+    }).select().single());
+
+    const { data: carolReg } = await carol.sb.rpc("register_for_event", {
+      p_event_id: mismatchEvent.id, p_contact_phone: "9876543212", p_contact_name: "Carol Test",
+    });
+    const { data: carolPayOrder } = await carol.sb.rpc("create_event_payment_order", { p_registration_id: carolReg.registration_id });
+    const gatewayOrderIdMismatch = `order_livecheck_${stamp}_mismatch`;
+    await svc.from("payments").update({ gateway_order_id: gatewayOrderIdMismatch }).eq("id", carolPayOrder.id);
+
+    const correctPaise = Math.round(Number(carolPayOrder.amount) * 100);
+    const { error: mismatchErr } = await svc.rpc("record_payment_event", {
+      p_gateway_order_id: gatewayOrderIdMismatch,
+      p_gateway_payment_id: "pay_livecheck_event_mismatch",
+      p_status: "captured",
+      p_signature_verified: true,
+      p_raw_payload: { event: "payment.captured", payload: { payment: { entity: { id: "pay_livecheck_event_mismatch", order_id: gatewayOrderIdMismatch, amount: correctPaise + 500 } } } },
+    });
+    check("record_payment_event accepts a mismatched-amount capture for an event registration (doesn't error/500)", !mismatchErr, mismatchErr);
+    const { data: carolRegAfterMismatch } = await svc.from("event_registrations").select("payment_status").eq("id", carolReg.registration_id).single();
+    check("An amount-mismatched capture does NOT flip the registration to paid", carolRegAfterMismatch?.payment_status === "pending", carolRegAfterMismatch);
+    const { data: carolTicketAfterMismatch } = await svc.from("event_tickets").select("id").eq("registration_id", carolReg.registration_id);
+    check("No ticket is minted for a mismatched-amount capture", (carolTicketAfterMismatch?.length ?? 0) === 0, carolTicketAfterMismatch);
+    const { data: mismatchLog } = await svc.from("error_logs").select("id").eq("category", "payment").ilike("message", `%${gatewayOrderIdMismatch}%`).limit(1);
+    check("The mismatch is logged to error_logs", (mismatchLog?.length ?? 0) > 0, mismatchLog);
+
+    const { error: correctErr } = await fakeCapture(svc, gatewayOrderIdMismatch, `${stamp}_correct`, correctPaise);
+    check("A subsequent correctly-amounted capture on the same order still succeeds", !correctErr, correctErr);
+    const { data: carolRegAfterCorrect } = await svc.from("event_registrations").select("payment_status").eq("id", carolReg.registration_id).single();
+    check("The correctly-amounted capture flips the registration to paid", carolRegAfterCorrect?.payment_status === "paid", carolRegAfterCorrect);
+
+    // ---------------------------------------------------------------
     // Cancel a paid registration -> refund row created; RLS-readable by the
     // owner; a captured payment on a captured registration promotes Bob off
     // the waitlist into a payment_pending state (not a free ticket).
@@ -212,7 +259,7 @@ async function main() {
     // ---------------------------------------------------------------
     // Cleanup -- delete everything this script created.
     // ---------------------------------------------------------------
-    for (const ev of [freeEvent, paidEvent]) {
+    for (const ev of [freeEvent, paidEvent, mismatchEvent]) {
       if (!ev) continue;
       const { data: regs } = await svc.from("event_registrations").select("id").eq("event_id", ev.id);
       const regIds = (regs || []).map((r) => r.id);
