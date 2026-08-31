@@ -1,9 +1,17 @@
-# Minors policy — decision needed (not resolved by this document)
+# Minors policy
 
-Prep for readiness-audit phase 6's remainder (go-live runbook step 5). This
-lays out the actual question and the realistic options so the decision
-takes minutes instead of starting from a blank page — it doesn't pick one.
-Not legal advice; have counsel confirm whatever you land on.
+Prep for readiness-audit phase 6's remainder (go-live runbook step 5). Not
+legal advice; have counsel confirm this against the current DPDP Act 2023
+and its rules before treating it as binding — same posture as the other
+docs in this directory.
+
+> **⬛ REQUIRES YOUR INPUT — the only thing this document can't decide for
+> you:** ask the college's admissions office one question — *"does your
+> admitted student body ever include anyone under 18?"* — and record the
+> answer in the "College confirmation" section below. Everything else in
+> this document is a decided default that holds either way; only that one
+> answer determines whether the default below is sufficient on its own or
+> needs Option B's extra engineering work (see "If the answer is 'yes'").
 
 ## Why this needs a decision
 
@@ -17,48 +25,80 @@ mechanism here.
 CampusOS's actual population is college students. Most join at 18+, but a
 real slice of first-years turn 18 only partway through their first year —
 so "our users are all adults" isn't quite true on day one of any given
-cohort, even though it's true for the large majority.
+cohort, even though it's true for the large majority. Most Indian degree
+programs require 12th-standard completion for admission, which typically
+puts an enrolled student at 18+ already — but "typically" isn't the same
+as a documented certainty for *this* college.
 
-## Options
+## Decided default: self-declared adult population (Option A), backed by a college confirmation (Option C)
 
-**A. Treat the whole population as adult, document the assumption.**
-Simplest — no signup friction, no schema change. Defensible if the
-college's own admission policy guarantees no enrolled student is under 18
-at signup (many Indian degree programs do, since 12th-standard completion
-typically puts students at 18+ already). Risk: if that assumption turns
-out false for even one student, there's no consent mechanism at all for
-that account.
+This document adopts the combination of the two lowest-friction options as
+the operating default, rather than leaving the choice open:
 
-**B. Collect date of birth at signup, gate under-18 accounts.**
-Add a DOB field to the signup flow; block or hold accounts under 18 pending
-a verifiable-guardian-consent step (however that ends up being defined by
-the eventual DPDP rules). More signup friction, more schema/RLS work, but
-closes the gap directly. Only worth building if Option A's assumption is
-actually false for this college.
+1. **The Terms of Service now state, as a condition of creating an
+   account, that the student confirms they are 18 or older** (shipped in
+   this pass — see `LegalContent()` in `src/App.jsx`, Terms of Service
+   section). The existing signup flow already requires checking "I agree
+   to the Privacy Policy & Terms of Service" before an account can be
+   created (`agreedToTerms` in the signup form), so this reuses a checkbox
+   that's already mandatory rather than adding new signup friction —
+   agreeing to the Terms now doubles as the age affirmation.
+2. This is the same self-declaration pattern most consumer platforms use
+   to satisfy an age-eligibility requirement without collecting a birth
+   date (which would itself be new sensitive data to protect). It's a
+   reasonable, industry-standard default — not a bulletproof one; a
+   self-declaration doesn't verify anything, it documents an assumption.
+3. **The college confirmation (the field above) is what upgrades this from
+   "reasonable assumption" to "documented basis."** Until that answer is
+   on file, the ToS clause is doing the work alone. Get the confirmation
+   before treating this as fully closed.
 
-**C. Ask the college directly.** Most colleges already have their own
-admission-age records. If the college can attest (in writing) that no
-enrolled student is under 18, that's arguably the strongest and cheapest
-version of Option A — a documented basis rather than an assumption.
+This was Option A+C from the original version of this document, chosen
+over Option B (collect date of birth, gate under-18 accounts) because
+Option B's engineering cost — new signup field, schema change, an
+unbuilt verifiable-parental-consent flow the DPDP rules don't even fully
+define yet — isn't justified unless the college confirmation below comes
+back "yes." Building Option B speculatively, before knowing it's needed,
+would be solving a problem that may not exist for this college.
 
-## Recommendation
+## College confirmation
 
-Start with **C** — ask the college's admissions office one question
-("does your admitted student body ever include anyone under 18?") before
-building anything. If the answer is "no, never," Option A with that answer
-on file is likely sufficient and Option B's engineering cost isn't worth
-it yet. If the answer is "rarely, but yes," Option B becomes worth
-scoping.
+**⬛ REQUIRES YOUR INPUT.** Fill in once asked:
 
-## What to bring back
+- **Question asked:** "Does your admitted student body ever include
+  anyone under 18?"
+- **Answer:** _(not yet asked)_
+- **Date / source:** _(not yet asked — ideally something in writing:
+  an email from admissions is enough, doesn't need to be a formal letter)_
 
-Whichever option you pick, tell me:
-1. The college's answer to the admission-age question.
-2. If Option B: whether "gate the account" should mean "block signup
-   entirely" or "allow signup but hide privileged features until consent
-   clears" — that's a product call, not just a legal one.
+## If the answer is "no, never"
 
-Either way, this decision and the Grievance Officer name (see
-`docs/BREACH_NOTIFICATION_PROCEDURE.md`) should land in the in-app Privacy
-Policy (`LegalContent()` in `src/App.jsx`) together, not as two separate
-edits.
+The decided default above (self-declaration via the ToS clause) is
+sufficient as documented. No further engineering work needed for this
+item — mark it closed in the readiness audit once the confirmation is on
+file.
+
+## If the answer is "rarely, but yes"
+
+Option B becomes worth scoping. Before building it, this still needs a
+product call this document can't make for you: should "gate the account"
+mean **block signup entirely** for a declared under-18 student, or **allow
+signup but hide privileged/data-sharing features** (Connect directory
+visibility, marketplace, posting) **until consent clears**? Bring that
+answer back along with the college's response above, and this becomes a
+normal engineering ticket (DOB field, RLS gate, a guardian-consent
+intake — the actual verification mechanism still depends on DPDP rules
+that aren't finalized, so that specific piece may need a second pass once
+they are).
+
+## What this document doesn't resolve
+
+- **The college's actual answer** — the one input above.
+- **Legal sign-off** — this is an engineering-side starting point, not
+  reviewed by counsel.
+- **Option B's build**, if the college confirmation comes back "yes" —
+  correctly not started speculatively.
+
+Either way, this decision and the Grievance Officer appointment (see
+`docs/GRIEVANCE_OFFICER.md`) should land in the in-app Privacy Policy
+(`LegalContent()` in `src/App.jsx`) together whenever either changes.

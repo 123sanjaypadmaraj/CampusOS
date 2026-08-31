@@ -7821,6 +7821,12 @@ function LegalContent() {
         orders, post, register for events, book resources, or use any
         other feature until reactivated by a campus admin.
       </p>
+      <p>
+        By creating an account, you confirm you are 18 years of age or
+        older. CampusOS is built for an enrolled college student
+        population; see <code>docs/MINORS_POLICY_DECISION.md</code> in the
+        project repository for how this is handled.
+      </p>
 
       <h3>Payments &amp; orders</h3>
       <p>
