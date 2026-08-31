@@ -6358,13 +6358,24 @@ function ActivityNotifications({ items, go }) {
   );
 }
 
+// A payment row's target is exactly one of orders/print_jobs/
+// event_registrations (payments_target_xor) -- pick whichever embedded
+// relation actually came back non-null to build a human-readable label,
+// same order the ledger's own target columns were added in.
+function paymentTitle(payment) {
+  if (payment.orders?.canteens?.name) return `Payment · ${payment.orders.canteens.name}`;
+  if (payment.print_jobs) return `Payment · Print job${payment.print_jobs.pickup_code ? ` #${payment.print_jobs.pickup_code}` : ""}`;
+  if (payment.event_registrations?.events?.title) return `Payment · ${payment.event_registrations.events.title}`;
+  return "Payment";
+}
+
 function ActivityPayments({ items }) {
   if (!items.length) {
     return (
       <EmptyState
         icon={<HiCreditCard />}
         title="No payments yet"
-        text="Payments for food orders show up here once you've placed one."
+        text="Payments for food orders, print jobs and paid events show up here once you've made one."
       />
     );
   }
@@ -6374,7 +6385,7 @@ function ActivityPayments({ items }) {
         <ActivityRow
           key={payment.id}
           icon={<HiCreditCard />}
-          title={payment.orders?.canteens?.name ? `Payment · ${payment.orders.canteens.name}` : "Payment"}
+          title={paymentTitle(payment)}
           subtitle={`${payment.gateway ? formatStatusLabel(payment.gateway) : "Gateway"}${payment.created_at ? ` · ${new Date(payment.created_at).toLocaleString()}` : ""}`}
           meta={activityMoney(payment.amount)}
           status={payment.status}

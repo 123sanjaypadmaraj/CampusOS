@@ -28,6 +28,7 @@ import {
   startEventRegistrationRefund,
   getMyPendingPaymentEvents,
   getMyEventRegistrations,
+  getMyPayments,
   isValidPhone,
   transitionOrderStatus,
   startFoodOrderPayment,
@@ -343,6 +344,43 @@ describe("getMyPendingPaymentEvents", () => {
 
   it("returns an empty list without a network call when there is no user id", async () => {
     const result = await getMyEventRegistrations(null);
+    expect(result).toEqual([]);
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+});
+
+describe("getMyPayments", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  // A payments row's target is exactly one of orders/print_jobs/
+  // event_registrations (payments_target_xor) -- the embedded select pulls
+  // all three so a food, print, or paid-event charge is each recognizable
+  // from the same row shape (see paymentTitle() in App.jsx).
+  it("returns the ledger rows with all three embedded targets, whichever is populated", async () => {
+    const mockResponse = {
+      data: [
+        { id: "pay-food", gateway: "razorpay", amount: 120, orders: { id: "o1", total: 120, canteens: { name: "Main Canteen" } }, print_jobs: null, event_registrations: null },
+        { id: "pay-print", gateway: "razorpay", amount: 20, orders: null, print_jobs: { id: "pj1", pickup_code: "482913" }, event_registrations: null },
+        { id: "pay-event", gateway: "razorpay", amount: 250, orders: null, print_jobs: null, event_registrations: { id: "er1", events: { title: "Hack Night" } } },
+      ],
+      error: null,
+    };
+    const builder = {
+      select: jest.fn(() => builder),
+      order: jest.fn(() => builder),
+      limit: jest.fn(() => builder),
+      then: (resolve) => Promise.resolve(mockResponse).then(resolve),
+    };
+    mockFrom.mockReturnValue(builder);
+
+    const result = await getMyPayments("user-1");
+
+    expect(mockFrom).toHaveBeenCalledWith("payments");
+    expect(result).toEqual(mockResponse.data);
+  });
+
+  it("returns an empty list without a network call when there is no user id", async () => {
+    const result = await getMyPayments(null);
     expect(result).toEqual([]);
     expect(mockFrom).not.toHaveBeenCalled();
   });

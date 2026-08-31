@@ -11,12 +11,15 @@
 import { supabase } from "../../lib/supabase";
 import { throwIfError } from "./_shared.js";
 
-// The payment ledger only ever links to a food order (`payments.order_id ->
-// orders`, see supabase/migrations/20260814000400_payments.sql) -- there's
-// no student-facing row for store/booking/print charges yet. RLS
-// (payments_read) already restricts this to payments on the caller's own
-// orders, so no explicit .eq("user_id", ...) is needed or even possible
-// here -- the filter has to go through the embedded orders join instead.
+// The payment ledger's `payments` row can point at any one of three targets
+// (payments_target_xor, extended most recently by
+// supabase/migrations/20260831000800_paid_events.sql to add
+// event_registration_id alongside the original order_id and print_job_id
+// from printing_v2) -- this embeds all three so ActivityPayments can show
+// something meaningful regardless of which kind a given row is. RLS
+// (payments_read) already restricts this to payments the caller owns via
+// one of those three relations, so no explicit .eq("user_id", ...) is
+// needed or even possible here.
 export async function getMyPayments(userId) {
   if (!userId) return [];
 
@@ -34,6 +37,16 @@ export async function getMyPayments(userId) {
         total,
         status,
         canteens ( name )
+      ),
+      print_jobs (
+        id,
+        pickup_code,
+        pages,
+        copies
+      ),
+      event_registrations (
+        id,
+        events ( title )
       )
     `)
     .order("created_at", { ascending: false })
