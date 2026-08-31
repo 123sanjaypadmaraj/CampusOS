@@ -416,7 +416,7 @@ Deno.serve(async (req: Request) => {
     // yet -- same "not ready to deliver" signal the old VAPID-only check
     // gave, just gateway-aware now.
     await reportResult("skipped", gatewayErrors.join("; "));
-    return json({ code: "GATEWAY_NOT_CONFIGURED", details: gatewayErrors }, 503);
+    return json({ code: "GATEWAY_NOT_CONFIGURED", details: gatewayErrors, sent, total: subs.length }, 503);
   } else {
     await reportResult("failed", `delivery failed to all ${subs.length} subscription(s)${gatewayErrors.length ? `; ${gatewayErrors.join("; ")}` : ""}`);
   }
