@@ -39,6 +39,8 @@ import {
   publishClubAnnouncement,
   upsertClubMeeting,
   markMeetingAttendance,
+  getEventSettlementReport,
+  getClubEventPayouts,
 } from "./api";
 
 function chain(result) {
@@ -380,5 +382,55 @@ describe("markMeetingAttendance", () => {
 
     expect(mockRpc).toHaveBeenCalledWith("mark_meeting_attendance", { p_meeting_id: "meeting-1", p_entries: entries });
     expect(result).toEqual(entries);
+  });
+});
+
+describe("getEventSettlementReport", () => {
+  it("passes the event id through to event_settlement_report", async () => {
+    const rows = [{ row_type: "registration", net_amount: 190 }];
+    mockRpc.mockResolvedValue({ data: rows, error: null });
+
+    const result = await getEventSettlementReport("event-1");
+
+    expect(mockRpc).toHaveBeenCalledWith("event_settlement_report", { p_event_id: "event-1" });
+    expect(result).toEqual(rows);
+  });
+
+  it("defaults to an empty array when the RPC returns no data", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: null });
+
+    const result = await getEventSettlementReport("event-1");
+
+    expect(result).toEqual([]);
+  });
+
+  it("surfaces a not-authorized error from the RPC", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: new Error("Not authorized to view this event's settlement report") });
+
+    await expect(getEventSettlementReport("event-1")).rejects.toThrow("Not authorized");
+  });
+});
+
+describe("getClubEventPayouts", () => {
+  it("queries event_payouts scoped to the club, newest first", async () => {
+    const rows = [{ id: "payout-1", club_id: "club-1", net_amount: 180 }];
+    const builder = chain({ data: rows, error: null });
+    mockFrom.mockReturnValue(builder);
+
+    const result = await getClubEventPayouts("club-1");
+
+    expect(mockFrom).toHaveBeenCalledWith("event_payouts");
+    expect(builder.eq).toHaveBeenCalledWith("club_id", "club-1");
+    expect(builder.order).toHaveBeenCalledWith("created_at", { ascending: false });
+    expect(result).toEqual(rows);
+  });
+
+  it("defaults to an empty array when no payouts exist yet", async () => {
+    const builder = chain({ data: null, error: null });
+    mockFrom.mockReturnValue(builder);
+
+    const result = await getClubEventPayouts("club-1");
+
+    expect(result).toEqual([]);
   });
 });

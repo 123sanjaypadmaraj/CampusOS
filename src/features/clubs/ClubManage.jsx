@@ -17,6 +17,9 @@ import {
   HiArrowDownTray,
   HiQrCode,
   HiCamera,
+  HiBanknotes,
+  HiCurrencyRupee,
+  HiArrowUturnLeft,
 } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import { TrendChart, StatTile } from "../../components/ui/Charts";
@@ -97,6 +100,7 @@ export default function ClubManage({ clubId, campusId, authUser, notify, onBack 
         <button className={tab === "members" ? "chip active" : "chip"} onClick={() => setTab("members")}>Members ({data.members.length})</button>
         <button className={tab === "applications" ? "chip active" : "chip"} onClick={() => setTab("applications")}>Applications {data.applications.length > 0 ? `(${data.applications.length})` : ""}</button>
         <button className={tab === "events" ? "chip active" : "chip"} onClick={() => setTab("events")}>Events ({data.events.length})</button>
+        <button className={tab === "payouts" ? "chip active" : "chip"} onClick={() => setTab("payouts")}>Payouts</button>
         <button className={tab === "meetings" ? "chip active" : "chip"} onClick={() => setTab("meetings")}>Attendance</button>
         <button className={tab === "announcements" ? "chip active" : "chip"} onClick={() => setTab("announcements")}>Announcements</button>
         <button className={tab === "gallery" ? "chip active" : "chip"} onClick={() => setTab("gallery")}>Gallery</button>
@@ -109,6 +113,7 @@ export default function ClubManage({ clubId, campusId, authUser, notify, onBack 
       {tab === "members" && <MembersTab club={data.club} members={data.members} canManage={isAdminRole} authUser={authUser} notify={notify} onChange={reload} />}
       {tab === "applications" && <ApplicationsTab club={data.club} applications={data.applications} notify={notify} onChange={reload} />}
       {tab === "events" && <EventsTab clubId={clubId} campusId={campusId} events={data.events} authUser={authUser} notify={notify} onChange={reload} />}
+      {tab === "payouts" && <PayoutsTab clubId={clubId} events={data.events} notify={notify} />}
       {tab === "meetings" && <MeetingsTab clubId={clubId} meetings={data.meetings} members={data.members} authUser={authUser} notify={notify} onChange={reload} />}
       {tab === "announcements" && <AnnouncementsTab clubId={clubId} announcements={data.announcements} notify={notify} onChange={reload} />}
       {tab === "gallery" && <GalleryTab clubId={clubId} gallery={data.gallery} authUser={authUser} notify={notify} onChange={reload} />}
@@ -585,6 +590,99 @@ function ClubEventForm({ event, clubId, campusId, authUser, onClose, onSaved, no
         {saving ? "Saving…" : "Save event"}
       </button>
     </Modal>
+  );
+}
+
+/* =========================================================================
+   PAYOUTS -- revenue ledger for paid events. Generation is admin-only
+   (generate_event_payout/mark_event_payout_paid, see supabase/migrations/
+   20260831001400_event_payouts.sql) -- this tab is read-only for the club:
+   an itemized settlement report per paid event, plus the payout history an
+   admin has already issued. Mirrors VendorDashboard's BillingPanel.
+========================================================================= */
+function PayoutsTab({ clubId, events, notify }) {
+  const paidEvents = events.filter((e) => e.price != null && Number(e.price) > 0);
+  const [selectedId, setSelectedId] = useState(paidEvents[0]?.id || "");
+  const [report, setReport] = useState([]);
+  const [payouts, setPayouts] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      const [p, r] = await Promise.all([
+        clubApi.getClubEventPayouts(clubId),
+        selectedId ? clubApi.getEventSettlementReport(selectedId) : Promise.resolve([]),
+      ]);
+      setPayouts(p);
+      setReport(r);
+    } catch (err) { notify(err.message || "Could not load payout data"); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { reload(); }, [clubId, selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (paidEvents.length === 0 && payouts.length === 0 && !loading) {
+    return <EmptyState icon={<HiCurrencyRupee />} title="No paid events yet" text="Once an event has a ticket price, its revenue ledger appears here." />;
+  }
+
+  const reportTotal = report.reduce((sum, r) => sum + Number(r.net_amount || 0), 0);
+
+  return (
+    <div>
+      <div className="section-head"><h2>Event settlement report</h2></div>
+      {paidEvents.length === 0 ? (
+        <p style={{ color: "var(--muted)" }}>No paid events yet.</p>
+      ) : (
+        <div className="form-grid" style={{ maxWidth: 420 }}>
+          <label>Event
+            <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)}>
+              {paidEvents.map((e) => <option key={e.id} value={e.id}>{e.title}</option>)}
+            </select>
+          </label>
+        </div>
+      )}
+
+      {loading ? <LoadingState label="Loading…" /> : (
+        <>
+          {selectedId && (
+            <>
+              <div className="resource-row" style={{ marginTop: 12 }}>
+                <div><b>Net so far</b><small>{report.length} line item{report.length === 1 ? "" : "s"} (registrations minus completed refunds, before the platform&rsquo;s 5% fee)</small></div>
+                <strong>₹{reportTotal.toFixed(2)}</strong>
+              </div>
+              <div className="resource-list">
+                {report.map((row, i) => (
+                  <article className="resource-row" key={`${row.registration_id}-${row.row_type}-${i}`}>
+                    <div className="resource-icon">{row.row_type === "refund" ? <HiArrowUturnLeft /> : <HiBanknotes />}</div>
+                    <div><b>{row.description}</b><small>{row.occurred_on}</small></div>
+                    <strong style={{ color: Number(row.net_amount) < 0 ? "#c23434" : undefined }}>₹{Number(row.net_amount).toFixed(2)}</strong>
+                  </article>
+                ))}
+                {report.length === 0 && <EmptyState title="No paid registrations yet" />}
+              </div>
+            </>
+          )}
+
+          <div className="section-head" style={{ marginTop: 24 }}><h2>Payout history</h2></div>
+          <div className="resource-list">
+            {payouts.length === 0 && <EmptyState title="No payouts yet" text="An admin generates a payout for a paid event once it's settled; it'll show up here once issued." />}
+            {payouts.map((p) => (
+              <article className="resource-row" key={p.id}>
+                <div className="resource-icon"><HiCurrencyRupee /></div>
+                <div>
+                  <b>{p.events?.title || "Event"}</b>
+                  <small>Gross ₹{p.gross_amount} · Fee ₹{p.platform_fee_amount} · Refunds ₹{p.refund_amount}</small>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <strong>₹{p.net_amount}</strong>
+                  <div><span className="listing-tag">{p.status}</span></div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
