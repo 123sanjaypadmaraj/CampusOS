@@ -1,14 +1,18 @@
 # Native app icon/splash source
 
-`icon.png` / `icon-foreground.png` / `splash.png` here are placeholders
-upscaled from `public/icons/icon-512.png` (the largest source art that
-existed in the repo) — good enough to scaffold the native projects, not
-good enough for an actual App Store/Play Store submission.
+`icon.png` (flat icon, opaque white bg), `icon-foreground.png` /
+`icon-background.png` (Android adaptive-icon pair) and `splash.png` are
+generated from the real CampusOS logo mark (`src/assets/campusos-logo-mark.png`,
+sourced from the brand's official `CampusOS Logo.png` artwork) — not
+placeholders.
 
-Before shipping to either store, replace these with real art (Apple wants
-a 1024×1024 App Store icon with no transparency; a dedicated adaptive-icon
-foreground/background pair for Android looks much better than one flat
-image reused as the foreground) and regenerate:
+`icon-foreground.png` keeps the mark inside Android's ~66% adaptive-icon
+safe zone on a transparent background; `icon-background.png` is a flat
+white layer behind it; `icon.png` is the same mark at a larger, more
+legible size on opaque white for iOS and legacy (non-adaptive) Android
+icons.
+
+Re-run this any time the source art in `src/assets/` changes:
 
 ```bash
 npx capacitor-assets generate

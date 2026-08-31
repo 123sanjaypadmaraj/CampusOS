@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useMemo, useRef, useState, Suspense, lazy } from "react";
+import campusOSLogoMark from "./assets/campusos-logo-mark.png";
 import { mergeCartItem, addonSelectionKey, isFoodItemAvailableNow, isCanteenOpenNow, calculatePrintJobPrice } from "./utils/mvpHelpers";
 import {
   getDefaultCampus,
@@ -2091,7 +2092,9 @@ function App() {
           onClick={() => go(isVendorAccount ? "vendor" : "home")}
           aria-label="Campus OS home"
         >
-          <span className="brand-mark">C</span>
+          <span className="brand-mark">
+            <img src={campusOSLogoMark} alt="" />
+          </span>
           <span>
             <b>Campus</b>
             <em>OS</em>
@@ -5201,7 +5204,9 @@ function Profile({ user, onLogin, onLogout, notify, openModal, profile, onProfil
     return (
       <section className="page-section profile-page">
         <div className="empty-profile">
-          <div className="profile-logo">C</div>
+          <div className="profile-logo">
+            <img src={campusOSLogoMark} alt="" />
+          </div>
           <span className="section-kicker">YOUR CAMPUS ID</span>
           <h1>Build your campus identity.</h1>
           <p>
