@@ -151,6 +151,7 @@ export async function upsertEvent(campusId, event) {
     event_date: event.event_date,
     place: event.place || "",
     capacity: event.capacity ? Number(event.capacity) : null,
+    price: event.price !== "" && event.price != null ? Number(event.price) : null,
     published: event.published !== false,
   };
   const query = event.id

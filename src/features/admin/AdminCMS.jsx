@@ -2002,7 +2002,7 @@ function EventForm({ event, clubs, campusId, onClose, onSaved, notify }) {
   const [form, setForm] = useState({
     title: event.title || "", category: event.category || "Workshop",
     description: event.description || "", place: event.place || "",
-    club_id: event.club_id || "", capacity: event.capacity || "",
+    club_id: event.club_id || "", capacity: event.capacity || "", price: event.price || "",
     event_date: toLocalInput(event.event_date), published: event.published !== false,
   });
   const [coverFile, setCoverFile] = useState(null);
@@ -2024,6 +2024,9 @@ function EventForm({ event, clubs, campusId, onClose, onSaved, notify }) {
         <label>Capacity (blank = unlimited)<input type="number" min="1" value={form.capacity} onChange={(e) => change("capacity", e.target.value)} /></label>
       </div>
       <label>Place<input value={form.place} onChange={(e) => change("place", e.target.value)} /></label>
+      <label>Price in ₹ (optional -- leave blank for a free event)
+        <input type="number" min="0" step="0.01" value={form.price} onChange={(e) => change("price", e.target.value)} placeholder="Free" />
+      </label>
       <label>Description<textarea value={form.description} onChange={(e) => change("description", e.target.value)} /></label>
       <label>Cover image (optional)
         <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setCoverFile(e.target.files?.[0] || null)} />

@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState, Suspense, lazy } from "react";
 import { mergeCartItem, addonSelectionKey, isFoodItemAvailableNow, isCanteenOpenNow, calculatePrintJobPrice } from "./utils/mvpHelpers";
 import {
   getDefaultCampus,
@@ -69,6 +69,9 @@ import {
   createCampusServiceRequest,
   createResourceBooking,
   getMyRegisteredEventIds,
+  getMyPendingPaymentEvents,
+  startEventRegistrationPayment,
+  startEventRegistrationRefund,
   getSavedEvents,
   toggleSavedEvent,
   cancelEventRegistration,
@@ -108,24 +111,28 @@ import { useModalA11y } from "./hooks/useModalA11y";
 import { usePermissions } from "./hooks/usePermissions";
 import { LoadingState, EmptyState, ErrorState, OfflineBanner, InstallPromptBanner } from "./components/ui/States";
 import { TrendChart, StatTile } from "./components/ui/Charts";
-import AdminCMS from "./features/admin/AdminCMS";
-import VendorDashboard from "./features/vendor/VendorDashboard";
-import FacilitiesDashboard from "./features/facilities/FacilitiesDashboard";
-import ClubManage from "./features/clubs/ClubManage";
+// Role-gated / rarely-visited route panels are code-split via React.lazy:
+// each is its own chunk that only downloads for the roles/tabs that need
+// it (AdminCMS and VendorDashboard alone are ~6,800 lines combined), instead
+// of shipping in the single main bundle every student pays for on first load.
+const AdminCMS = lazy(() => import("./features/admin/AdminCMS"));
+const VendorDashboard = lazy(() => import("./features/vendor/VendorDashboard"));
+const FacilitiesDashboard = lazy(() => import("./features/facilities/FacilitiesDashboard"));
+const ClubManage = lazy(() => import("./features/clubs/ClubManage"));
 import * as clubApi from "./features/clubs/api";
-import Marketplace from "./features/marketplace/Marketplace";
+const Marketplace = lazy(() => import("./features/marketplace/Marketplace"));
 import { renewMarketplaceListing } from "./features/marketplace/api";
-import AcademicHub from "./features/academics/AcademicHub";
-import EmergencyDirectory from "./features/emergency/EmergencyDirectory";
-import SupportService from "./features/support/SupportCenter";
-import TeamsBoard from "./features/teams/TeamsBoard";
+const AcademicHub = lazy(() => import("./features/academics/AcademicHub"));
+const EmergencyDirectory = lazy(() => import("./features/emergency/EmergencyDirectory"));
+const SupportService = lazy(() => import("./features/support/SupportCenter"));
+const TeamsBoard = lazy(() => import("./features/teams/TeamsBoard"));
 import { applyToTeam } from "./features/teams/api";
 // Only the two entry points App.jsx itself needs directly: the "Message
 // seller"/"Message" buttons on Marketplace/Connect cards (messagePerson()
 // helpers below) and the always-mounted unread-badge counter. Everything
 // else messaging-related now lives inside features/messages/Messages.jsx.
 import { startConversation, getUnreadMessageCount, subscribeToConversationList } from "./services/messagingService";
-import Messages from "./features/messages/Messages";
+const Messages = lazy(() => import("./features/messages/Messages"));
 import {
   globalSearch,
   logSearch,
@@ -622,6 +629,10 @@ function App() {
     useState([]);
   const [people, setPeople] = useState([]);
   const [registeredEventIds, setRegisteredEventIds] = useState([]);
+  // Events where the student has reserved a seat but not finished paying
+  // (paid_events.sql) -- { eventId, amount }[], drives the "Complete
+  // payment" affordance instead of "Cancel registration" on that card.
+  const [pendingPaymentEvents, setPendingPaymentEvents] = useState([]);
   const [savedEventIds, setSavedEventIds] = useState([]);
   const [savedPostIds, setSavedPostIds] = useState([]);
   const [printJobs, setPrintJobs] = useState([]);
@@ -1591,10 +1602,10 @@ function App() {
     useEffect(() => {
       if (!authUser?.id) return;
       Promise.all([
-        getMyRegisteredEventIds(authUser.id), getSavedEvents(authUser.id), getMyPrintJobs(authUser.id),
+        getMyRegisteredEventIds(authUser.id), getMyPendingPaymentEvents(authUser.id), getSavedEvents(authUser.id), getMyPrintJobs(authUser.id),
         getMyServiceRequests(authUser.id), getMyBookings(authUser.id), getMyOrders(authUser.id), getSavedPosts(authUser.id),
-      ]).then(([registered, saved, jobs, requests, myBookings, myOrders, savedPosts]) => {
-        setRegisteredEventIds(registered); setSavedEventIds(saved); setPrintJobs(jobs);
+      ]).then(([registered, pendingPayment, saved, jobs, requests, myBookings, myOrders, savedPosts]) => {
+        setRegisteredEventIds(registered); setPendingPaymentEvents(pendingPayment); setSavedEventIds(saved); setPrintJobs(jobs);
         setServiceRequests(requests); setBookings(myBookings); setOrders(myOrders); setSavedPostIds(savedPosts);
       }).catch((error) => console.error("Personal workspace loading failed", error));
     }, [authUser?.id]);
@@ -1758,8 +1769,10 @@ function App() {
           profile={profile}
           openLogin={() => setLoginOpen(true)}
           registeredIds={registeredEventIds}
+          pendingPaymentEvents={pendingPaymentEvents}
           savedIds={savedEventIds}
           onRegistrationChange={setRegisteredEventIds}
+          onPendingPaymentChange={setPendingPaymentEvents}
           onSavedChange={setSavedEventIds}
           onProfileUpdated={applyProfileUpdate}
         />
@@ -1791,15 +1804,17 @@ function App() {
         );
       }
       return (
-        <Messages
-          notify={notify}
-          authUser={authUser}
-          profile={profile}
-          people={people}
-          openConversationId={openConversationId}
-          onConversationOpened={() => setOpenConversationId(null)}
-          onUnreadChange={setUnreadMessageCount}
-        />
+        <Suspense fallback={<LoadingState label="Loading messages…" />}>
+          <Messages
+            notify={notify}
+            authUser={authUser}
+            profile={profile}
+            people={people}
+            openConversationId={openConversationId}
+            onConversationOpened={() => setOpenConversationId(null)}
+            onUnreadChange={setUnreadMessageCount}
+          />
+        </Suspense>
       );
     }
 
@@ -1911,7 +1926,11 @@ function App() {
           />
         );
       }
-      return <AdminCMS notify={notify} campusId={campusId} authUser={authUser} can={access.can} />;
+      return (
+        <Suspense fallback={<LoadingState label="Loading admin console…" />}>
+          <AdminCMS notify={notify} campusId={campusId} authUser={authUser} can={access.can} />
+        </Suspense>
+      );
     }
 
     if (active === "vendor") {
@@ -1923,7 +1942,11 @@ function App() {
           />
         );
       }
-      return <VendorDashboard notify={notify} authUser={authUser} />;
+      return (
+        <Suspense fallback={<LoadingState label="Loading vendor dashboard…" />}>
+          <VendorDashboard notify={notify} authUser={authUser} />
+        </Suspense>
+      );
     }
 
     if (active === "facilities") {
@@ -1935,7 +1958,11 @@ function App() {
           />
         );
       }
-      return <FacilitiesDashboard notify={notify} campusId={campusId} />;
+      return (
+        <Suspense fallback={<LoadingState label="Loading facilities dashboard…" />}>
+          <FacilitiesDashboard notify={notify} campusId={campusId} />
+        </Suspense>
+      );
     }
 
     if (active === "calendar") {
@@ -3095,7 +3122,9 @@ function People({ notify, people, campusId, authUser, openLogin, onOpenConversat
       )}
 
       {section === "teams" && (
-        <TeamsBoard campusId={campusId} authUser={authUser} notify={notify} openLogin={openLogin} />
+        <Suspense fallback={<LoadingState label="Loading teams…" />}>
+          <TeamsBoard campusId={campusId} authUser={authUser} notify={notify} openLogin={openLogin} />
+        </Suspense>
       )}
     </section>
   );
@@ -3198,13 +3227,15 @@ function Clubs({ notify, clubs: clubList, authUser, setLoginOpen, campusId }) {
 
   if (managingClubId) {
     return (
-      <ClubManage
-        clubId={managingClubId}
-        campusId={campusId}
-        authUser={authUser}
-        notify={notify}
-        onBack={() => setManagingClubId(null)}
-      />
+      <Suspense fallback={<LoadingState label="Loading club management…" />}>
+        <ClubManage
+          clubId={managingClubId}
+          campusId={campusId}
+          authUser={authUser}
+          notify={notify}
+          onBack={() => setManagingClubId(null)}
+        />
+      </Suspense>
     );
   }
 
@@ -3513,8 +3544,10 @@ function Events({
   openLogin,
   go,
   registeredIds = [],
+  pendingPaymentEvents = [],
   savedIds = [],
   onRegistrationChange,
+  onPendingPaymentChange,
   onSavedChange,
   onProfileUpdated,
 }) {
@@ -3522,6 +3555,42 @@ function Events({
   const [applyingTo, setApplyingTo] = useState(null);
   const [requestingMentor, setRequestingMentor] = useState(null);
   const [ticketFor, setTicketFor] = useState(null);
+  const [payingEventId, setPayingEventId] = useState(null);
+  const pendingPaymentIds = pendingPaymentEvents.map((p) => p.eventId);
+
+  // Shared by both the "Register" confirm dialog (a fresh registration) and
+  // the "Complete payment" button (resuming one already reserved) --
+  // register_for_event() returns the same { status: 'payment_pending' }
+  // shape either way (paid_events.sql), so this is the one place that opens
+  // Checkout for an event registration.
+  const payForEvent = async (event, registrationId, amount) => {
+    try {
+      setPayingEventId(event.id);
+      const payment = await startEventRegistrationPayment(registrationId);
+      await openRazorpayCheckout({
+        keyId: payment.key_id,
+        gatewayOrderId: payment.gateway_order_id,
+        amount: payment.amount,
+        currency: payment.currency,
+        name: "CampusOS",
+        description: event.title,
+        prefillEmail: authUser?.email,
+        prefillName: profile?.name,
+        onDismiss: () => notify("Payment cancelled — you can finish paying any time from this tab before your seat expires"),
+      });
+      onPendingPaymentChange?.((rows) => rows.some((r) => r.eventId === event.id) ? rows : [...rows, { eventId: event.id, amount }]);
+    } catch (paymentError) {
+      console.error("Event payment start failed:", paymentError);
+      logClientError(paymentError.message || "Event payment start failed", {
+        stack: paymentError.stack,
+        severity: "error",
+        context: { flow: "event_registration_payment", eventId: event.id, registrationId },
+      });
+      notify(paymentError.message || "Payment could not be started. Try again from this tab.");
+    } finally {
+      setPayingEventId(null);
+    }
+  };
 
   return (
     <section className="page-section events-page">
@@ -3567,10 +3636,12 @@ function Events({
               <p>
                 <HiClock /> {event.time} <span>·</span>{" "}
                 <HiMapPin /> {event.place}
+                {event.price > 0 && <><span>·</span> ₹{event.price}</>}
               </p>
 
               <div>
                 <button
+                  disabled={payingEventId === event.id}
                   onClick={async () => {
 
                     try {
@@ -3585,10 +3656,39 @@ function Events({
                         return;
                       }
 
+                      if (pendingPaymentIds.includes(event.id)) {
+                        // Resume a reserved-but-unpaid seat -- contact
+                        // details are already on file server-side, so this
+                        // skips straight to Checkout instead of reopening
+                        // the confirm dialog.
+                        const pending = pendingPaymentEvents.find((p) => p.eventId === event.id);
+                        const result = await registerEvent({
+                          eventId: event.id,
+                          userId: authUser.id,
+                          contactPhone: profile?.phone || "",
+                          contactName: profile?.name || "",
+                          rollNumber: profile?.roll_number,
+                          department: profile?.department,
+                        });
+                        await payForEvent(event, result.registration_id, result.amount ?? pending?.amount);
+                        return;
+                      }
+
                       if (registeredIds.includes(event.id)) {
-                        await cancelEventRegistration({ eventId: event.id });
+                        const result = await cancelEventRegistration({ eventId: event.id });
                         onRegistrationChange?.((ids) => ids.filter((id) => id !== event.id));
-                        notify(`${event.title}: registration cancelled`);
+                        onPendingPaymentChange?.((rows) => rows.filter((r) => r.eventId !== event.id));
+                        if (result?.refund_id) {
+                          try {
+                            await startEventRegistrationRefund(result.refund_id);
+                            notify(`${event.title}: registration cancelled — refund processed`);
+                          } catch (refundError) {
+                            console.error("Event refund:", refundError);
+                            notify(`${event.title}: registration cancelled — refund is processing, check My Activity shortly`);
+                          }
+                        } else {
+                          notify(`${event.title}: registration cancelled`);
+                        }
                         return;
                       }
 
@@ -3611,7 +3711,11 @@ function Events({
                     }
                   }}
                                   >
-                  {registeredIds.includes(event.id) ? "Cancel registration" : "Register"}
+                  {pendingPaymentIds.includes(event.id)
+                    ? (payingEventId === event.id ? "Opening payment…" : `Complete payment${event.price > 0 ? ` · ₹${event.price}` : ""}`)
+                    : registeredIds.includes(event.id)
+                    ? "Cancel registration"
+                    : (event.price > 0 ? `Register · ₹${event.price}` : "Register")}
                 </button>
 
                 <button
@@ -3755,14 +3859,22 @@ function Events({
           onClose={() => setConfirmingEvent(null)}
           onProfileUpdated={onProfileUpdated}
           onConfirmed={(result) => {
+            const justConfirmed = confirmingEvent;
             if (result?.status === "waitlisted") {
               notify(`${confirmingEvent.title}: event is full — you're #${result.position} on the waitlist`);
+              setConfirmingEvent(null);
+            } else if (result?.status === "payment_pending") {
+              onRegistrationChange?.((ids) => [...ids, confirmingEvent.id]);
+              onPendingPaymentChange?.((rows) => [...rows, { eventId: confirmingEvent.id, amount: result.amount }]);
+              notify(`${confirmingEvent.title}: spot reserved — opening payment…`);
+              setConfirmingEvent(null);
+              payForEvent(justConfirmed, result.registration_id, result.amount);
             } else {
               onRegistrationChange?.((ids) => [...ids, confirmingEvent.id]);
               notify(`${confirmingEvent.title}: registration confirmed`);
               setTicketFor(confirmingEvent);
+              setConfirmingEvent(null);
             }
-            setConfirmingEvent(null);
           }}
         />
       )}
@@ -3899,7 +4011,9 @@ function EventRegistrationConfirmModal({ event, profile, authUser, onClose, onCo
   return (
     <ModalShell kicker="CONFIRM REGISTRATION" title={event.title} onClose={onClose}>
       <p className="modal-subtext">
-        Review your details before we confirm your spot.
+        {event.price > 0
+          ? `Review your details, then pay ₹${event.price} to confirm your spot.`
+          : "Review your details before we confirm your spot."}
       </p>
 
       <div className="form-grid">
@@ -3959,7 +4073,7 @@ function EventRegistrationConfirmModal({ event, profile, authUser, onClose, onCo
       {error && <p className="form-error">{error}</p>}
 
       <button className="primary wide" disabled={submitting} onClick={handleConfirm}>
-        {submitting ? "Confirming…" : "Confirm registration"}
+        {submitting ? "Confirming…" : event.price > 0 ? `Continue to payment · ₹${event.price}` : "Confirm registration"}
       </button>
     </ModalShell>
   );
@@ -7146,19 +7260,27 @@ function ServiceDetail({ serviceId, notify, go, openModal, openLogin, authUser, 
       )}
 
       {serviceId === "market" && (
-        <Marketplace notify={notify} authUser={authUser} openLogin={openLogin} campusId={campusId} listings={marketListings} onChange={onMarketListingsChange} onOpenConversation={onOpenConversation} />
+        <Suspense fallback={<LoadingState label="Loading marketplace…" />}>
+          <Marketplace notify={notify} authUser={authUser} openLogin={openLogin} campusId={campusId} listings={marketListings} onChange={onMarketListingsChange} onOpenConversation={onOpenConversation} />
+        </Suspense>
       )}
 
       {serviceId === "academics" && (
-        <AcademicHub profile={profile} notify={notify} can={can} isAdmin={isAdmin} />
+        <Suspense fallback={<LoadingState label="Loading academics…" />}>
+          <AcademicHub profile={profile} notify={notify} can={can} isAdmin={isAdmin} />
+        </Suspense>
       )}
 
       {serviceId === "emergencydirectory" && (
-        <EmergencyDirectory />
+        <Suspense fallback={<LoadingState label="Loading emergency directory…" />}>
+          <EmergencyDirectory />
+        </Suspense>
       )}
 
       {serviceId === "support" && (
-        <SupportService notify={notify} authUser={authUser} openLogin={openLogin} campusId={campusId} />
+        <Suspense fallback={<LoadingState label="Loading support…" />}>
+          <SupportService notify={notify} authUser={authUser} openLogin={openLogin} campusId={campusId} />
+        </Suspense>
       )}
     </section>
   );
@@ -7785,6 +7907,13 @@ const AI_ACTION_EXECUTORS = {
       rollNumber: ctx.profile?.roll_number,
       department: ctx.profile?.department,
     });
+    // A paid event reserves the seat but needs Checkout, which only opens
+    // from the Events tab's own UI (payForEvent) -- the AI action layer
+    // never gets to trigger a payment popup itself (doc §16's "no elevated
+    // privilege" rule extends to gateway checkout, not just writes).
+    if (result?.status === "payment_pending") {
+      return `Reserved your spot for "${action.eventTitle}" (₹${result.amount}) — open the Events tab to complete payment within 30 minutes, or the seat goes to the next person.`;
+    }
     return result?.status === "waitlisted"
       ? `You're on the waitlist for "${action.eventTitle}".`
       : `You're registered for "${action.eventTitle}"!`;

@@ -23,6 +23,11 @@ import { supabase } from "../lib/supabase";
 import {
   createFoodOrder,
   registerEvent,
+  cancelEventRegistration,
+  startEventRegistrationPayment,
+  startEventRegistrationRefund,
+  getMyPendingPaymentEvents,
+  getMyEventRegistrations,
   isValidPhone,
   transitionOrderStatus,
   startFoodOrderPayment,
@@ -261,6 +266,85 @@ describe("registerEvent", () => {
       registerEvent({ eventId: "11111111-1111-4111-8111-111111111111", userId: null, contactPhone: "9876543210", contactName: "Alice" })
     ).rejects.toThrow(/sign in/i);
     expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+});
+
+describe("cancelEventRegistration / startEventRegistrationPayment / startEventRegistrationRefund", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("returns the { registration, refund_id } shape from cancel_event_registration (paid_events.sql -- no longer void)", async () => {
+    supabase.rpc.mockResolvedValue({
+      data: { registration: { id: "reg-1", status: "cancelled" }, refund_id: "refund-1" },
+      error: null,
+    });
+
+    const result = await cancelEventRegistration({ eventId: "11111111-1111-4111-8111-111111111111" });
+
+    expect(supabase.rpc).toHaveBeenCalledWith("cancel_event_registration", { p_event_id: "11111111-1111-4111-8111-111111111111" });
+    expect(result).toEqual({ registration: { id: "reg-1", status: "cancelled" }, refund_id: "refund-1" });
+  });
+
+  it("startEventRegistrationPayment invokes create-razorpay-order with event_registration_id", async () => {
+    supabase.functions.invoke.mockResolvedValue({
+      data: { key_id: "rzp_test_x", gateway_order_id: "order_z", amount: 25000, currency: "INR" },
+      error: null,
+    });
+
+    const result = await startEventRegistrationPayment("reg-1");
+
+    expect(supabase.functions.invoke).toHaveBeenCalledWith("create-razorpay-order", {
+      body: { event_registration_id: "reg-1" },
+    });
+    expect(result.gateway_order_id).toBe("order_z");
+  });
+
+  it("startEventRegistrationPayment surfaces a friendly error when the gateway call fails", async () => {
+    supabase.functions.invoke.mockResolvedValue({ data: null, error: { message: "GATEWAY_NOT_CONFIGURED" } });
+    await expect(startEventRegistrationPayment("reg-1")).rejects.toThrow();
+  });
+
+  it("startEventRegistrationRefund invokes razorpay-refund with the refund id", async () => {
+    supabase.functions.invoke.mockResolvedValue({ data: { ok: true }, error: null });
+
+    const result = await startEventRegistrationRefund("refund-1");
+
+    expect(supabase.functions.invoke).toHaveBeenCalledWith("razorpay-refund", { body: { refund_id: "refund-1" } });
+    expect(result).toEqual({ ok: true });
+  });
+});
+
+describe("getMyPendingPaymentEvents", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("returns only registrations whose payment is pending or failed, with the event's price", async () => {
+    const mockResponse = {
+      data: [
+        { event_id: "evt-paid-pending", payment_status: "pending", events: { price: "250.00" } },
+        { event_id: "evt-paid-failed", payment_status: "failed", events: { price: "99.00" } },
+        { event_id: "evt-paid-done", payment_status: "paid", events: { price: "250.00" } },
+        { event_id: "evt-free", payment_status: "not_required", events: { price: null } },
+      ],
+      error: null,
+    };
+    const builder = {
+      select: jest.fn(() => builder),
+      eq: jest.fn(() => builder),
+      then: (resolve) => Promise.resolve(mockResponse).then(resolve),
+    };
+    mockFrom.mockReturnValue(builder);
+
+    const result = await getMyPendingPaymentEvents("user-1");
+
+    expect(result).toEqual([
+      { eventId: "evt-paid-pending", amount: 250 },
+      { eventId: "evt-paid-failed", amount: 99 },
+    ]);
+  });
+
+  it("returns an empty list without a network call when there is no user id", async () => {
+    const result = await getMyEventRegistrations(null);
+    expect(result).toEqual([]);
+    expect(mockFrom).not.toHaveBeenCalled();
   });
 });
 

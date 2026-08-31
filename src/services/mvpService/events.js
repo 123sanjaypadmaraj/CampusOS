@@ -41,6 +41,7 @@ function formatEvent(event) {
     category: event.category || "Event",
     attendees: event.attendees || 0,
     description: event.description || "",
+    price: event.price != null ? Number(event.price) : null,
     coverImageUrl: event.cover_image_url || null,
     checkedInCount: event.checked_in_count || 0,
     avgRating: event.avg_rating || null,
@@ -68,6 +69,7 @@ export async function getCampusEvents(
         event_date,
         place,
         description,
+        price,
         capacity,
         registration_status,
         attendees,
@@ -128,12 +130,14 @@ export async function getMyEventRegistrations(
     .select(`
       event_id,
       registered_at,
+      payment_status,
       events (
         id,
         title,
         category,
         event_date,
         place,
+        price,
         certificates_enabled
       )
     `)
@@ -143,6 +147,18 @@ export async function getMyEventRegistrations(
   throwIfError(error);
 
   return data || [];
+}
+
+// Event ids where the student has a confirmed-but-unpaid registration
+// (payment_status 'pending' or 'failed' -- see paid_events.sql) --
+// register_for_event() reserves the seat immediately but never mints a
+// ticket until payment clears, so these need a "complete payment"
+// affordance rather than "cancel registration".
+export async function getMyPendingPaymentEvents(userId) {
+  const rows = await getMyEventRegistrations(userId);
+  return rows
+    .filter((row) => row.payment_status === "pending" || row.payment_status === "failed")
+    .map((row) => ({ eventId: row.event_id, amount: row.events?.price != null ? Number(row.events.price) : null }));
 }
 
 
@@ -227,11 +243,34 @@ export async function registerEvent({
   return data; // { status: 'confirmed' | 'waitlisted', registration_id?, ticket_token?, position? }
 }
 
+// Returns { registration, refund_id } (paid_events.sql) -- a captured
+// payment gets a 'pending' refund row the caller is expected to immediately
+// drive through razorpay-refund, same pattern as cancelPrintJob/
+// startPrintJobRefund below.
 export async function cancelEventRegistration({ eventId }) {
   if (!isUuid(eventId)) throw new Error("Invalid event ID.");
-  const { error } = await supabase.rpc("cancel_event_registration", { p_event_id: eventId });
+  const { data, error } = await supabase.rpc("cancel_event_registration", { p_event_id: eventId });
   throwIfError(error);
-  return true;
+  return data;
+}
+
+// Mirrors startPrintJobPayment() -- asks create-razorpay-order for a gateway
+// order to open Checkout against; the registration only actually gets its
+// ticket once razorpay-webhook verifies the payment server-side.
+export async function startEventRegistrationPayment(registrationId) {
+  const { data, error } = await supabase.functions.invoke("create-razorpay-order", {
+    body: { event_registration_id: registrationId },
+  });
+  if (error) throw new Error(error.message || "Unable to start payment");
+  return data; // { key_id, gateway_order_id, amount, currency, payment_id }
+}
+
+export async function startEventRegistrationRefund(refundId) {
+  const { data, error } = await supabase.functions.invoke("razorpay-refund", {
+    body: { refund_id: refundId },
+  });
+  if (error) throw new Error(error.message || "Unable to process refund");
+  return data;
 }
 
 /* =========================================================================

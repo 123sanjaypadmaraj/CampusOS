@@ -1,13 +1,15 @@
 // Edge Function: create-razorpay-order
 //
 // Called by the authenticated student right before opening Razorpay
-// Checkout, either for a food order OR a print job (mutually exclusive --
-// pass exactly one of order_id/print_job_id). It NEVER trusts an amount from
-// the browser -- it re-derives the authoritative total by calling
-// create_payment_order()/create_print_payment_order() (which re-reads the
-// locked order/print_job row), then asks Razorpay to create a matching
-// order, and only then hands the browser what it needs to open checkout
-// (doc §24-25, §29).
+// Checkout, for a food order, a print job, OR a paid event registration
+// (mutually exclusive -- pass exactly one of order_id/print_job_id/
+// event_registration_id). It NEVER trusts an amount from the browser -- it
+// re-derives the authoritative total by calling create_payment_order()/
+// create_print_payment_order()/create_event_payment_order() (which re-reads
+// the locked order/print_job/registration row), then asks Razorpay to create
+// a matching order, and only then hands the browser what it needs to open
+// checkout (doc §24-25, §29; event registrations added in
+// 20260831000800_paid_events.sql).
 //
 // Required secrets (set via `supabase secrets set`):
 //   RAZORPAY_KEY_ID
@@ -36,12 +38,13 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ code: "UNAUTHENTICATED", message: "Sign in required" }, 401);
     }
 
-    const { order_id, print_job_id } = await req.json();
-    if (!order_id && !print_job_id) {
-      return jsonResponse({ code: "BAD_REQUEST", message: "order_id or print_job_id is required" }, 400);
+    const { order_id, print_job_id, event_registration_id } = await req.json();
+    const targetCount = [order_id, print_job_id, event_registration_id].filter(Boolean).length;
+    if (targetCount === 0) {
+      return jsonResponse({ code: "BAD_REQUEST", message: "order_id, print_job_id, or event_registration_id is required" }, 400);
     }
-    if (order_id && print_job_id) {
-      return jsonResponse({ code: "BAD_REQUEST", message: "Pass only one of order_id / print_job_id" }, 400);
+    if (targetCount > 1) {
+      return jsonResponse({ code: "BAD_REQUEST", message: "Pass only one of order_id / print_job_id / event_registration_id" }, 400);
     }
 
     // Client scoped to the caller's JWT -- RLS/ownership is enforced by the
@@ -52,9 +55,11 @@ Deno.serve(async (req: Request) => {
 
     const { data: payment, error } = order_id
       ? await userClient.rpc("create_payment_order", { p_order_id: order_id })
-      : await userClient.rpc("create_print_payment_order", { p_print_job_id: print_job_id });
+      : print_job_id
+      ? await userClient.rpc("create_print_payment_order", { p_print_job_id: print_job_id })
+      : await userClient.rpc("create_event_payment_order", { p_registration_id: event_registration_id });
     if (error) {
-      await logServerError(serviceClient, `create_payment_order/create_print_payment_order failed: ${error.message}`, { category: "payment", severity: "error", context: { order_id, print_job_id } });
+      await logServerError(serviceClient, `create_payment_order/create_print_payment_order/create_event_payment_order failed: ${error.message}`, { category: "payment", severity: "error", context: { order_id, print_job_id, event_registration_id } });
       return jsonResponse({ code: "PAYMENT_ORDER_FAILED", message: error.message }, 400);
     }
 
@@ -90,14 +95,18 @@ Deno.serve(async (req: Request) => {
         amount: Math.round(Number(payment.amount) * 100), // paise
         currency: payment.currency || "INR",
         receipt: payment.id,
-        notes: order_id ? { order_id, payment_id: payment.id } : { print_job_id, payment_id: payment.id },
+        notes: order_id
+          ? { order_id, payment_id: payment.id }
+          : print_job_id
+          ? { print_job_id, payment_id: payment.id }
+          : { event_registration_id, payment_id: payment.id },
       }),
     });
 
     if (!razorpayRes.ok) {
       const errBody = await razorpayRes.text();
       console.error("Razorpay order creation failed:", errBody);
-      await logServerError(serviceClient, `Razorpay order creation failed: ${errBody.slice(0, 500)}`, { category: "payment", severity: "error", context: { order_id, print_job_id } });
+      await logServerError(serviceClient, `Razorpay order creation failed: ${errBody.slice(0, 500)}`, { category: "payment", severity: "error", context: { order_id, print_job_id, event_registration_id } });
       return jsonResponse({ code: "GATEWAY_ERROR", message: "Payment gateway could not create the order." }, 502);
     }
 

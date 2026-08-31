@@ -532,7 +532,7 @@ function ClubEventForm({ event, clubId, campusId, authUser, onClose, onSaved, no
     title: event.title || "", category: event.category || "Club Event",
     description: event.description || "",
     event_date: event.event_date ? new Date(event.event_date).toISOString().slice(0, 16) : "",
-    place: event.place || "", capacity: event.capacity || "", published: event.published !== false,
+    place: event.place || "", capacity: event.capacity || "", price: event.price || "", published: event.published !== false,
   });
   const [coverFile, setCoverFile] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -552,6 +552,9 @@ function ClubEventForm({ event, clubId, campusId, authUser, onClose, onSaved, no
       <label>Date &amp; time<input type="datetime-local" value={form.event_date} onChange={(e) => change("event_date", e.target.value)} /></label>
       <label>Place<input value={form.place} onChange={(e) => change("place", e.target.value)} /></label>
       <label>Capacity (optional)<input type="number" min="1" value={form.capacity} onChange={(e) => change("capacity", e.target.value)} /></label>
+      <label>Price in ₹ (optional -- leave blank for a free event)
+        <input type="number" min="0" step="0.01" value={form.price} onChange={(e) => change("price", e.target.value)} placeholder="Free" />
+      </label>
       <label>Cover image (optional)
         <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setCoverFile(e.target.files?.[0] || null)} />
       </label>
