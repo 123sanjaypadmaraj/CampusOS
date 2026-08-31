@@ -101,14 +101,21 @@ npx cap sync        # copies dist/ into android/ and ios/, updates plugin config
 
 ## Known gaps / follow-up work
 
-- **App icon/splash source art**: `assets/icon.png` etc. are placeholders
-  upscaled from the existing 512×512 PWA icon (`public/icons/icon-512.png`)
-  — the largest source art in the repo. Apple's App Store wants a real
-  1024×1024 icon with no transparency; replace `assets/*.png` with real art
-  and re-run `npx capacitor-assets generate` before submitting to either
-  store. See `assets/README.md`.
+- **App icon/splash source art**: `assets/*.png` are generated from the
+  real CampusOS logo mark (not placeholders — see `assets/README.md`), and
+  every derived icon (Android mipmaps, iOS `AppIcon.appiconset`, PWA icons)
+  was regenerated from it via `npx capacitor-assets generate`. The iOS
+  1024×1024 `AppIcon-512@2x.png` is RGB with no alpha channel, matching
+  Apple's requirement exactly.
 - **Native push notifications** — the client and server code is built (see
-  above); only the FCM/APNs credentials themselves are missing, and those
-  need a Firebase project + (for iOS) a Mac-built app first.
-- **App Store / Play Store listings, signing keys, submission** — not
-  attempted from this repo.
+  above), including the iOS `AppDelegate.swift` device-token forwarding
+  Capacitor's plugin needs; only the FCM/APNs credentials themselves are
+  missing, and those need a Firebase project + (for iOS) a paid Apple
+  Developer account first.
+- **Android**: submission-ready — see `android/RELEASE_BACKUP_CHECKLIST.md`.
+- **iOS**: project config finalized (permission strings, push delegate
+  methods, iPhone-only device family, real icon art) as far as possible
+  without a Mac. Exact Xcode build/sign/submit steps, App Store Connect
+  listing copy, App Privacy answers, and the screenshot set are in
+  `ios/APP_STORE_SUBMISSION.md` — the actual Xcode build/archive/upload
+  still needs a Mac with Xcode, which this repo has never had access to.
