@@ -329,7 +329,17 @@ describe("publishClubAnnouncement", () => {
     await publishClubAnnouncement("club-1", { title: "Kickoff" });
 
     expect(mockRpc).toHaveBeenCalledWith("publish_club_announcement", {
-      p_club_id: "club-1", p_title: "Kickoff", p_body: null, p_pinned: false,
+      p_club_id: "club-1", p_title: "Kickoff", p_body: null, p_pinned: false, p_audience: "members",
+    });
+  });
+
+  it("passes through an 'all_students' audience", async () => {
+    mockRpc.mockResolvedValue({ data: { id: "ann-1" }, error: null });
+
+    await publishClubAnnouncement("club-1", { title: "Recruiting now", audience: "all_students" });
+
+    expect(mockRpc).toHaveBeenCalledWith("publish_club_announcement", {
+      p_club_id: "club-1", p_title: "Recruiting now", p_body: null, p_pinned: false, p_audience: "all_students",
     });
   });
 

@@ -920,3 +920,32 @@ export async function listMyPayouts(canteenId) {
   throwIfError(error);
   return data || [];
 }
+
+/* =========================================================================
+   BROADCASTS -- canteen/print-shop announcements, delivered as a real
+   notification + a message in every past customer's Messages tab.
+   (supabase/migrations/20260831000300_club_vendor_broadcasts.sql)
+========================================================================= */
+
+// canteenId: pass a canteen's id for a food-vendor broadcast, or null for
+// the print shop (audience there is scoped by the caller's own campus).
+export async function broadcastVendorMessage(canteenId, title, body) {
+  const { data, error } = await supabase.rpc("broadcast_vendor_message", {
+    p_canteen_id: canteenId, p_title: title, p_body: body || null,
+  });
+  throwIfError(error);
+  return data;
+}
+
+// vendor_broadcasts is public-read (same convention as club_announcements)
+// so this is a plain table call, not an RPC -- see the migration. campusId
+// is only needed (and only used) for the print-shop case, to scope to the
+// caller's own campus rather than every campus's print shop.
+export async function listMyVendorBroadcasts(canteenId, campusId) {
+  const query = canteenId
+    ? supabase.from("vendor_broadcasts").select("*").eq("canteen_id", canteenId)
+    : supabase.from("vendor_broadcasts").select("*").is("canteen_id", null).eq("campus_id", campusId);
+  const { data, error } = await query.order("created_at", { ascending: false }).limit(50);
+  throwIfError(error);
+  return data || [];
+}

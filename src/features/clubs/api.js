@@ -224,9 +224,14 @@ export async function deleteClubGalleryItem(item) {
    ANNOUNCEMENTS -- club-scoped, distinct from admin's campus-wide feed.
 ========================================================================= */
 
-export async function publishClubAnnouncement(clubId, { title, body, pinned }) {
+// audience: 'members' (default -- only this club's roster is notified) or
+// 'all_students' (every student on the club's campus is notified too). The
+// channel thread delivered into Messages stays members-only either way --
+// see the migration's header comment for why.
+export async function publishClubAnnouncement(clubId, { title, body, pinned, audience }) {
   const { data, error } = await supabase.rpc("publish_club_announcement", {
     p_club_id: clubId, p_title: title, p_body: body || null, p_pinned: pinned || false,
+    p_audience: audience || "members",
   });
   throwIfError(error);
   return data;

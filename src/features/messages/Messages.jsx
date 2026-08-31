@@ -2,7 +2,7 @@ import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   HiChatBubbleLeftRight, HiMagnifyingGlass, HiPhoto, HiPaperAirplane, HiTrash, HiNoSymbol,
   HiXMark, HiUserGroup, HiPlus, HiPencilSquare, HiArrowUturnLeft, HiFaceSmile, HiStar,
-  HiCheck, HiArrowLeft, HiFlag,
+  HiCheck, HiArrowLeft, HiFlag, HiMegaphone,
 } from "react-icons/hi2";
 import { LoadingState, EmptyState } from "../../components/ui/States";
 import { useModalA11y } from "../../hooks/useModalA11y";
@@ -689,7 +689,9 @@ export default function Messages({ notify, authUser, profile, openConversationId
 
   const activeConversation = conversations.find((c) => c.conversation_id === activeId);
   const isGroup = !!activeConversation?.is_group;
-  const activeIsBlocked = !isGroup && activeConversation && blockedIds.has(activeConversation.other_user_id);
+  const isChannel = !!activeConversation?.is_channel;
+  const canPostHere = activeConversation ? activeConversation.can_post !== false : true;
+  const activeIsBlocked = !isGroup && !isChannel && activeConversation && blockedIds.has(activeConversation.other_user_id);
 
   const participantsById = useMemo(() => {
     const map = {};
@@ -716,7 +718,7 @@ export default function Messages({ notify, authUser, profile, openConversationId
   const filteredConversations = search.trim()
     ? conversations.filter((c) => {
         const q = search.trim().toLowerCase();
-        const name = c.is_group ? c.title : c.other_user_name;
+        const name = (c.is_group || c.is_channel) ? c.title : c.other_user_name;
         return name?.toLowerCase().includes(q) || c.listing_title?.toLowerCase().includes(q);
       })
     : conversations;
@@ -953,16 +955,16 @@ export default function Messages({ notify, authUser, profile, openConversationId
               className={`message-thread-row ${c.conversation_id === activeId ? "active" : ""}`}
               onClick={() => openThread(c.conversation_id)}
             >
-              {c.is_group ? <div className="big-avatar small group"><HiUserGroup /></div> : <Avatar name={c.other_user_name} small />}
+              {c.is_channel ? <div className="big-avatar small channel"><HiMegaphone /></div> : c.is_group ? <div className="big-avatar small group"><HiUserGroup /></div> : <Avatar name={c.other_user_name} small />}
               <div>
                 <b>
-                  {c.is_group ? c.title : (c.other_user_name || "Campus member")}
-                  {!c.is_group && blockedIds.has(c.other_user_id) && <span className="blocked-tag"> · Blocked</span>}
+                  {(c.is_group || c.is_channel) ? c.title : (c.other_user_name || "Campus member")}
+                  {!c.is_group && !c.is_channel && blockedIds.has(c.other_user_id) && <span className="blocked-tag"> · Blocked</span>}
                 </b>
                 {c.listing_title && <small className="listing-tag">Re: {c.listing_title}</small>}
                 <small>
                   {c.is_group && c.last_message_sender_name ? `${c.last_message_sender_name}: ` : ""}
-                  {c.last_message_body ? c.last_message_body.slice(0, 60) : "Say hello…"}
+                  {c.last_message_body ? c.last_message_body.slice(0, 60) : c.is_channel ? "No broadcasts yet" : "Say hello…"}
                 </small>
               </div>
               {Number(c.unread_count) > 0 && <i>{c.unread_count}</i>}
@@ -984,12 +986,13 @@ export default function Messages({ notify, authUser, profile, openConversationId
                   className={`messages-thread-title${isGroup ? " clickable" : ""}`}
                   onClick={() => isGroup && setShowingGroupInfo(true)}
                 >
-                  {isGroup ? <div className="big-avatar small group"><HiUserGroup /></div> : <Avatar name={activeConversation?.other_user_name} small />}
+                  {isChannel ? <div className="big-avatar small channel"><HiMegaphone /></div> : isGroup ? <div className="big-avatar small group"><HiUserGroup /></div> : <Avatar name={activeConversation?.other_user_name} small />}
                   <div>
-                    <b>{isGroup ? activeConversation?.title : (activeConversation?.other_user_name || "Conversation")}</b>
+                    <b>{(isGroup || isChannel) ? activeConversation?.title : (activeConversation?.other_user_name || "Conversation")}</b>
                     {isGroup && <small>{activeConversation?.member_count} members</small>}
-                    {!isGroup && activeConversation?.listing_title && <small>About: {activeConversation.listing_title}</small>}
-                    {!isGroup && activeConversation?.other_user_availability_status === "away" && (
+                    {isChannel && <small>Broadcast channel · {activeConversation?.member_count} {activeConversation.member_count === 1 ? "recipient" : "recipients"}</small>}
+                    {!isGroup && !isChannel && activeConversation?.listing_title && <small>About: {activeConversation.listing_title}</small>}
+                    {!isGroup && !isChannel && activeConversation?.other_user_availability_status === "away" && (
                       <small className="availability-chip away">
                         Away{activeConversation.other_user_availability_message ? ` · ${activeConversation.other_user_availability_message}` : ""}
                       </small>
@@ -998,7 +1001,7 @@ export default function Messages({ notify, authUser, profile, openConversationId
                 </button>
                 <div className="messages-thread-actions">
                   <button className="ghost" onClick={() => setThreadSearchOpen((v) => !v)} aria-label="Search in conversation"><HiMagnifyingGlass /></button>
-                  {!isGroup && <button className="ghost" onClick={toggleBlock}>{activeIsBlocked ? "Unblock" : "Block"}</button>}
+                  {!isGroup && !isChannel && <button className="ghost" onClick={toggleBlock}>{activeIsBlocked ? "Unblock" : "Block"}</button>}
                   <button className="ghost" onClick={reportConversation}><HiFlag /> Report</button>
                 </div>
               </div>
@@ -1042,6 +1045,10 @@ export default function Messages({ notify, authUser, profile, openConversationId
               {activeIsBlocked ? (
                 <div className="messages-compose blocked">
                   <span>You&apos;ve blocked this person. Unblock them to send a message.</span>
+                </div>
+              ) : isChannel && !canPostHere ? (
+                <div className="messages-compose blocked">
+                  <span><HiMegaphone /> This is a broadcast channel — only {activeConversation?.title} can post here.</span>
                 </div>
               ) : (
                 <div className="messages-compose">

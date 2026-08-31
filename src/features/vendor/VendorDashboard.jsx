@@ -31,6 +31,7 @@ import {
   HiChartBar,
   HiCurrencyRupee,
   HiChevronRight,
+  HiMegaphone,
 } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import * as vendorApi from "./api";
@@ -452,6 +453,7 @@ function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
         <button className={tab === "inventory" ? "chip active" : "chip"} onClick={() => setTab("inventory")}>Inventory</button>
         <button className={tab === "staff" ? "chip active" : "chip"} onClick={() => setTab("staff")}>Staff</button>
         <button className={tab === "billing" ? "chip active" : "chip"} onClick={() => setTab("billing")}>Billing</button>
+        <button className={tab === "broadcasts" ? "chip active" : "chip"} onClick={() => setTab("broadcasts")}>Broadcasts</button>
         <button className={tab === "analytics" ? "chip active" : "chip"} onClick={() => setTab("analytics")}>Analytics</button>
       </div>
 
@@ -466,6 +468,8 @@ function CanteenMenuManager({ canteen, notify, onCanteenChanged }) {
       {tab === "staff" && <VendorManagerAccounts vendorType="canteen" scopeId={canteen.id} notify={notify} />}
 
       {tab === "billing" && <BillingPanel canteen={canteen} notify={notify} onCanteenChanged={onCanteenChanged} />}
+
+      {tab === "broadcasts" && <VendorBroadcastsTab canteenId={canteen.id} campusId={canteen.campus_id} label={canteen.name} notify={notify} />}
 
       {tab === "analytics" && <VendorAnalytics />}
 
@@ -854,6 +858,78 @@ function InventoryReportPanel({ canteenId, notify }) {
    (generate_vendor_payout/mark_payout_paid) -- this panel is read-only for
    the vendor plus their own self-editable GST config.
 ========================================================= */
+
+// Shared by both the canteen and print-shop dashboards -- canteenId is null
+// for the print shop (audience there is scoped by campus, see
+// broadcast_vendor_message()'s own header comment). Every broadcast reaches
+// everyone who's ever ordered/printed here: a real notification, plus a
+// message in their Messages tab from this vendor's read-only channel.
+function VendorBroadcastsTab({ canteenId, campusId, label, notify }) {
+  const [form, setForm] = useState({ title: "", body: "" });
+  const [posting, setPosting] = useState(false);
+  const [broadcasts, setBroadcasts] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setBroadcasts(await vendorApi.listMyVendorBroadcasts(canteenId, campusId));
+    } catch (err) {
+      notify(err.message || "Could not load past broadcasts");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, [canteenId, campusId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const post = async () => {
+    try {
+      setPosting(true);
+      const sent = await vendorApi.broadcastVendorMessage(canteenId, form.title, form.body);
+      notify(`Sent to ${sent.recipient_count} ${sent.recipient_count === 1 ? "student" : "students"}`);
+      setForm({ title: "", body: "" });
+      reload();
+    } catch (err) {
+      notify(err.message || "Could not send broadcast");
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className="profile-box" style={{ maxWidth: 560, marginBottom: 20 }}>
+        <h3>New broadcast</h3>
+        <p style={{ marginBottom: 12 }}>
+          Reaches every student who&rsquo;s ever ordered from {label} — as a notification and as a message in their Messages tab.
+        </p>
+        <label>Title<input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} placeholder="e.g. Closing early today" /></label>
+        <label>Message (optional)<textarea rows={3} value={form.body} onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))} /></label>
+        <button className="primary wide" disabled={posting || !form.title.trim()} onClick={post}>
+          {posting ? "Sending…" : "Send broadcast"}
+        </button>
+      </div>
+
+      {loading ? <LoadingState label="Loading past broadcasts…" /> : broadcasts.length === 0 ? (
+        <EmptyState icon={<HiMegaphone />} title="No broadcasts sent yet" />
+      ) : (
+        <div className="resource-list">
+          {broadcasts.map((b) => (
+            <article className="resource-row" key={b.id}>
+              <div className="resource-icon"><HiMegaphone /></div>
+              <div>
+                <b>{b.title}</b>
+                <small>{new Date(b.created_at).toLocaleString()} · sent to {b.recipient_count} {b.recipient_count === 1 ? "student" : "students"}</small>
+                {b.body && <small style={{ display: "block", marginTop: 4 }}>{b.body}</small>}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function BillingPanel({ canteen, notify, onCanteenChanged }) {
   const [gstRegistered, setGstRegistered] = useState(Boolean(canteen.gst_registered));
@@ -2206,9 +2282,12 @@ function PrintPricingManager({ rates, notify, onChanged }) {
         <button className={tab === "jobs" ? "chip active" : "chip"} onClick={() => setTab("jobs")}>Print Queue</button>
         <button className={tab === "history" ? "chip active" : "chip"} onClick={() => setTab("history")}>Job History</button>
         <button className={tab === "pricing" ? "chip active" : "chip"} onClick={() => setTab("pricing")}>Pricing</button>
+        <button className={tab === "broadcasts" ? "chip active" : "chip"} onClick={() => setTab("broadcasts")}>Broadcasts</button>
         <button className={tab === "analytics" ? "chip active" : "chip"} onClick={() => setTab("analytics")}>Analytics</button>
         <button className={tab === "staff" ? "chip active" : "chip"} onClick={() => setTab("staff")}>Managers</button>
       </div>
+
+      {tab === "broadcasts" && <VendorBroadcastsTab canteenId={null} campusId={campusId} label="the print shop" notify={notify} />}
 
       {tab === "dashboard" && <PrintShopOverview notify={notify} onNavigate={setTab} campusId={campusId} />}
 

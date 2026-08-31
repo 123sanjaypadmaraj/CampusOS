@@ -62,12 +62,15 @@ import {
   listPrintJobHistory,
   transitionPrintJob,
   getPrintFileSignedUrl,
+  broadcastVendorMessage,
+  listMyVendorBroadcasts,
 } from "./api";
 
 function chain(result) {
   const builder = {
     select: jest.fn(() => builder),
     eq: jest.fn(() => builder),
+    is: jest.fn(() => builder),
     in: jest.fn(() => builder),
     limit: jest.fn(() => builder),
     order: jest.fn(() => builder),
@@ -691,5 +694,59 @@ describe("initiateRefund", () => {
     mockFunctionsInvoke.mockResolvedValue({ data: null, error: { message: "GATEWAY_NOT_CONFIGURED" } });
 
     await expect(initiateRefund("order-1", 120, "reason")).rejects.toMatchObject({ message: "GATEWAY_NOT_CONFIGURED" });
+  });
+});
+
+describe("broadcastVendorMessage", () => {
+  beforeEach(() => { mockRpc.mockReset(); });
+
+  it("sends a canteen broadcast via the RPC", async () => {
+    mockRpc.mockResolvedValue({ data: { id: "b-1", recipient_count: 42 }, error: null });
+
+    const result = await broadcastVendorMessage("canteen-1", "Closing early today", "Back by 6pm");
+
+    expect(mockRpc).toHaveBeenCalledWith("broadcast_vendor_message", {
+      p_canteen_id: "canteen-1", p_title: "Closing early today", p_body: "Back by 6pm",
+    });
+    expect(result).toEqual({ id: "b-1", recipient_count: 42 });
+  });
+
+  it("passes a null canteen id for the print shop", async () => {
+    mockRpc.mockResolvedValue({ data: { id: "b-2", recipient_count: 5 }, error: null });
+
+    await broadcastVendorMessage(null, "Printer maintenance");
+
+    expect(mockRpc).toHaveBeenCalledWith("broadcast_vendor_message", {
+      p_canteen_id: null, p_title: "Printer maintenance", p_body: null,
+    });
+  });
+
+  it("surfaces a not-authorized error", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { message: "Not authorized to broadcast for this canteen" } });
+    await expect(broadcastVendorMessage("canteen-1", "x")).rejects.toMatchObject({ message: "Not authorized to broadcast for this canteen" });
+  });
+});
+
+describe("listMyVendorBroadcasts", () => {
+  it("filters by canteen_id for a food vendor", async () => {
+    const builder = chain({ data: [{ id: "b-1" }], error: null });
+    mockFrom.mockReturnValue(builder);
+
+    const result = await listMyVendorBroadcasts("canteen-1");
+
+    expect(mockFrom).toHaveBeenCalledWith("vendor_broadcasts");
+    expect(builder.eq).toHaveBeenCalledWith("canteen_id", "canteen-1");
+    expect(result).toEqual([{ id: "b-1" }]);
+  });
+
+  it("filters by campus_id with a null canteen_id for the print shop", async () => {
+    const builder = chain({ data: [{ id: "b-2" }], error: null });
+    mockFrom.mockReturnValue(builder);
+
+    const result = await listMyVendorBroadcasts(null, "campus-1");
+
+    expect(builder.is).toHaveBeenCalledWith("canteen_id", null);
+    expect(builder.eq).toHaveBeenCalledWith("campus_id", "campus-1");
+    expect(result).toEqual([{ id: "b-2" }]);
   });
 });

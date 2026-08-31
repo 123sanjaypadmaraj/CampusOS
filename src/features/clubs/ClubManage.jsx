@@ -678,15 +678,15 @@ function ApplicationsTab({ club, applications, notify, onChange }) {
 }
 
 function AnnouncementsTab({ clubId, announcements, notify, onChange }) {
-  const [form, setForm] = useState({ title: "", body: "", pinned: false });
+  const [form, setForm] = useState({ title: "", body: "", pinned: false, audience: "members" });
   const [posting, setPosting] = useState(false);
 
   const post = async () => {
     try {
       setPosting(true);
       await clubApi.publishClubAnnouncement(clubId, form);
-      notify("Announcement posted to every member");
-      setForm({ title: "", body: "", pinned: false });
+      notify(form.audience === "all_students" ? "Broadcast sent to every student on campus" : "Announcement posted to every member");
+      setForm({ title: "", body: "", pinned: false, audience: "members" });
       onChange();
     } catch (err) {
       notify(err.message || "Could not post announcement");
@@ -701,12 +701,21 @@ function AnnouncementsTab({ clubId, announcements, notify, onChange }) {
         <h3>New announcement</h3>
         <label>Title<input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} /></label>
         <label>Message<textarea rows={3} value={form.body} onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))} /></label>
+        <label>Send to
+          <select value={form.audience} onChange={(e) => setForm((f) => ({ ...f, audience: e.target.value }))}>
+            <option value="members">Club members only</option>
+            <option value="all_students">All students on campus (recruitment, open events, etc.)</option>
+          </select>
+        </label>
         <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <input type="checkbox" checked={form.pinned} onChange={(e) => setForm((f) => ({ ...f, pinned: e.target.checked }))} style={{ width: "auto" }} />
           Pin to top
         </label>
+        <p style={{ marginBottom: 12, color: "var(--muted)" }}>
+          <small>Members also get this as a message from the club in their Messages tab. Students outside the club only get a notification (if you broadcast to all students).</small>
+        </p>
         <button className="primary wide" disabled={posting || !form.title.trim()} onClick={post}>
-          {posting ? "Posting…" : "Post to all members"}
+          {posting ? "Posting…" : form.audience === "all_students" ? "Broadcast to all students" : "Post to all members"}
         </button>
       </div>
 

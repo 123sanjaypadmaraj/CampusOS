@@ -5137,6 +5137,7 @@
 .message-thread-row small.listing-tag { color: var(--purple); font-weight: 700; }
 .message-thread-row i { position: absolute; right: 14px; top: 14px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; font-size: 10px; font-style: normal; background: var(--purple); color: #fff; display: grid; place-items: center; }
 .big-avatar.group { background: var(--soft, var(--surface-2)); color: var(--purple); display: grid; place-items: center; }
+.big-avatar.channel { background: var(--soft, var(--surface-2)); color: var(--amber, #d97706); display: grid; place-items: center; }
 .messages-thread { display: flex; flex-direction: column; min-height: 560px; }
 .messages-thread-head { padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
 .thread-back-btn { display: none; background: none; border: none; color: var(--text); padding: 6px; cursor: pointer; flex-shrink: 0; }
