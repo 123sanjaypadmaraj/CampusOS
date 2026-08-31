@@ -28,6 +28,12 @@ import {
   getAcademicCalendar,
   publishCalendarEvent,
   deleteCalendarEvent,
+  getClassRoster,
+  markAttendance,
+  listAttendanceSessions,
+  getAttendanceSession,
+  getMyAttendanceSummary,
+  getMyAttendanceRecords,
 } from "./api";
 
 function chain(result) {
@@ -172,5 +178,66 @@ describe("academic calendar", () => {
     mockFrom.mockReturnValue(chain({ error: null }));
     await deleteCalendarEvent("c3");
     expect(mockFrom).toHaveBeenCalledWith("academic_calendar_events");
+  });
+});
+
+describe("attendance", () => {
+  it("getClassRoster calls get_class_roster with course/year and returns [] on null data", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: null });
+    const result = await getClassRoster({ course: "B.Tech CSE", year: "2nd Year" });
+    expect(mockRpc).toHaveBeenCalledWith("get_class_roster", { p_course: "B.Tech CSE", p_year: "2nd Year" });
+    expect(result).toEqual([]);
+  });
+
+  it("getClassRoster throws the RPC's own-course-only error", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: new Error("You can only view the roster for your own course") });
+    await expect(getClassRoster({ course: "B.Tech Mech" })).rejects.toThrow("You can only view the roster for your own course");
+  });
+
+  it("markAttendance forwards records and optional fields to mark_attendance", async () => {
+    mockRpc.mockResolvedValue({ data: { id: "s1" }, error: null });
+    const result = await markAttendance({
+      course: "B.Tech CSE", subject: "Data Structures", classDate: "2026-08-30",
+      records: [{ student_id: "u1", status: "present" }], year: "2nd Year", section: "A",
+    });
+    expect(mockRpc).toHaveBeenCalledWith("mark_attendance", {
+      p_course: "B.Tech CSE", p_subject: "Data Structures", p_class_date: "2026-08-30",
+      p_records: [{ student_id: "u1", status: "present" }], p_year: "2nd Year", p_section: "A", p_timetable_entry_id: null,
+    });
+    expect(result).toEqual({ id: "s1" });
+  });
+
+  it("markAttendance throws the RPC's roster-mismatch error", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: new Error("Student u1 is not on this course's roster") });
+    await expect(markAttendance({ course: "B.Tech CSE", subject: "x", classDate: "2026-08-30", records: [{ student_id: "u1", status: "present" }] }))
+      .rejects.toThrow("is not on this course's roster");
+  });
+
+  it("listAttendanceSessions calls list_attendance_sessions with course/limit and returns [] on null data", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: null });
+    const result = await listAttendanceSessions({ course: "B.Tech CSE" });
+    expect(mockRpc).toHaveBeenCalledWith("list_attendance_sessions", { p_course: "B.Tech CSE", p_limit: 50 });
+    expect(result).toEqual([]);
+  });
+
+  it("getAttendanceSession calls get_attendance_session with the session id", async () => {
+    mockRpc.mockResolvedValue({ data: { id: "s1", records: [] }, error: null });
+    const result = await getAttendanceSession("s1");
+    expect(mockRpc).toHaveBeenCalledWith("get_attendance_session", { p_session_id: "s1" });
+    expect(result).toEqual({ id: "s1", records: [] });
+  });
+
+  it("getMyAttendanceSummary returns [] on null data", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: null });
+    const result = await getMyAttendanceSummary();
+    expect(mockRpc).toHaveBeenCalledWith("get_my_attendance_summary");
+    expect(result).toEqual([]);
+  });
+
+  it("getMyAttendanceRecords defaults p_subject to null and returns [] on null data", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: null });
+    const result = await getMyAttendanceRecords();
+    expect(mockRpc).toHaveBeenCalledWith("get_my_attendance_records", { p_subject: null });
+    expect(result).toEqual([]);
   });
 });

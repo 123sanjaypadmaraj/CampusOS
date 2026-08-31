@@ -140,3 +140,52 @@ export async function deleteCalendarEvent(id) {
   const { error } = await supabase.from("academic_calendar_events").delete().eq("id", id);
   throwIfError(error);
 }
+
+/* ========================================================================
+   ATTENDANCE (faculty-facing marking + history, student-facing summary).
+   See supabase/migrations/20260831000700_academic_attendance.sql.
+======================================================================== */
+
+export async function getClassRoster({ course, year = null }) {
+  const { data, error } = await supabase.rpc("get_class_roster", { p_course: course, p_year: year });
+  throwIfError(error);
+  return data || [];
+}
+
+export async function markAttendance({ course, subject, classDate, records, year = null, section = null, timetableEntryId = null }) {
+  const { data, error } = await supabase.rpc("mark_attendance", {
+    p_course: course,
+    p_subject: subject,
+    p_class_date: classDate,
+    p_records: records,
+    p_year: year,
+    p_section: section,
+    p_timetable_entry_id: timetableEntryId,
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function listAttendanceSessions({ course = null, limit = 50 } = {}) {
+  const { data, error } = await supabase.rpc("list_attendance_sessions", { p_course: course, p_limit: limit });
+  throwIfError(error);
+  return data || [];
+}
+
+export async function getAttendanceSession(sessionId) {
+  const { data, error } = await supabase.rpc("get_attendance_session", { p_session_id: sessionId });
+  throwIfError(error);
+  return data;
+}
+
+export async function getMyAttendanceSummary() {
+  const { data, error } = await supabase.rpc("get_my_attendance_summary");
+  throwIfError(error);
+  return data || [];
+}
+
+export async function getMyAttendanceRecords({ subject = null } = {}) {
+  const { data, error } = await supabase.rpc("get_my_attendance_records", { p_subject: subject });
+  throwIfError(error);
+  return data || [];
+}

@@ -9,7 +9,7 @@
 import { useEffect, useId, useState } from "react";
 import {
   HiXMark, HiPlus, HiTrash, HiMegaphone, HiClock, HiCalendarDays,
-  HiAcademicCap, HiBellAlert,
+  HiAcademicCap, HiBellAlert, HiClipboardDocumentCheck, HiCheck,
 } from "react-icons/hi2";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import { createReminder } from "../../services/remindersService";
@@ -57,6 +57,7 @@ const TABS = [
   ["announcements", "Announcements", <HiMegaphone key="i" />],
   ["deadlines", "Assignments & Deadlines", <HiClock key="i" />],
   ["timetable", "Timetable", <HiAcademicCap key="i" />],
+  ["attendance", "Attendance", <HiClipboardDocumentCheck key="i" />],
   ["calendar", "Academic Calendar", <HiCalendarDays key="i" />],
 ];
 
@@ -92,6 +93,9 @@ export default function AcademicHub({ profile, notify, can = () => false, isAdmi
       )}
       {tab === "timetable" && (
         <TimetablePanel profile={profile} notify={notify} canCompose={canFacultyCompose} />
+      )}
+      {tab === "attendance" && (
+        <AttendancePanel profile={profile} notify={notify} canCompose={canFacultyCompose} isAdmin={isAdmin} />
       )}
       {tab === "calendar" && (
         <CalendarPanel profile={profile} notify={notify} canCompose={isAdmin} />
@@ -511,6 +515,279 @@ function TimetableForm({ profile, onClose, onSaved, notify }) {
         {saving ? "Saving…" : "Add class"}
       </button>
     </Modal>
+  );
+}
+
+/* ========================================================================
+   ATTENDANCE
+   Faculty/admin: take attendance for a class (course + subject + date),
+   pulling the roster from get_class_roster() and marking each student, plus
+   a history of past sessions. Students: a read-only per-subject summary
+   (the number they actually care about) with the individual dates behind it.
+======================================================================== */
+
+const ATTENDANCE_STATUSES = [
+  ["present", "Present"],
+  ["absent", "Absent"],
+  ["late", "Late"],
+  ["excused", "Excused"],
+];
+
+function AttendancePanel({ profile, notify, canCompose, isAdmin }) {
+  return canCompose
+    ? <FacultyAttendanceView profile={profile} notify={notify} isAdmin={isAdmin} />
+    : <StudentAttendanceView notify={notify} />;
+}
+
+function FacultyAttendanceView({ profile, notify, isAdmin }) {
+  const [view, setView] = useState("take"); // "take" | "history"
+  const [course, setCourse] = useState(isAdmin ? "" : (profile?.course || ""));
+  const [year, setYear] = useState(profile?.year || "");
+  const [section, setSection] = useState("");
+  const [subject, setSubject] = useState("");
+  const [classDate, setClassDate] = useState(new Date().toISOString().slice(0, 10));
+  const [roster, setRoster] = useState(null); // null = not loaded yet
+  const [loadingRoster, setLoadingRoster] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [sessions, setSessions] = useState([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+  const [detail, setDetail] = useState(null);
+
+  const noScope = !isAdmin && !profile?.course;
+
+  async function loadRoster(prefillFrom = null) {
+    if (!course.trim()) { notify("Enter a course first"); return; }
+    setLoadingRoster(true);
+    try {
+      const list = await academicsApi.getClassRoster({ course: course.trim(), year: year.trim() || null });
+      const prefill = new Map((prefillFrom || []).map((r) => [r.student_id, r.status]));
+      setRoster(list.map((s) => ({ ...s, status: prefill.get(s.student_id) || "present" })));
+    } catch (err) { notify(err.message || "Could not load the roster"); }
+    setLoadingRoster(false);
+  }
+
+  async function reloadSessions() {
+    setLoadingSessions(true);
+    try {
+      setSessions(await academicsApi.listAttendanceSessions({ course: course.trim() || null }));
+    } catch (err) { notify(err.message || "Could not load attendance history"); }
+    setLoadingSessions(false);
+  }
+
+  useEffect(() => { if (view === "history") reloadSessions(); }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function openSession(id) {
+    try {
+      const d = await academicsApi.getAttendanceSession(id);
+      setDetail(d);
+    } catch (err) { notify(err.message || "Could not open this session"); }
+  }
+
+  async function editSession(d) {
+    setCourse(d.course); setYear(d.year || ""); setSection(d.section || "");
+    setSubject(d.subject); setClassDate(d.class_date);
+    setDetail(null);
+    setView("take");
+    setRoster((d.records || []).map((r) => ({ student_id: r.student_id, name: r.name, usn: r.usn, status: r.status })));
+  }
+
+  return (
+    <div>
+      <div className="section-head">
+        <div>
+          <h2>Attendance</h2>
+          <p>Take attendance for a class, or review past sessions.</p>
+        </div>
+        <div className="chips">
+          <button className={view === "take" ? "chip active" : "chip"} onClick={() => setView("take")}>Take attendance</button>
+          <button className={view === "history" ? "chip active" : "chip"} onClick={() => setView("history")}>History</button>
+        </div>
+      </div>
+
+      {noScope && view === "take" && (
+        <p style={{ color: "var(--warn, #a3691f)", fontSize: 13 }}>
+          Your account has no course set, so there&rsquo;s no roster to take attendance against yet.
+          Ask an admin to set it (via a roster import, or directly on your profile) first.
+        </p>
+      )}
+
+      {view === "take" && (
+        <div>
+          <label>Course<input value={course} onChange={(e) => { setCourse(e.target.value); setRoster(null); }} placeholder="e.g. B.Tech CSE" disabled={!isAdmin} /></label>
+          <label>Subject<input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="e.g. Data Structures" /></label>
+          <label>Date<input type="date" max={new Date().toISOString().slice(0, 10)} value={classDate} onChange={(e) => setClassDate(e.target.value)} /></label>
+          <label>Year (optional)<input value={year} onChange={(e) => { setYear(e.target.value); setRoster(null); }} placeholder="e.g. 2nd Year" /></label>
+          <label>Section (optional)<input value={section} onChange={(e) => setSection(e.target.value)} placeholder="e.g. A" /></label>
+
+          {roster === null && (
+            <button className="primary" disabled={loadingRoster || !course.trim()} onClick={() => loadRoster()}>
+              {loadingRoster ? "Loading roster…" : "Load roster"}
+            </button>
+          )}
+
+          {roster !== null && (
+            <>
+              {roster.length === 0 && <EmptyState icon={<HiClipboardDocumentCheck />} title="No students found" text="Nobody on this course/year yet -- check the roster has been imported." />}
+              <div className="resource-list">
+                {roster.map((s, idx) => (
+                  <article className="resource-row" key={s.student_id}>
+                    <div className="resource-icon"><HiClipboardDocumentCheck /></div>
+                    <div>
+                      <b>{s.name}</b>
+                      {s.usn && <small>{s.usn}</small>}
+                    </div>
+                    <div className="chips">
+                      {ATTENDANCE_STATUSES.map(([key, label]) => (
+                        <button
+                          key={key}
+                          className={s.status === key ? "chip active" : "chip"}
+                          onClick={() => setRoster((r) => r.map((row, i) => (i === idx ? { ...row, status: key } : row)))}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </div>
+              {roster.length > 0 && (
+                <button
+                  className="primary wide"
+                  disabled={saving || !subject.trim() || !classDate}
+                  onClick={async () => {
+                    setSaving(true);
+                    try {
+                      await academicsApi.markAttendance({
+                        course: course.trim(), subject: subject.trim(), classDate, year: year.trim() || null,
+                        section: section.trim() || null,
+                        records: roster.map((s) => ({ student_id: s.student_id, status: s.status })),
+                      });
+                      notify("Attendance saved");
+                      setRoster(null);
+                    } catch (err) { notify(err.message || "Could not save attendance"); }
+                    setSaving(false);
+                  }}
+                >
+                  {saving ? "Saving…" : `Save attendance for ${roster.length} student${roster.length === 1 ? "" : "s"}`}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {view === "history" && (
+        loadingSessions ? <LoadingState label="Loading attendance history…" /> : (
+          <div className="resource-list">
+            {sessions.length === 0 && <EmptyState icon={<HiClipboardDocumentCheck />} title="No attendance taken yet" />}
+            {sessions.map((s) => (
+              <article className="resource-row" key={s.id} onClick={() => openSession(s.id)} style={{ cursor: "pointer" }}>
+                <div className="resource-icon"><HiClipboardDocumentCheck /></div>
+                <div>
+                  <b>{s.subject}</b>
+                  <small>{fmtDate(s.class_date)} · {s.course}{s.section ? ` (${s.section})` : ""} · {s.present_count}/{s.total_count} present</small>
+                </div>
+              </article>
+            ))}
+          </div>
+        )
+      )}
+
+      {detail && (
+        <Modal kicker="ATTENDANCE" title={`${detail.subject} · ${fmtDate(detail.class_date)}`} onClose={() => setDetail(null)}>
+          <div className="resource-list">
+            {(detail.records || []).map((r) => (
+              <article className="resource-row" key={r.student_id}>
+                <div className="resource-icon"><HiClipboardDocumentCheck /></div>
+                <div>
+                  <b>{r.name}</b>
+                  {r.usn && <small>{r.usn}</small>}
+                </div>
+                <small style={{ textTransform: "capitalize" }}>{r.status}</small>
+              </article>
+            ))}
+          </div>
+          <button className="primary wide" onClick={() => editSession(detail)}>Edit this session</button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function StudentAttendanceView({ notify }) {
+  const [summary, setSummary] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [expanded, setExpanded] = useState(null);
+  const [records, setRecords] = useState([]);
+
+  async function reload() {
+    setLoading(true);
+    setError(null);
+    try {
+      setSummary(await academicsApi.getMyAttendanceSummary());
+    } catch (err) {
+      setError(err.message || "Could not load your attendance");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { reload(); }, []);
+
+  if (loading) return <LoadingState label="Loading your attendance…" />;
+  if (error) return <ErrorState text={error} onRetry={reload} />;
+
+  return (
+    <div>
+      <div className="section-head">
+        <div>
+          <h2>Attendance</h2>
+          <p>Your attendance by subject.</p>
+        </div>
+      </div>
+
+      <div className="resource-list">
+        {summary.length === 0 && <EmptyState icon={<HiClipboardDocumentCheck />} title="No attendance recorded yet" text="Nothing's been marked for you yet." />}
+        {summary.map((row) => {
+          const pct = Number(row.percentage);
+          const low = pct < 75; // most Indian colleges' typical exam-eligibility cutoff
+          return (
+            <article className="resource-row" key={`${row.course}-${row.subject}`}>
+              <div className="resource-icon"><HiClipboardDocumentCheck /></div>
+              <div>
+                <b>{row.subject}</b>
+                <small>{row.course} · {row.present_count}/{row.total_sessions} classes attended</small>
+              </div>
+              <b style={{ color: low ? "var(--crit, #a53939)" : "var(--good, #2f7d5b)" }}>{pct}%</b>
+              <button
+                onClick={async () => {
+                  if (expanded === row.subject) { setExpanded(null); return; }
+                  try {
+                    setRecords(await academicsApi.getMyAttendanceRecords({ subject: row.subject }));
+                    setExpanded(row.subject);
+                  } catch (err) { notify(err.message || "Could not load the detail"); }
+                }}
+              >
+                {expanded === row.subject ? "Hide" : "Details"}
+              </button>
+            </article>
+          );
+        })}
+      </div>
+
+      {expanded && (
+        <div className="resource-list" style={{ marginTop: 8 }}>
+          {records.map((r, i) => (
+            <article className="resource-row" key={i}>
+              <div className="resource-icon">{r.status === "present" || r.status === "late" ? <HiCheck /> : <HiXMark />}</div>
+              <div><b>{fmtDate(r.class_date)}</b></div>
+              <small style={{ textTransform: "capitalize" }}>{r.status}</small>
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
