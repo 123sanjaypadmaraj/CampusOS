@@ -41,6 +41,11 @@ env:
   SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
   STAGING_PROJECT_REF: qmfmziilgkktwnqoxakk
   PROD_PROJECT_REF: dzjzjlylsfpmymkcavrq
+  # Repo variable (Settings -> Secrets and variables -> Actions -> Variables),
+  # not a secret -- it's the public production URL. Unset today, so this
+  # falls back to the current domain; a future domain cutover is just
+  # setting this one variable, no workflow edit -- see docs/DOMAIN_CUTOVER.md.
+  PROD_URL: ${{ vars.PROD_URL || 'https://campusos-amber.vercel.app' }}
   # _shared is a shared-code directory, not a deployable function; razorpay-webhook
   # is deployed separately below with --no-verify-jwt (see supabase/functions/README.md).
   #
@@ -80,8 +85,32 @@ jobs:
     steps:
       - run: echo "Deploying ${{ github.event.workflow_run.head_sha || github.sha }}"
 
-  deploy-staging:
+  # Fails fast with one clear reason per secret instead of a cryptic failure
+  # 3-4 minutes into deploy-staging (or worse, mid-way through production).
+  # See scripts/validate-deploy-secrets.mjs's own header for exactly what
+  # "well-formed" does and doesn't check.
+  validate-secrets:
     needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Validate the 6 deploy secrets are present and well-formed
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          STAGING_SUPABASE_ANON_KEY: ${{ secrets.STAGING_SUPABASE_ANON_KEY }}
+          STAGING_E2E_ACCOUNTS: ${{ secrets.STAGING_E2E_ACCOUNTS }}
+        run: node scripts/validate-deploy-secrets.mjs
+
+  deploy-staging:
+    needs: validate-secrets
     runs-on: ubuntu-latest
     environment: staging
     steps:
@@ -236,11 +265,11 @@ jobs:
         run: |
           set -euo pipefail
           for i in $(seq 1 20); do
-            if curl -fsS https://campusos-amber.vercel.app/ | grep -qF "${{ steps.deploy.outputs.bundle }}"; then
-              echo "Bundle hash verified live on production: ${{ steps.deploy.outputs.bundle }}"
+            if curl -fsS "$PROD_URL/" | grep -qF "${{ steps.deploy.outputs.bundle }}"; then
+              echo "Bundle hash verified live on production ($PROD_URL): ${{ steps.deploy.outputs.bundle }}"
               exit 0
             fi
             sleep 5
           done
-          echo "campusos-amber.vercel.app never served ${{ steps.deploy.outputs.bundle }}" >&2
+          echo "$PROD_URL never served ${{ steps.deploy.outputs.bundle }}" >&2
           exit 1

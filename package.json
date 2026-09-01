@@ -11,7 +11,10 @@
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
     "test": "jest",
     "watch-test": "jest --watch",
-    "test:ui": "playwright test"
+    "test:ui": "playwright test",
+    "test:ui:crossbrowser": "playwright test --config=playwright.crossbrowser.config.cjs",
+    "test:ui:responsive": "playwright test --config=playwright.responsive.config.cjs",
+    "check:css-cascade": "node scripts/check-css-cascade.mjs"
   },
   "license": "ISC",
   "engines": {

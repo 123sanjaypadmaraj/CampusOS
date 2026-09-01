@@ -6,6 +6,14 @@
 // scripts/live-check-messaging-whatsapp-features.mjs for the single-scenario
 // version this generalizes.
 //
+// 2026-09-01 addendum: two features shipped after the original run --
+// club/vendor broadcasts and academic attendance -- had no phase here at
+// all. Added Phase 8 (broadcast fan-out at real pool scale) and Phase 9
+// (concurrent mark_attendance submissions racing the same session row).
+// Paid-events/payouts concurrency is intentionally NOT duplicated here --
+// scripts/loadtest-event-payment-race.mjs already covers register/order/
+// capture/refund races directly; re-run that alongside this script.
+//
 // Defaults to STAGING (see scripts/env-target.mjs) and refuses production
 // without --env=production --yes-production, on purpose: this creates a
 // nontrivial amount of throwaway data (100+ posts, DMs, tickets, ...) that
@@ -322,6 +330,87 @@ async function main() {
     callRpc(u.token, "create_support_ticket", { p_category: "technical", p_subject: `LoadTest ticket ${stamp}`, p_description: "Concurrent load test ticket", p_attachment_url: null })
   ));
   report.phases.push(summarize(`support: concurrent create_support_ticket (${ticketUsers.length} users)`, ticketResults));
+
+  // -----------------------------------------------------------------
+  // Phase 8: BROADCASTS -- publish_club_announcement(audience='all_students')
+  // fans out to every active student on the campus via a per-row PL/pgSQL
+  // loop (see 20260831000300_club_vendor_broadcasts.sql), not a batch
+  // insert. The concurrency-relevant question isn't "many callers" (it's
+  // rate-limited to 20/hour/user and only club leaders/admins can call it
+  // at all) -- it's whether that per-row fan-out holds up at real pool
+  // scale without timing out. One timed call, audience = the whole
+  // load-test pool (all on the same campus), then verify delivery count.
+  // -----------------------------------------------------------------
+  console.log("\n--- Phase 8: broadcasts (all_students fan-out at pool scale) ---");
+  const beforeBroadcast = new Date().toISOString();
+  const broadcastResult = await callRpc(adminToken, "publish_club_announcement", {
+    p_club_id: clubId, p_title: `LoadTest broadcast ${stamp}`, p_body: "Concurrent load test broadcast", p_pinned: false, p_audience: "all_students",
+  });
+  report.phases.push(summarize("broadcasts: publish_club_announcement(audience=all_students)", [broadcastResult]));
+  if (broadcastResult.ok) {
+    // notifications is RLS'd strictly to user_id = auth.uid() (no admin
+    // bypass), so a single admin-token query can't see the whole pool's
+    // rows -- spot-check a sample of individual users' own notifications
+    // instead of an exhaustive admin-side count. A student can also have
+    // opted out of 'clubs' notifications (create_notification returns null
+    // for them), so "not every sampled user has one" isn't itself a bug.
+    const sample = users.filter((_, i) => i % 15 === 0).slice(0, 10);
+    const sampleChecks = await Promise.all(sample.map((u) => restSelect(u.token, "notifications", `type=eq.club&created_at=gte.${beforeBroadcast}&select=id&limit=1`)));
+    const delivered = sampleChecks.filter((r) => r.ok && r.data?.length).length;
+    console.log(`  invariant check: broadcast took ${Math.round(broadcastResult.ms)}ms for ${users.length} students on the campus; spot-check ${delivered}/${sample.length} sampled users received a 'club' notification (some may have notifications.clubs disabled -- not itself a bug)`);
+  }
+
+  // -----------------------------------------------------------------
+  // Phase 9: ATTENDANCE -- mark_attendance() upserts a session row
+  // (unique on campus/course/year/section/subject/date) then bulk-upserts
+  // student records inside it. The real concurrency question is a double-
+  // submit race: two overlapping mark_attendance calls for the exact same
+  // session (a faculty double-tapping "submit", or a retry after a slow
+  // response) hitting the on-conflict paths at once. Admin bypasses the
+  // own-course check, so it stands in for "faculty" here without needing a
+  // faculty account per course. Students are grouped by their deterministic
+  // course assignment (COURSES[i % 5] in setup-loadtest-users.mjs, encoded
+  // in the e2e.loadNNN@ email) since the signed-in `users` array doesn't
+  // carry course.
+  // -----------------------------------------------------------------
+  console.log("\n--- Phase 9: attendance (concurrent mark_attendance on one session) ---");
+  const ATT_COURSES = ["Computer Science & Engineering", "Information Science & Engineering", "Electronics & Communication", "Mechanical Engineering", "Civil Engineering"];
+  const courseForEmail = (email) => {
+    const n = Number(email.match(/e2e\.load(\d+)@/)?.[1]);
+    return Number.isFinite(n) ? ATT_COURSES[(n - 1) % ATT_COURSES.length] : null;
+  };
+  const attCourse = ATT_COURSES[0];
+  const attUsers = users.filter((u) => courseForEmail(u.email) === attCourse);
+  if (attUsers.length < 4) {
+    console.log(`  skipped: only ${attUsers.length} signed-in users on "${attCourse}" (need at least 4 to make the split race meaningful)`);
+  } else {
+    const attSubject = `LoadTest Subject ${stamp}`;
+    const attDate = new Date().toISOString().slice(0, 10);
+    // Split into overlapping halves so the concurrent calls both touch a
+    // shared subset of students (real conflict on attendance_records too,
+    // not just the session row).
+    const mid = Math.ceil(attUsers.length / 2);
+    const half1 = attUsers.slice(0, mid + 2); // overlaps half2 by up to 2
+    const half2 = attUsers.slice(mid - 2);
+    const callsInFlight = [half1, half2, attUsers].map((group, i) =>
+      callRpc(adminToken, "mark_attendance", {
+        p_course: attCourse, p_subject: attSubject, p_class_date: attDate,
+        p_records: group.map((u, gi) => ({ student_id: u.userId, status: (gi + i) % 4 === 0 ? "absent" : "present" })),
+        p_year: null, p_section: null, p_timetable_entry_id: null,
+      })
+    );
+    const attResults = await Promise.all(callsInFlight);
+    report.phases.push(summarize(`attendance: concurrent mark_attendance (${attUsers.length} students, ${attCourse})`, attResults));
+    const sessionId = attResults.find((r) => r.ok)?.data?.id;
+    if (sessionId) {
+      const { data: recRows } = await restSelect(adminToken, "attendance_records", `session_id=eq.${sessionId}&select=student_id`);
+      const uniqueStudents = new Set((recRows || []).map((r) => r.student_id)).size;
+      const dupes = (recRows || []).length !== uniqueStudents;
+      console.log(`  invariant check: ${recRows?.length ?? "?"} records for ${attUsers.length} students in the roster -> ${dupes ? "DUPLICATE (session_id,student_id) ROWS -- BUG" : "no duplicates"}, ${uniqueStudents}/${attUsers.length} students have a record${uniqueStudents < attUsers.length ? " -- SOME LOST -- BUG" : ""}`);
+    } else {
+      console.log(`  all ${attResults.length} concurrent calls failed: ${JSON.stringify(attResults.map((r) => r.data))}`);
+    }
+  }
 
   // -----------------------------------------------------------------
   report.finishedAt = new Date().toISOString();

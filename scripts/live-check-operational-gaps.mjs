@@ -72,6 +72,14 @@ const svc = client(SERVICE_ROLE_KEY);
 const suffix = Date.now();
 const cleanup = { canteens: [], stores: [], resources: [], lostFound: [], tickets: [] };
 let testUserIds = [];
+// Real, pre-existing print_rate_card rows (unlike the canteens/stores above,
+// these aren't freshly inserted test rows this script can just delete) --
+// their real owner_id must be captured before PART A reassigns them to
+// alice, and restored in cleanupAll. Without this a failed/interrupted run
+// permanently leaves alice owning the real print shop's rate cards -- the
+// exact staging-data-pollution bug this comment is here to prevent
+// recurring a third time.
+let printRateCardBackup = [];
 
 async function main() {
   console.log(`=== Operational gaps pass (${target}) ===`);
@@ -152,6 +160,10 @@ async function main() {
   check("removing bob's only store manager row reverts him to student", bobRoleAfterStore?.role === "student", bobRoleAfterStore);
 
   // --- Print: alice becomes the print rate-card owner for this campus ---
+  // (real owner captured above into printRateCardBackup and restored by
+  // cleanupAll, however this run ends)
+  const { data: printOwnersBefore } = await svc.from("print_rate_card").select("id, owner_id").eq("campus_id", campusId);
+  printRateCardBackup = printOwnersBefore ?? [];
   await svc.from("print_rate_card").update({ owner_id: alice.userId }).eq("campus_id", campusId);
 
   const { error: printAddErr } = await alice.sb.rpc("add_print_staff_account", { p_campus_id: campusId, p_email: "e2e.bob@nhce.edu.in" });
@@ -279,6 +291,7 @@ async function cleanupAll(userIds) {
   await svc.from("resources").delete().ilike("name", `LiveCheck Room ${suffix}%`);
   if (cleanup.stores.length) await svc.from("stores").delete().in("id", cleanup.stores);
   if (cleanup.canteens.length) await svc.from("canteens").delete().in("id", cleanup.canteens);
+  for (const row of printRateCardBackup) await svc.from("print_rate_card").update({ owner_id: row.owner_id }).eq("id", row.id);
   for (const id of userIds || []) forceRole(id, "student"); // leave e2e accounts as plain students for the next run
 }
 
