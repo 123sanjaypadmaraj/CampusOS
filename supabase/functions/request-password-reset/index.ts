@@ -17,6 +17,11 @@
 //
 // Auto-provided: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 // Required secrets: EMAIL_DISPATCH_SECRET (same value as send-email's)
+// Optional secret: FRONTEND_URL -- the deployed frontend's origin, used to
+// build the reset link. Falls back to production's current domain so a
+// domain cutover is just `supabase secrets set FRONTEND_URL=...` (per
+// project), not a code change + redeploy -- see docs/DOMAIN_CUTOVER.md.
+const FRONTEND_URL = Deno.env.get("FRONTEND_URL") || "https://campusos-amber.vercel.app";
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
@@ -111,7 +116,7 @@ Deno.serve(async (req: Request) => {
 
     const emailSecret = Deno.env.get("EMAIL_DISPATCH_SECRET");
     if (emailSecret) {
-      const resetLink = `https://campusos-amber.vercel.app/reset-password?token=${rawToken}`;
+      const resetLink = `${FRONTEND_URL}/reset-password?token=${rawToken}`;
       await fetch(`${supabaseUrl}/functions/v1/send-email`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Email-Secret": emailSecret },

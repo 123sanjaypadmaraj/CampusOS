@@ -99,11 +99,14 @@ deploy dist`), doc §96 mentions both.
 
 ## 5. DNS + domain
 
-Point your domain at the hosting provider (Vercel/Cloudflare both have
-one-click custom domain flows once you own the domain). Doc §78 suggests
-`campusos.app` with `vendor.`/`admin.`/`facilities.` subdomains for the
-apps that don't exist yet (§76-78) — irrelevant until those apps exist;
-a single domain is fine for now.
+Full copy-paste runbook (exact DNS records, exact Vercel steps, SSL
+verification, the old `*.vercel.app` redirect, rollback plan):
+**`docs/DOMAIN_CUTOVER.md`**. Doc §78's `campusos.app` +
+`vendor.`/`admin.`/`facilities.` subdomain suggestion is moot — that name
+turned out to be an unrelated site with no connection to this project
+(confirmed 31 Aug 2026, 0 domains attached in Vercel) — pick any domain you
+actually own; a single domain is fine, the subdomains were only ever for
+apps that don't exist yet (§76-78).
 
 ## 6. Monitoring, backups, disaster recovery -- done (2026-08-15, storage
    file-bytes backup added 2026-08-19)

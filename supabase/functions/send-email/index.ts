@@ -13,6 +13,10 @@
 // Required secrets (set via `supabase secrets set`):
 //   EMAIL_DISPATCH_SECRET  -- must match the `email_dispatch_secret` Vault entry
 //   RESEND_API_KEY, RESEND_FROM  (e.g. "CampusOS <notifications@yourdomain>")
+// Optional secret: FRONTEND_URL -- the deployed frontend's origin, linked
+// from notification emails' "Open CampusOS" button. Falls back to
+// production's current domain so a domain cutover is just `supabase
+// secrets set FRONTEND_URL=...` (per project) -- see docs/DOMAIN_CUTOVER.md.
 // Auto-provided: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -30,7 +34,7 @@ function isRealEmail(email: string | null | undefined): boolean {
 }
 
 function wrapTemplate(title: string, body: string, actionType?: string | null, actionId?: string | null): string {
-  const appUrl = "https://campusos-amber.vercel.app";
+  const appUrl = Deno.env.get("FRONTEND_URL") || "https://campusos-amber.vercel.app";
   const viewLink = actionType && actionId
     ? `<p style="margin-top:20px"><a href="${appUrl}" style="color:#4f46e5">Open CampusOS</a></p>`
     : "";

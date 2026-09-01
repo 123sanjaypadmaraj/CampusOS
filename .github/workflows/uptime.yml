@@ -27,11 +27,17 @@ jobs:
       # unnecessary manual setup step for something with no confidentiality
       # to protect. Rotate here too if it's ever rotated in Supabase.
       PROD_ANON_KEY: sb_publishable_oI9SZm9xq3UzxzkGINUG7w_vZ38QDIm
+      # Repo variable (Settings -> Secrets and variables -> Actions ->
+      # Variables), not a secret -- it's the public production URL. Unset
+      # today, so this falls back to the current domain; a future domain
+      # cutover is just setting this one variable, no workflow edit --
+      # see docs/DOMAIN_CUTOVER.md.
+      PROD_URL: ${{ vars.PROD_URL || 'https://campusos-amber.vercel.app' }}
     steps:
       - name: Frontend responds
         run: |
-          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 https://campusos-amber.vercel.app)
-          echo "campusos-amber.vercel.app -> $code"
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$PROD_URL")
+          echo "$PROD_URL -> $code"
           if [ "$code" -lt 200 ] || [ "$code" -ge 400 ]; then
             echo "::error::Frontend returned HTTP $code"
             exit 1
