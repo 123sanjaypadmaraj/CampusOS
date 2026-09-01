@@ -13,13 +13,19 @@ name: Deploy
 # (commit ace4256) did by hand.
 #
 # Needs repo secrets this session couldn't set itself (no `gh` CLI
-# available) -- see docs/DEPLOYMENT.md "CI/CD secrets" for the full list and
-# how to generate each one. Like backup.yml/storage-backup.yml, every
-# individual CLI call here (db push, functions deploy, vercel build/deploy)
-# was exercised manually against the real projects while writing this, but
-# the workflow as a whole has NOT run inside actual GitHub Actions -- run it
-# once via workflow_dispatch after setting every secret, before trusting the
-# on-merge trigger alone.
+# available) -- see docs/DEPLOYMENT.md "CI/CD secrets -- 5-minute setup
+# checklist" for exactly how to generate each one. The first job below,
+# validate-secrets, checks all six are present and well-formed before
+# anything touches staging or production (scripts/validate-deploy-secrets.mjs).
+# Like backup.yml/storage-backup.yml, every individual CLI call here (db
+# push, functions deploy, vercel build/deploy) was exercised manually
+# against the real projects while writing this, and the shell logic of
+# every job below except staging-live-check is proven end-to-end by
+# scripts/deploy-dry-run.mjs against fake secrets and mocked CLIs (runs on
+# every push as ci.yml's deploy-dry-run job) -- but the workflow as a whole
+# has NOT run inside actual GitHub Actions against real infrastructure --
+# run it once via workflow_dispatch after setting every secret, before
+# trusting the on-merge trigger alone.
 
 on:
   workflow_run:
@@ -88,7 +94,8 @@ jobs:
   # Fails fast with one clear reason per secret instead of a cryptic failure
   # 3-4 minutes into deploy-staging (or worse, mid-way through production).
   # See scripts/validate-deploy-secrets.mjs's own header for exactly what
-  # "well-formed" does and doesn't check.
+  # "well-formed" does and doesn't check, and docs/DEPLOYMENT.md "CI/CD
+  # secrets -- 5-minute setup checklist" for how to generate each one.
   validate-secrets:
     needs: gate
     runs-on: ubuntu-latest
@@ -96,9 +103,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+
       - name: Validate the 6 deploy secrets are present and well-formed
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}

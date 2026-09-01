@@ -1,9 +1,10 @@
 name: CI
 
-# Pull Request -> Lint -> Typecheck -> Unit tests -> Build -> E2E (doc §95).
-# Deploy steps are intentionally NOT included -- this repo doesn't push to
-# any hosting target yet (see docs/ROADMAP.md). Add a deploy job once a
-# Vercel/Cloudflare Pages project and its secrets exist.
+# Pull Request -> Lint -> Typecheck -> Unit tests -> Build -> E2E (doc §95),
+# plus a dry run of deploy.yml's own logic (see deploy-dry-run below). Real
+# deploys are NOT included here on purpose -- they're .github/workflows/deploy.yml,
+# a separate workflow gated on this one going green, so a lint/test failure
+# can never itself trigger a deploy.
 
 on:
   push:
@@ -22,6 +23,32 @@ env:
   VITE_SUPABASE_PUBLISHABLE_KEY: ci-placeholder-anon-key
 
 jobs:
+  # Exercises the real `.github/workflows/deploy.yml` shell logic (migrations
+  # + edge functions + Vercel build/deploy + bundle-hash verification, for
+  # both staging and production) against fake secrets and mocked
+  # supabase/vercel CLIs -- no network, no real credentials, ~1 minute. This
+  # is what makes deploy.yml trustworthy before its 6 real secrets ever get
+  # set: a change that breaks its shell logic (bad quoting, a function
+  # falling out of every deploy group, a broken flag) fails here on every
+  # push instead of only being discoverable during a real deploy. See
+  # scripts/deploy-dry-run.mjs's header for exactly what is and isn't
+  # covered.
+  deploy-dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Dry-run the deploy pipeline
+        run: node scripts/deploy-dry-run.mjs
+
   lint-typecheck-test-build:
     runs-on: ubuntu-latest
     steps:

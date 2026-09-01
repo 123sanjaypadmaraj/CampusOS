@@ -166,25 +166,62 @@ built, not a stale cached one).
 Like `backup.yml`/`storage-backup.yml`, every individual CLI call in it
 (`supabase db push`, `supabase functions deploy`, `vercel build`/`vercel
 deploy --prebuilt`) was exercised manually against the real projects while
-writing it, but the workflow as a whole has not run inside an actual
-GitHub Actions job yet — trigger it once via the Actions tab's "Run
-workflow" button after setting every secret below, before trusting the
-on-merge trigger alone.
+writing it, and its shell logic as a whole is proven by
+`node scripts/deploy-dry-run.mjs` (mocked CLIs, fake secrets, no network --
+see that script's header; it also runs on every push as `ci.yml`'s
+`deploy-dry-run` job). What's NOT yet proven is a real GitHub Actions run
+against real infrastructure — trigger one once via the Actions tab's "Run
+workflow" button after the checklist below, before trusting the on-merge
+trigger alone.
 
-### CI/CD secrets
+### CI/CD secrets -- 5-minute setup checklist
 
 None of these could be set by the session that wrote `deploy.yml` (no `gh`
-CLI available) — add them under repo → Settings → Secrets and variables →
-Actions:
+CLI available). Six secrets, in the order that's fastest to get all six —
+do them top to bottom and it's a five-minute job. Every command below
+either sets the secret directly (needs `gh auth login` once) or prints
+exactly what to paste into repo → **Settings → Secrets and variables →
+Actions → New repository secret** if you'd rather use the UI.
 
-| Secret | What it is |
-|---|---|
-| `SUPABASE_ACCESS_TOKEN` | Same personal access token `backup.yml` already needs (Dashboard → Account → Access Tokens) — reuse it, don't mint a second one. |
-| `VERCEL_TOKEN` | Vercel → Account Settings → Tokens. Needs deploy access to the `campus-os2/campusos` project. |
-| `VERCEL_ORG_ID` | From `.vercel/project.json` after running `vercel link` locally once against the real project, or Vercel project Settings → General. |
-| `VERCEL_PROJECT_ID` | Same source as `VERCEL_ORG_ID`. |
-| `STAGING_SUPABASE_ANON_KEY` | Staging project's anon/publishable key (Supabase Dashboard → staging project → Project Settings → API). Not sensitive on its own (it's the same key the deployed frontend ships to every browser), but the live-check job needs it directly rather than reading it from Vercel's pulled env vars. |
-| `STAGING_E2E_ACCOUNTS` | JSON array of `{email, password, label}` for every staging test account the live suite signs in as. Generate it **yourself, locally** — never through an agent session, it contains real (if synthetic) passwords — with `node scripts/print-ci-staging-accounts-secret.mjs`, piped straight into `gh secret set STAGING_E2E_ACCOUNTS` or pasted into the GitHub secret UI. See that script's header comment for what it needs already set up locally. |
+**1. `SUPABASE_ACCESS_TOKEN`** — skip this step if `backup.yml` already
+has it (Actions → check its secret list); it's the same token, don't mint
+a second one.
+- Get it: https://supabase.com/dashboard/account/tokens → **Generate new token**
+- Set it: `gh secret set SUPABASE_ACCESS_TOKEN` (paste the token, then Ctrl-D)
+
+**2. `VERCEL_TOKEN`**
+- Get it: https://vercel.com/account/tokens → **Create Token** (no expiry, or 1 year)
+- Set it: `gh secret set VERCEL_TOKEN` (paste the token, then Ctrl-D)
+
+**3 & 4. `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID`** — both come from one command, run from the repo root with the token from step 2:
+```bash
+npx vercel login   # if not already logged in
+npx vercel link --token=<the VERCEL_TOKEN from step 2>
+cat .vercel/project.json
+```
+That prints `{"orgId":"team_xxxx","projectId":"prj_xxxx",...}`.
+- Set them: `gh secret set VERCEL_ORG_ID --body "team_xxxx"` and `gh secret set VERCEL_PROJECT_ID --body "prj_xxxx"` (the real values from the JSON above)
+
+**5. `STAGING_SUPABASE_ANON_KEY`**
+- Get it: https://supabase.com/dashboard/project/qmfmziilgkktwnqoxakk/settings/api → **Project API keys** → the `anon` / `public` key (starts with `sb_publishable_`). Not sensitive on its own — it's the same key the deployed frontend ships to every browser — but the live-check job needs it directly. **Never** use the `service_role` key here.
+- Set it: `gh secret set STAGING_SUPABASE_ANON_KEY --body "sb_publishable_xxxx"`
+
+**6. `STAGING_E2E_ACCOUNTS`** — JSON array of `{email, password, label}` for every staging test account the live suite signs in as. Generate it **yourself, locally** — never through an agent session, it prints real (if synthetic) passwords:
+```bash
+node scripts/print-ci-staging-accounts-secret.mjs | gh secret set STAGING_E2E_ACCOUNTS
+```
+(See that script's header comment for what local credential files it needs already set up.)
+
+**Verify all six before trusting a real run**: push anything to `master`
+(or re-run a past `Deploy` workflow_dispatch) and check the new
+`validate-secrets` job — it runs `scripts/validate-deploy-secrets.mjs`
+against the real secrets and fails immediately, with one specific reason
+per problem, if any of the six is missing or malformed (wrong prefix,
+truncated paste, not valid JSON, etc.) before anything touches staging or
+production. To sanity-check a single value by hand before pasting it in:
+```bash
+VERCEL_PROJECT_ID=prj_xxxx node scripts/validate-deploy-secrets.mjs
+```
 
 Production's Supabase URL/anon key aren't needed as separate secrets —
 `vercel pull --environment=production` already reads them from the
@@ -206,3 +243,10 @@ steps use `--project-ref` directly, not a locally-linked project.
   `production` environment (repo → Settings → Environments → production →
   Required reviewers) if you want a human in the loop before every deploy,
   not just before the first one.
+- **The `staging-live-check` job itself** — `scripts/deploy-dry-run.mjs`
+  deliberately does NOT simulate it (it needs a real deployed staging site
+  and real Playwright browsers, which can't be meaningfully faked without
+  just not testing anything). It's covered a different way instead: it's
+  the same `tests/live/**` suite that's already run by hand against staging
+  after every pass this month, so its own correctness isn't new/unproven —
+  only "does the workflow correctly wire it up as this job's gate" is.
