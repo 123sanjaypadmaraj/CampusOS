@@ -117,10 +117,27 @@ for (const width of WIDTHS) {
 
     test('the sign-in modal fits inside the viewport with no overflow', async ({ page }) => {
       // Unauthenticated for this one check -- the modal only opens from
-      // the signed-out "Sign in" button.
+      // the signed-out "Sign in" button. mockSignedInSession() (called in
+      // this describe's beforeEach, above) registers an addInitScript that
+      // reseeds the fake auth token on every navigation, INCLUDING a
+      // reload -- so `localStorage.clear()` then `page.reload()` alone
+      // never actually reaches a signed-out state; Playwright runs
+      // addInitScript callbacks in registration order, so a second one
+      // registered here removes it again right after. Same logic for the
+      // route mock: page.route tries the LAST-registered matching handler
+      // first, so this override beats mockSignedInSession's "**/auth/v1/**"
+      // handler. (First found by running this spec for real against a live
+      // dev server -- every "sign-in modal" case timed out waiting for
+      // #sign-in-button, because the app never stopped thinking it was
+      // signed in.)
+      await page.addInitScript(() => {
+        for (const key of Object.keys(window.localStorage)) {
+          if (key.startsWith('sb-') && key.endsWith('-auth-token')) window.localStorage.removeItem(key);
+        }
+      });
+      await page.route('**/auth/v1/**', (route) => route.fulfill({ status: 401, json: { message: 'Unauthorized' } }));
+
       await page.goto('/');
-      await page.evaluate(() => window.localStorage.clear());
-      await page.reload();
       await page.waitForLoadState('networkidle');
 
       await page.getByTestId('sign-in-button').click();
