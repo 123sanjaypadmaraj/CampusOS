@@ -77,14 +77,29 @@ for (const width of WIDTHS) {
         // base rule's `display:grid` and crushing the label into a sliver.
         await expect(button).toHaveCSS('display', 'grid');
 
-        // The label must render with real width, not be squeezed to a
-        // single truncated character -- assert its box is a substantial
-        // fraction of the button's own width, not a token of it.
+        // The label must render its full text, not be squeezed down to an
+        // ellipsis-truncated sliver -- check for actual overflow-clipping
+        // (scrollWidth > clientWidth means the CSS `text-overflow:ellipsis`
+        // rule for narrow widths is actively cutting text off), not a
+        // fixed proportion of the button's box. A proportional check
+        // (labelBox.width vs buttonBox.width) doesn't hold in general: at
+        // widths above 620px .bottom-nav button reverts to a *fixed* 90px
+        // width (see src/index.css), so a naturally short label like
+        // "Home" legitimately renders well under half that width with no
+        // truncation at all -- that was a false positive from an earlier
+        // version of this check, not a real bug (confirmed by actually
+        // running this spec against a live dev server for the first time).
         const label = button.locator('small');
-        const [labelBox, buttonBox] = await Promise.all([label.boundingBox(), button.boundingBox()]);
+        const labelBox = await label.boundingBox();
         expect(labelBox).not.toBeNull();
-        expect(buttonBox).not.toBeNull();
-        expect(labelBox.width).toBeGreaterThan(buttonBox.width * 0.5);
+        const { scrollWidth, clientWidth, text } = await label.evaluate((el) => ({
+          scrollWidth: el.scrollWidth,
+          clientWidth: el.clientWidth,
+          text: el.textContent,
+        }));
+        // +1px tolerance for sub-pixel rounding across engines.
+        expect(scrollWidth, `label "${text}" is ellipsis-truncated (scrollWidth ${scrollWidth} > clientWidth ${clientWidth})`).toBeLessThanOrEqual(clientWidth + 1);
+        expect(text.trim().length, `label collapsed to a single character: "${text}"`).toBeGreaterThan(1);
       }
     });
 
@@ -95,7 +110,13 @@ for (const width of WIDTHS) {
       const location = page.locator('.topbar .location');
       const display = await location.evaluate((el) => getComputedStyle(el).display);
 
-      if (width < 900) {
+      if (width <= 900) {
+        // `@media (max-width: 900px)` is inclusive of exactly 900px, so
+        // .location is hidden there too, not just strictly below it --
+        // confirmed by actually running this spec (an earlier `width < 900`
+        // here was an off-by-one that failed at exactly the 900px boundary
+        // this test was specifically added to pin down).
+        //
         // This is the exact root cause of the real, shipped topbar bug
         // (campusos-cross-device-pass): a later "dark mode fix" rule
         // redeclared `display:flex` on `.location`, clobbering the
