@@ -60,11 +60,31 @@ async function adminFetch(pathname, options = {}) {
   return { ok: res.ok, status: res.status, data: text ? JSON.parse(text) : null };
 }
 
+// The Admin API's `?email=` query param is accepted but NOT actually applied
+// server-side -- it silently returns the default first page of ALL users,
+// unfiltered. On a staging/prod project with more than one page of real
+// users (this repo's load-test accounts alone put staging over 300), the
+// account we're looking for can be off the first page, `.find` comes back
+// empty, and the caller wrongly concludes the account doesn't exist yet.
+// Paginate for real instead, bounded by the API's own x-total-count.
+async function findUserByEmail(targetEmail) {
+  const perPage = 1000;
+  let page = 1;
+  for (;;) {
+    const { ok, status, data } = await adminFetch(`/auth/v1/admin/users?page=${page}&per_page=${perPage}`);
+    if (!ok) throw new Error(`Failed to list users: ${status} ${JSON.stringify(data)}`);
+    const users = data?.users || data || [];
+    const found = users.find((u) => u.email === targetEmail);
+    if (found) return found;
+    if (users.length < perPage) return undefined; // last page, exhausted
+    page += 1;
+  }
+}
+
 const shouldRotate = process.argv.includes("--rotate");
 
 async function main() {
-  const { data: list } = await adminFetch(`/auth/v1/admin/users?email=${encodeURIComponent(email)}`);
-  let user = (list?.users || list)?.find?.((u) => u.email === email);
+  let user = await findUserByEmail(email);
   let password = null;
 
   if (user && !shouldRotate) {
