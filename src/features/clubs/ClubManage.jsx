@@ -21,6 +21,7 @@ import {
   HiCurrencyRupee,
   HiArrowUturnLeft,
 } from "react-icons/hi2";
+import { FEATURES } from "../../config/features";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import { TrendChart, StatTile } from "../../components/ui/Charts";
 import * as clubApi from "./api";
@@ -100,7 +101,7 @@ export default function ClubManage({ clubId, campusId, authUser, notify, onBack 
         <button className={tab === "members" ? "chip active" : "chip"} onClick={() => setTab("members")}>Members ({data.members.length})</button>
         <button className={tab === "applications" ? "chip active" : "chip"} onClick={() => setTab("applications")}>Applications {data.applications.length > 0 ? `(${data.applications.length})` : ""}</button>
         <button className={tab === "events" ? "chip active" : "chip"} onClick={() => setTab("events")}>Events ({data.events.length})</button>
-        <button className={tab === "payouts" ? "chip active" : "chip"} onClick={() => setTab("payouts")}>Payouts</button>
+        {FEATURES.payouts && <button className={tab === "payouts" ? "chip active" : "chip"} onClick={() => setTab("payouts")}>Payouts</button>}
         <button className={tab === "meetings" ? "chip active" : "chip"} onClick={() => setTab("meetings")}>Attendance</button>
         <button className={tab === "announcements" ? "chip active" : "chip"} onClick={() => setTab("announcements")}>Announcements</button>
         <button className={tab === "gallery" ? "chip active" : "chip"} onClick={() => setTab("gallery")}>Gallery</button>
@@ -113,7 +114,7 @@ export default function ClubManage({ clubId, campusId, authUser, notify, onBack 
       {tab === "members" && <MembersTab club={data.club} members={data.members} canManage={isAdminRole} authUser={authUser} notify={notify} onChange={reload} />}
       {tab === "applications" && <ApplicationsTab club={data.club} applications={data.applications} notify={notify} onChange={reload} />}
       {tab === "events" && <EventsTab clubId={clubId} campusId={campusId} events={data.events} authUser={authUser} notify={notify} onChange={reload} />}
-      {tab === "payouts" && <PayoutsTab clubId={clubId} events={data.events} notify={notify} />}
+      {tab === "payouts" && FEATURES.payouts && <PayoutsTab clubId={clubId} events={data.events} notify={notify} />}
       {tab === "meetings" && <MeetingsTab clubId={clubId} meetings={data.meetings} members={data.members} authUser={authUser} notify={notify} onChange={reload} />}
       {tab === "announcements" && <AnnouncementsTab clubId={clubId} announcements={data.announcements} notify={notify} onChange={reload} />}
       {tab === "gallery" && <GalleryTab clubId={clubId} gallery={data.gallery} authUser={authUser} notify={notify} onChange={reload} />}

@@ -177,16 +177,15 @@ describe("App button interactions", () => {
     });
 
     test("deep-linking straight to a URL (refresh/bookmark) renders that section on first paint", async () => {
-      window.history.pushState(null, "", "/food");
+      // Food was the original route used here, but it's behind
+      // FEATURES.food (currently off, see src/config/features.js) so it no
+      // longer renders `.food-page` -- Events is unaffected by any feature
+      // flag and still exercises the same deep-link-on-first-paint path.
+      window.history.pushState(null, "", "/events");
       const { container } = render(<App />);
 
-      // Assert on the *route* rendering, not on its data finishing loading
-      // (that's a separate, unrelated async chain with its own coverage) --
-      // the Food section shows either its loading state or the loaded menu
-      // depending on timing, both of which only render under `active ===
-      // "food"`.
       await waitFor(() => {
-        expect(container.querySelector(".food-page")).toBeInTheDocument();
+        expect(container.querySelector(".events-page")).toBeInTheDocument();
       });
     });
 

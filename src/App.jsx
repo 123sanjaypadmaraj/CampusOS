@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useMemo, useRef, useState, Suspense, lazy } from "react";
 import campusOSLogoMark from "./assets/campusos-logo-mark.png";
+import { FEATURES } from "./config/features";
 import { mergeCartItem, addonSelectionKey, isFoodItemAvailableNow, isCanteenOpenNow, calculatePrintJobPrice } from "./utils/mvpHelpers";
 import {
   getDefaultCampus,
@@ -945,6 +946,10 @@ function App() {
   };
 
   const checkoutStore = async () => {
+    if (!FEATURES.storeCheckout) {
+      notify("Store ordering is temporarily paused — check back soon.");
+      return;
+    }
     if (!authUser) {
       setLoginOpen(true);
       notify("Sign in before placing an order");
@@ -1939,7 +1944,7 @@ function App() {
       return <Clubs notify={notify} clubs={clubs} authUser={authUser} setLoginOpen={setLoginOpen} campusId={campusId} />;
     }
 
-    if (active === "food") {
+    if (active === "food" && FEATURES.food) {
       return (
         <Food
         notify={notify}
@@ -2302,7 +2307,7 @@ function App() {
         />
       )}
 
-      {modal === "food-cart" && (
+      {modal === "food-cart" && FEATURES.food && (
       <CartModal
         title="Food cart"
         cart={foodCart}
@@ -2481,13 +2486,15 @@ function Home({
             meta="This week"
             onClick={() => go("services")}
           />
-          <PulseCard
-            icon={<HiTrophy />}
-            label="FOOD"
-            title="Udupi has the shortest queue"
-            meta="8–12 min · Food Hub"
-            onClick={() => go("food")}
-          />
+          {FEATURES.food && (
+            <PulseCard
+              icon={<HiTrophy />}
+              label="FOOD"
+              title="Udupi has the shortest queue"
+              meta="8–12 min · Food Hub"
+              onClick={() => go("food")}
+            />
+          )}
         </div>
       </section>
 
@@ -2506,12 +2513,14 @@ function Home({
             text="Upload & collect"
             onClick={() => go("print")}
           />
-          <ActionTile
-            icon={<HiShoppingCart />}
-            title="Food"
-            text={`${foodCart.length} items in cart`}
-            onClick={() => go("food")}
-          />
+          {FEATURES.food && (
+            <ActionTile
+              icon={<HiShoppingCart />}
+              title="Food"
+              text={`${foodCart.length} items in cart`}
+              onClick={() => go("food")}
+            />
+          )}
           <ActionTile
             icon={<HiBookOpen />}
             title="Store"
@@ -2887,7 +2896,7 @@ function RecommendedForYou({ authUser, go, notify }) {
       </div>
 
       <div className="recommend-rows">
-        {foodItems.length > 0 && (
+        {FEATURES.food && foodItems.length > 0 && (
           <div className="recommend-row">
             <h4>Food</h4>
             <div className="recommend-cards">
@@ -3737,8 +3746,13 @@ function Events({
               </p>
 
               <div>
+                {/* A paid event needs a live registration_id to charge, so
+                    both "register fresh into a priced event" and "resume a
+                    reserved-but-unpaid seat" go through Checkout -- neither
+                    can proceed while paid registration is paused. Cancelling
+                    an existing registration (paid or free) is unaffected. */}
                 <button
-                  disabled={payingEventId === event.id}
+                  disabled={payingEventId === event.id || (!FEATURES.paidEvents && (pendingPaymentIds.includes(event.id) || (!registeredIds.includes(event.id) && event.price > 0)))}
                   onClick={async () => {
 
                     try {
@@ -3750,6 +3764,11 @@ function Events({
                           "Sign in to register"
                         );
 
+                        return;
+                      }
+
+                      if (!FEATURES.paidEvents && (pendingPaymentIds.includes(event.id) || (!registeredIds.includes(event.id) && event.price > 0))) {
+                        notify("Paid event registration is temporarily paused — free events are still open.");
                         return;
                       }
 
@@ -3808,10 +3827,14 @@ function Events({
                     }
                   }}
                                   >
-                  {pendingPaymentIds.includes(event.id)
+                  {!FEATURES.paidEvents && pendingPaymentIds.includes(event.id)
+                    ? "Payments paused"
+                    : pendingPaymentIds.includes(event.id)
                     ? (payingEventId === event.id ? "Opening payment…" : `Complete payment${event.price > 0 ? ` · ₹${event.price}` : ""}`)
                     : registeredIds.includes(event.id)
                     ? "Cancel registration"
+                    : (!FEATURES.paidEvents && event.price > 0)
+                    ? "Registration paused"
                     : (event.price > 0 ? `Register · ₹${event.price}` : "Register")}
                 </button>
 
@@ -4230,27 +4253,29 @@ function Services({ go, storeCart, printFile, openModal }) {
           </button>
         </div>
 
-        <div className="service-dash-card">
-          <span className="section-kicker">FOOD HUB</span>
-          <h2>Four canteens. One checkout.</h2>
-          <p>
-            Udupi, Tango, Munch and Nescafe are now searchable from the same
-            campus interface.
-          </p>
+        {FEATURES.food && (
+          <div className="service-dash-card">
+            <span className="section-kicker">FOOD HUB</span>
+            <h2>Four canteens. One checkout.</h2>
+            <p>
+              Udupi, Tango, Munch and Nescafe are now searchable from the same
+              campus interface.
+            </p>
 
-          <div className="mini-canteens">
-            {canteens.map((canteen) => (
-              <div key={canteen.id}>
-                <b>{canteen.name}</b>
-                <small>{canteen.eta} · {canteen.status}</small>
-              </div>
-            ))}
+            <div className="mini-canteens">
+              {canteens.map((canteen) => (
+                <div key={canteen.id}>
+                  <b>{canteen.name}</b>
+                  <small>{canteen.eta} · {canteen.status}</small>
+                </div>
+              ))}
+            </div>
+
+            <button onClick={() => go("food")}>
+              Open Food Hub <HiArrowRight />
+            </button>
           </div>
-
-          <button onClick={() => go("food")}>
-            Open Food Hub <HiArrowRight />
-          </button>
-        </div>
+        )}
       </div>
 
       <div className="service-footer-grid">
@@ -5709,7 +5734,7 @@ function YourActivity({
   notifications = [],
 }) {
   const userId = profile?.id || authUser?.id;
-  const [tab, setTab] = useState("food");
+  const [tab, setTab] = useState(FEATURES.food ? "food" : "store");
   const [loading, setLoading] = useState(true);
   const [eventRegs, setEventRegs] = useState([]);
   const [clubActivity, setClubActivity] = useState([]);
@@ -5780,7 +5805,7 @@ function YourActivity({
 
       <div className="activity-layout">
         <nav className="activity-nav" aria-label="Activity categories">
-          {ACTIVITY_CATEGORIES.map((c) => (
+          {ACTIVITY_CATEGORIES.filter((c) => FEATURES.food || c.key !== "food").map((c) => (
             <button
               key={c.key}
               className={`activity-nav-item${tab === c.key ? " active" : ""}`}
@@ -7996,6 +8021,7 @@ function ResetPasswordPage({ go, notify }) {
 // proposed, so a hallucinated/stale action id just fails cleanly here.
 const AI_ACTION_EXECUTORS = {
   add_to_food_cart: async (action, ctx) => {
+    if (!FEATURES.food) throw new Error("Food ordering is temporarily unavailable.");
     const item = {
       id: action.foodItemId,
       name: action.name,
@@ -8028,6 +8054,9 @@ const AI_ACTION_EXECUTORS = {
     // never gets to trigger a payment popup itself (doc §16's "no elevated
     // privilege" rule extends to gateway checkout, not just writes).
     if (result?.status === "payment_pending") {
+      if (!FEATURES.paidEvents) {
+        return `Reserved your spot for "${action.eventTitle}", but paid registration is temporarily paused -- your seat will expire on its own; try again later from the Events tab.`;
+      }
       return `Reserved your spot for "${action.eventTitle}" (₹${result.amount}) — open the Events tab to complete payment within 30 minutes, or the seat goes to the next person.`;
     }
     return result?.status === "waitlisted"
@@ -8112,14 +8141,15 @@ function CampusAI({ notify, go, authUser, profile, campusId, addFood, openLogin 
   const [conversation, setConversation] = useState([
     {
       role: "ai",
-      text:
-        "Hi! I'm a real assistant with live access to CampusOS — ask me about the food menu, upcoming events, open opportunities, mentors, teams looking for teammates, the store, or your own orders and registrations. I can also draft real actions for you (add food to your cart, register for an event, submit a service request, book a resource, set a reminder, apply to join a team) -- you'll always get a chance to confirm before anything actually happens.",
+      text: FEATURES.food
+        ? "Hi! I'm a real assistant with live access to CampusOS — ask me about the food menu, upcoming events, open opportunities, mentors, teams looking for teammates, the store, or your own orders and registrations. I can also draft real actions for you (add food to your cart, register for an event, submit a service request, book a resource, set a reminder, apply to join a team) -- you'll always get a chance to confirm before anything actually happens."
+        : "Hi! I'm a real assistant with live access to CampusOS — ask me about upcoming events, open opportunities, mentors, teams looking for teammates, the store, or your own orders and registrations. I can also draft real actions for you (register for an event, submit a service request, book a resource, set a reminder, apply to join a team) -- you'll always get a chance to confirm before anything actually happens.",
     },
   ]);
   const [phoneDrafts, setPhoneDrafts] = useState({}); // messageIndex -> phone string, for register_event cards
 
   const suggestions = [
-    "What's on the food menu right now?",
+    ...(FEATURES.food ? ["What's on the food menu right now?"] : []),
     "What events are coming up?",
     "Remind me to pay hostel fees this Friday at 6pm",
     "Any internships or research openings?",
@@ -8324,10 +8354,9 @@ function CampusAI({ notify, go, authUser, profile, campusId, addFood, openLogin 
           <span className="section-kicker">NOW LIVE</span>
           <h2>AI that can act, not just answer.</h2>
           <p>
-            Ask it to add food to your cart, register you for an event, file
-            a service request, book a resource, or set a reminder -- it
-            drafts the action and always waits for your Confirm before
-            anything real happens.
+            {FEATURES.food
+              ? "Ask it to add food to your cart, register you for an event, file a service request, book a resource, or set a reminder -- it drafts the action and always waits for your Confirm before anything real happens."
+              : "Ask it to register you for an event, file a service request, book a resource, or set a reminder -- it drafts the action and always waits for your Confirm before anything real happens."}
           </p>
         </div>
       </div>
@@ -10017,9 +10046,14 @@ function PrintModal({ onClose, setPrintFile, notify, authUser, user, campusId })
 
       <button
         className="primary wide"
-        disabled={submitting}
+        disabled={submitting || !FEATURES.printPayments}
         onClick={async () => {
           try {
+            if (!FEATURES.printPayments) {
+              notify("Print ordering is temporarily paused — check back soon.");
+              return;
+            }
+
             if (!file) {
               notify("Choose a document first");
               return;
@@ -10077,7 +10111,7 @@ function PrintModal({ onClose, setPrintFile, notify, authUser, user, campusId })
           }
         }}
       >
-        {submitting ? "Working…" : "Continue to payment"} <HiCreditCard />
+        {!FEATURES.printPayments ? "Print ordering paused" : submitting ? "Working…" : "Continue to payment"} <HiCreditCard />
       </button>
     </ModalShell>
   );
@@ -10139,6 +10173,7 @@ function CartModal({ title,cart,onClose,notify,type,onCheckout,onUpdateQuantity,
 
           <button
             className="primary wide"
+            disabled={type === "store" && !FEATURES.storeCheckout}
             onClick={async () => {
             if (onCheckout) {
               await onCheckout();
@@ -10150,7 +10185,7 @@ function CartModal({ title,cart,onClose,notify,type,onCheckout,onUpdateQuantity,
             }
           }}
           >
-            Continue to payment <HiCreditCard />
+            {type === "store" && !FEATURES.storeCheckout ? "Ordering paused" : <>Continue to payment <HiCreditCard /></>}
           </button>
         </>
       )}
