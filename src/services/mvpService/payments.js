@@ -20,6 +20,20 @@ import { throwIfError } from "./_shared.js";
 // (payments_read) already restricts this to payments the caller owns via
 // one of those three relations, so no explicit .eq("user_id", ...) is
 // needed or even possible here.
+//
+// print_jobs and event_registrations both need an explicit FK name in their
+// embed. printing_v2 (20260817001200) added print_jobs.payment_id ->
+// payments.id alongside payments.print_job_id -> print_jobs.id (so a job
+// can record whichever payment ultimately succeeded), and paid_events
+// (20260831000800) did the same for event_registrations.payment_id /
+// payments.event_registration_id -- each pair leaves two FK paths between
+// the same two tables. PostgREST can't pick one on its own for an
+// unqualified `print_jobs (...)` / `event_registrations (...)` embed and
+// throws PGRST201 on every call -- this was silently broken from the day
+// each migration shipped (17 Aug / 31 Aug respectively), caught live
+// testing the Activity page's Payments tab on 3 Sep. `orders` only has the
+// one direction (payments.order_id -> orders.id, no reverse column) so it
+// doesn't need qualifying.
 export async function getMyPayments(userId) {
   if (!userId) return [];
 
@@ -38,13 +52,13 @@ export async function getMyPayments(userId) {
         status,
         canteens ( name )
       ),
-      print_jobs (
+      print_jobs!payments_print_job_id_fkey (
         id,
         pickup_code,
         pages,
         copies
       ),
-      event_registrations (
+      event_registrations!payments_event_registration_id_fkey (
         id,
         events ( title )
       )

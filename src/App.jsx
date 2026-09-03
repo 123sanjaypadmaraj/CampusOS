@@ -804,9 +804,15 @@ function App() {
   // can change (go(), popstate, and the very first render) instead of
   // setting it at each call site. A screen reader announces a title change
   // on navigation; without this every route change was silent.
+  //
+  // "food" falls through to the Home *content* when FEATURES.food is off
+  // (see the render switch below) -- title has to fall through with it, or
+  // an AT user (or the browser tab) is told "Food Ordering" while looking
+  // at Home.
   useEffect(() => {
-    document.title = PAGE_TITLES[active]
-      ? `${PAGE_TITLES[active]} | Campus OS`
+    const titleKey = active === "food" && !FEATURES.food ? "home" : active;
+    document.title = PAGE_TITLES[titleKey]
+      ? `${PAGE_TITLES[titleKey]} | Campus OS`
       : "Campus OS | Your Digital Campus";
   }, [active]);
 

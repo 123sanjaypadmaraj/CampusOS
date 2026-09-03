@@ -377,6 +377,17 @@ describe("getMyPayments", () => {
 
     expect(mockFrom).toHaveBeenCalledWith("payments");
     expect(result).toEqual(mockResponse.data);
+
+    // Both print_jobs and event_registrations have a second FK back to
+    // payments (print_jobs.payment_id / event_registrations.payment_id,
+    // alongside the payments.print_job_id / payments.event_registration_id
+    // columns actually being embedded here) -- an unqualified embed is
+    // ambiguous and PostgREST rejects it with PGRST201 on every real call,
+    // even though a mocked client like this one can't catch that. Guards
+    // against silently losing the FK qualifier again.
+    const selectArg = builder.select.mock.calls[0][0];
+    expect(selectArg).toMatch(/print_jobs!payments_print_job_id_fkey/);
+    expect(selectArg).toMatch(/event_registrations!payments_event_registration_id_fkey/);
   });
 
   it("returns an empty list without a network call when there is no user id", async () => {
