@@ -15,11 +15,14 @@ import type { CapacitorConfig } from '@capacitor/cli';
 // copy (native plugin config, icons, etc.) -- it's just not what gets
 // loaded at runtime. Trade-off: the app now needs network on cold start
 // (it already needed network for every Supabase call, same as the web
-// build) -- there is no offline shell anymore. Revisit if that's a real
-// problem: either point this back at a bundled dist/ build, or add an
-// OTA JS-bundle updater (e.g. capacitor-updater) to get updates without
-// requiring network on *every* launch. See docs/PLATFORM_ADAPTIVE_LAYOUT.md
-// for how platform-specific chrome is wired on top of this one shared build.
+// build) -- there is no offline shell anymore. `server.errorPath` below
+// covers the failure mode (a branded "you're offline" screen instead of a
+// blank/generic WebView error page) but doesn't remove the dependency --
+// revisit if that's still a real problem: either point this back at a
+// bundled dist/ build, or add an OTA JS-bundle updater (e.g.
+// capacitor-updater) to get updates without requiring network on *every*
+// launch. See docs/PLATFORM_ADAPTIVE_LAYOUT.md for how platform-specific
+// chrome is wired on top of this one shared build.
 const config: CapacitorConfig = {
   appId: 'in.edu.nhce.campusos',
   appName: 'CampusOS',
@@ -27,6 +30,13 @@ const config: CapacitorConfig = {
   server: {
     url: 'https://campusos-amber.vercel.app',
     androidScheme: 'https',
+    // Capacitor's own WebViewClient auto-redirects the main frame here on
+    // any load failure (no connectivity, DNS failure, 5xx from Vercel) --
+    // see BridgeWebViewClient#onReceivedError/onReceivedHttpError in
+    // @capacitor/android. Served from the bundled webDir via Capacitor's
+    // local webserver, not from the network, so it renders even with zero
+    // connectivity. public/offline.html has the branded copy + retry.
+    errorPath: 'offline.html',
   },
   backgroundColor: '#faf9fc',
   plugins: {

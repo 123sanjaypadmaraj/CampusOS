@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>You're offline — CampusOS</title>
+    <!--
+      Capacitor's native shell (see capacitor.config.ts: server.errorPath)
+      auto-loads this file whenever the main-frame WebView navigation to
+      the live app fails -- no connectivity, DNS failure, or the server
+      itself returning an error. It's served from the app's own bundled
+      webDir via Capacitor's local webserver (https://localhost/offline.html),
+      which is why it has to be fully self-contained: no build-time hashed
+      asset paths, no external fonts/CDN, nothing that itself needs a
+      network round-trip to render. favicon.png is safe to reference below
+      since it's a same-origin bundled file served by that same local
+      webserver, not a network fetch.
+
+      This only fires for native (Android/iOS) app shells. The web/PWA
+      install path has its own offline handling in public/sw.js (the
+      service worker's app-shell cache), which is a separate mechanism --
+      see sw.js's file header for why the two don't share one codepath.
+    -->
+    <style>
+      :root {
+        color-scheme: light dark;
+        --brand: #6945e8;
+        --bg: #faf9fc;
+        --text: #1c1a24;
+        --muted: #6b6778;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #17151f;
+          --text: #f2f0f7;
+          --muted: #9b96ab;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 32px 24px;
+        padding-bottom: max(24px, env(safe-area-inset-bottom));
+        padding-top: max(24px, env(safe-area-inset-top));
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          Roboto,
+          Helvetica,
+          Arial,
+          sans-serif;
+        text-align: center;
+      }
+      .card {
+        max-width: 340px;
+      }
+      .logo {
+        width: 64px;
+        height: 64px;
+        border-radius: 16px;
+        margin: 0 auto 24px;
+        display: block;
+      }
+      .icon {
+        width: 56px;
+        height: 56px;
+        margin: 0 auto 20px;
+        color: var(--brand);
+      }
+      h1 {
+        font-size: 20px;
+        font-weight: 700;
+        margin: 0 0 8px;
+      }
+      p {
+        font-size: 14px;
+        line-height: 1.5;
+        color: var(--muted);
+        margin: 0 0 28px;
+      }
+      button {
+        appearance: none;
+        border: none;
+        background: var(--brand);
+        color: #fff;
+        font-size: 15px;
+        font-weight: 600;
+        padding: 12px 28px;
+        border-radius: 999px;
+        cursor: pointer;
+      }
+      button:active {
+        opacity: 0.85;
+      }
+      button[disabled] {
+        opacity: 0.6;
+        cursor: default;
+      }
+      .status {
+        margin-top: 16px;
+        font-size: 12px;
+        color: var(--muted);
+        min-height: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <img class="logo" src="favicon.png" alt="" onerror="this.remove()" />
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+        <path
+          d="M12 18.5v.01M8.5 15.5a5 5 0 0 1 7 0M5.5 12.5a9 9 0 0 1 13 0M2.5 9.5a13 13 0 0 1 19 0"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+        <path d="M3 3l18 18" stroke-linecap="round" />
+      </svg>
+      <h1>You're offline</h1>
+      <p>CampusOS needs an internet connection to load. Check your connection and try again.</p>
+      <button id="retry" type="button">Retry</button>
+      <div class="status" id="status" aria-live="polite"></div>
+    </div>
+    <script>
+      // Kept in sync with capacitor.config.ts's server.url by hand -- this
+      // is a static bundled file, not a build artifact, so it can't read
+      // that config at build time. Update both if the production domain
+      // ever changes (see docs/DOMAIN_CUTOVER.md).
+      var APP_URL = "https://campusos-amber.vercel.app/";
+
+      var statusEl = document.getElementById("status");
+      var retryBtn = document.getElementById("retry");
+
+      function attemptReload() {
+        retryBtn.disabled = true;
+        statusEl.textContent = "Checking connection…";
+        // A plain reload (not just location.href = APP_URL) so a retry
+        // from a deep link's error page still lands back where the user
+        // was, since Capacitor reloads the last-requested URL on next
+        // launch/foreground -- window.location.href is the safe fallback
+        // for a manual click right now.
+        window.location.href = APP_URL;
+      }
+
+      retryBtn.addEventListener("click", attemptReload);
+
+      // Auto-retry the moment the OS reports connectivity back, so most
+      // people never have to tap anything.
+      window.addEventListener("online", attemptReload);
+
+      if (navigator.onLine === false) {
+        statusEl.textContent = "Waiting for a connection…";
+      }
+    </script>
+  </body>
+</html>

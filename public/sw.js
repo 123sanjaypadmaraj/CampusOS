@@ -17,8 +17,25 @@
 // src/utils/offlineCache.js -- this file only ever sees same-origin
 // document/asset requests, never the Supabase API calls those go over.
 const SHELL_CACHE = "campusos-shell-v1";
+// Static branded fallback for the one case the app-shell cache below can't
+// cover: a navigate request fails *and* there's no previously-cached "/"
+// to fall back to either (fresh install with cache cleared, or the very
+// first visit ever happening offline). Precached at install time -- by
+// the time a new SW version is installing, the browser already fetched
+// this SW script over the network, so that same visit can also afford one
+// more small fetch. Same file the native Android/iOS shells redirect to
+// via capacitor.config.ts's server.errorPath; this is the separate
+// web/PWA install codepath, since a PWA has no equivalent native-level
+// hook to redirect through.
+const OFFLINE_URL = "/offline.html";
 
-self.addEventListener("install", () => {
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    caches
+      .open(SHELL_CACHE)
+      .then((cache) => cache.add(OFFLINE_URL))
+      .catch(() => {}) // best-effort -- don't fail install over this
+  );
   self.skipWaiting();
 });
 
@@ -53,7 +70,9 @@ self.addEventListener("fetch", (event) => {
           caches.open(SHELL_CACHE).then((cache) => cache.put("/", response.clone()));
           return response;
         })
-        .catch(() => caches.open(SHELL_CACHE).then((cache) => cache.match("/")))
+        .catch(() =>
+          caches.open(SHELL_CACHE).then(async (cache) => (await cache.match("/")) || cache.match(OFFLINE_URL))
+        )
     );
     return;
   }
