@@ -78,7 +78,30 @@ which is what makes those `env()` values non-zero in the first place.
 - **Status bar / splash screen**: `@capacitor/status-bar` and
   `@capacitor/splash-screen` calls are guarded by `IS_NATIVE` and, for the
   status bar, kept in sync with the same `darkMode` state that already
-  drives the rest of the theme.
+  drives the rest of the theme. On Android 16 (`targetSdkVersion` 36),
+  edge-to-edge is enforced by the OS and `StatusBar.setBackgroundColor()`
+  becomes a no-op (see `shouldSetStatusBarColor()` in
+  `@capacitor/status-bar`'s Android source) — the colored strip behind the
+  transparent status bar comes from `.topbar`'s own background plus the
+  `env(safe-area-inset-top)` padding above, not from that native call. Same
+  story for the bottom: `.bottom-nav`'s background plus
+  `env(safe-area-inset-bottom)` paints behind the transparent gesture-nav
+  area, not any native API.
+- **Native theme colors** (`android/app/src/main/res/values{,-night}/colors.xml`):
+  `styles.xml`'s `AppTheme.NoActionBar` — the theme `BridgeActivity`
+  actually applies at runtime, not the unused `AppTheme` above it — sets
+  `colorPrimary`/`colorPrimaryDark`/`colorAccent` from these files. They
+  didn't exist until this pass, so those items silently resolved to
+  `@capacitor/android`'s own bundled library defaults (stock Material demo
+  indigo `#3F51B5` / pink `#FF4081`, confirmed via the merged resource set
+  under `node_modules/@capacitor/android`), not CampusOS purple. Fixed with
+  real brand colors matching `src/index.css`'s `--purple`/`--purple-deep`/
+  `--purple2` (light) and `--accent`/`--bg` under `.dark-mode` (night) —
+  this is what tints the recents/task-switcher card and any native-chrome
+  UI (autofill/selection popups). Verified end-to-end with `aapt2 dump
+  resources` against a real `assembleDebug` build, and confirmed
+  `assembleRelease`/`bundleRelease` still build and sign correctly
+  afterward.
 
 ## Building the native apps
 

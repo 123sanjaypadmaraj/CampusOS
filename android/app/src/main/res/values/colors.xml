@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Real CampusOS brand colors, matching src/index.css's :root purple/purple-deep/
+      purple2 custom properties (also the PWA manifest's theme_color #6945e8); see
+      docs/PLATFORM_ADAPTIVE_LAYOUT.md.
+
+      Before this file existed, AppTheme's @color/colorPrimary etc referenced in
+      styles.xml silently fell back to @capacitor/android's own generic demo colors
+      (indigo #3F51B5 / pink #FF4081, the stock Material sample palette), confirmed
+      via the merged resource set at
+      node_modules/@capacitor/android/capacitor/.../values.xml. That's what the
+      recents/task-switcher card and any native-chrome tinting (native dialogs,
+      text-selection handles) had actually been showing on Android, not CampusOS
+      purple.
+    -->
+    <color name="colorPrimary">#6945e8</color>
+    <color name="colorPrimaryDark">#4c2fc9</color>
+    <color name="colorAccent">#8b6cff</color>
+</resources>

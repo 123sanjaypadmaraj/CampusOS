@@ -9,10 +9,22 @@
         <item name="colorAccent">@color/colorAccent</item>
     </style>
 
+    <!-- This is the theme actually applied at runtime: BridgeActivity.onCreate()
+         calls setTheme(R.style.AppTheme_NoActionBar) before the WebView loads,
+         and since app-module resources win a same-name merge against
+         @capacitor/android's own library-default "AppTheme.NoActionBar" (plain
+         Theme.AppCompat.NoActionBar, no brand colors), this definition, not
+         plain "AppTheme" above, is what determines the recents/task-switcher
+         card color and any native-chrome tinting. It has its own distinct
+         parent, so it does not inherit AppTheme's colorPrimary/etc via the
+         dotted name alone; they're repeated explicitly here for that reason. -->
     <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:background">@null</item>
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
     </style>
 
 

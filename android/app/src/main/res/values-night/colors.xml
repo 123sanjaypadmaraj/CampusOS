@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Dark-mode variant of ../values/colors.xml, matching src/index.css's
+      .app-shell.dark-mode tokens (accent: #9278ff, bg: #0c0d12). colorPrimary is
+      kept the same brand purple in both; the recents/task-switcher card should
+      stay recognizably "CampusOS purple" regardless of system theme, only the
+      darker chrome (colorPrimaryDark) and native accent tinting follow the
+      device's dark mode.
+    -->
+    <color name="colorPrimary">#6945e8</color>
+    <color name="colorPrimaryDark">#0c0d12</color>
+    <color name="colorAccent">#9278ff</color>
+</resources>
