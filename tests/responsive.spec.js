@@ -103,14 +103,26 @@ for (const width of WIDTHS) {
       }
     });
 
-    test('topbar location block hides below 900px and never wraps when shown', async ({ page }) => {
+    test('topbar location block: shown on phones (<=720, app-bar), hidden 721-900 (tablet), shown above, never wraps', async ({ page }) => {
       await page.goto('/');
       await page.waitForLoadState('networkidle');
 
       const location = page.locator('.topbar .location');
       const display = await location.evaluate((el) => getComputedStyle(el).display);
 
-      if (width <= 900) {
+      if (width <= 720) {
+        // Phone layer (src/mobile.css, gated by the JS-applied `.is-mobile`
+        // class): the campus/location block IS the app bar's left side,
+        // Blinkit/MyGate-style, so it must be visible and must truncate
+        // (ellipsis) rather than wrap or push the action buttons off-screen.
+        expect(display).not.toBe('none');
+        const topbarBox = await page.locator('.topbar').boundingBox();
+        const locationBox = await location.boundingBox();
+        expect(locationBox).not.toBeNull();
+        expect(locationBox.height).toBeLessThanOrEqual(topbarBox.height + 2);
+        const actions = await page.locator('.topbar .top-actions').boundingBox();
+        expect(locationBox.x + locationBox.width, 'location overlaps the action buttons').toBeLessThanOrEqual(actions.x + 1);
+      } else if (width <= 900) {
         // `@media (max-width: 900px)` is inclusive of exactly 900px, so
         // .location is hidden there too, not just strictly below it --
         // confirmed by actually running this spec (an earlier `width < 900`

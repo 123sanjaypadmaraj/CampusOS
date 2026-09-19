@@ -2,6 +2,9 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
+// Phone layer: must load after index.css (linked from index.html) so its
+// equal-specificity overrides win the cascade.
+import "./mobile.css";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { logClientError } from "./services/mvpService";
 

@@ -1,0 +1,842 @@
+/* =========================================================================
+   CampusOS phone layer (Blinkit / MyGate-inspired app shell)
+
+   Everything here is scoped to `.app-shell.is-mobile`, a class App.jsx only
+   adds while the viewport is <= 720px (see hooks/useIsMobile). That is
+   deliberate: index.css has a documented history of a later equal-
+   specificity rule silently defeating an earlier @media rule (see the
+   "UI REFRESH" note there and scripts/check-css-cascade.mjs). A JS-applied
+   class carries no media query to be clobbered and outranks the flat
+   selectors in index.css, so nothing below can leak to tablet/desktop and
+   nothing in index.css can undo it. Loaded from main.jsx AFTER index.css.
+
+   Colors come from the .app-shell tokens (--surface/--text/--muted/--border/
+   --accent), so dark mode and the five color themes work with no per-theme
+   rules.
+   ========================================================================= */
+
+.app-shell.is-mobile {
+  --m-nav-h: 62px;
+  --m-safe-b: env(safe-area-inset-bottom, 0px);
+  --m-topbar-h: 56px;
+  --m-radius: 18px;
+
+  padding-bottom: calc(var(--m-nav-h) + var(--m-safe-b) + 24px);
+  overflow-x: clip;
+}
+
+.app-shell.is-mobile.has-cart {
+  padding-bottom: calc(var(--m-nav-h) + var(--m-safe-b) + 92px);
+}
+
+/* ---- Top app bar: location on the left, actions on the right ---------- */
+
+.app-shell.is-mobile .topbar {
+  height: auto;
+  min-height: var(--m-topbar-h);
+  padding: env(safe-area-inset-top, 0px) 14px 0;
+  gap: 8px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  box-shadow: none;
+}
+
+.app-shell.is-mobile .topbar .brand {
+  display: none;
+}
+
+.app-shell.is-mobile .topbar .location {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.app-shell.is-mobile .topbar .location .pin {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  font-size: 18px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.app-shell.is-mobile .topbar .location > span:last-child {
+  min-width: 0;
+}
+
+.app-shell.is-mobile .topbar .location small {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  line-height: 1.2;
+}
+
+.app-shell.is-mobile .topbar .location b {
+  margin-top: 1px;
+  font-size: 13px;
+  line-height: 1.25;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-shell.is-mobile .top-actions {
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.app-shell.is-mobile .top-actions .icon-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border-color: transparent;
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.app-shell.is-mobile .top-actions .icon-btn:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.app-shell.is-mobile .top-actions .icon-btn svg {
+  width: 19px;
+  height: 19px;
+}
+
+.app-shell.is-mobile .top-actions .icon-btn i {
+  top: -2px;
+  right: -2px;
+  min-width: 18px;
+  width: auto;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  border: 2px solid var(--surface);
+  box-sizing: border-box;
+  font-size: 9.5px;
+  font-weight: 800;
+  line-height: 1;
+  background: #ef4444;
+}
+
+/* The Profile tab replaces the avatar chip; signed-out users keep Sign in. */
+.app-shell.is-mobile .top-actions .profile-mini {
+  display: none;
+}
+
+.app-shell.is-mobile .top-actions .login-btn {
+  padding: 9px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+
+/* Theme panel opens from the right edge instead of running off-screen. */
+.app-shell.is-mobile .theme-picker-panel {
+  right: 0;
+  left: auto;
+  max-width: calc(100vw - 28px);
+}
+
+.app-shell.is-mobile .offline-banner {
+  top: calc(var(--m-topbar-h) + env(safe-area-inset-top, 0px));
+}
+
+/* ---- Bottom tab bar: 5 full-width tabs, edge to edge ------------------ */
+
+.app-shell.is-mobile .bottom-nav {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  transform: none;
+  border-radius: 0;
+  justify-content: space-around;
+  gap: 0;
+  padding: 6px 6px calc(6px + var(--m-safe-b));
+  background: var(--surface);
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -6px 24px rgba(20, 16, 40, 0.07);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.app-shell.is-mobile.dark-mode .bottom-nav {
+  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.35);
+}
+
+.app-shell.is-mobile .bottom-nav button {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+  height: 50px;
+  padding: 4px 2px 2px;
+  border-radius: 14px;
+  gap: 2px;
+  align-content: center;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+}
+
+.app-shell.is-mobile .bottom-nav button small {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.app-shell.is-mobile .bottom-nav button svg {
+  width: 23px;
+  height: 23px;
+}
+
+.app-shell.is-mobile .bottom-nav button.active {
+  background: transparent;
+  color: var(--accent);
+  box-shadow: none;
+}
+
+.app-shell.is-mobile .bottom-nav button.active small {
+  font-weight: 800;
+}
+
+/* Blinkit-style active marker: a short bar hanging from the top edge. */
+.app-shell.is-mobile .bottom-nav button.active::before {
+  content: "";
+  position: absolute;
+  top: -7px;
+  left: 50%;
+  width: 26px;
+  height: 3px;
+  margin-left: -13px;
+  border-radius: 0 0 4px 4px;
+  background: var(--accent);
+}
+
+.app-shell.is-mobile .bottom-nav button:active {
+  transform: scale(0.94);
+}
+
+/* ---- Toast: sits above the tab bar instead of on top of it ------------ */
+
+.app-shell.is-mobile .toast {
+  left: 14px;
+  right: 14px;
+  bottom: calc(var(--m-nav-h) + var(--m-safe-b) + 14px);
+  justify-content: center;
+  padding: 12px 16px;
+  border-radius: 14px;
+  font-size: 13px;
+}
+
+.app-shell.is-mobile.has-cart .toast {
+  bottom: calc(var(--m-nav-h) + var(--m-safe-b) + 82px);
+}
+
+/* ---- Sticky cart bar (Blinkit's "View cart") -------------------------- */
+
+.app-shell.is-mobile .mobile-cart-bar {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(var(--m-nav-h) + var(--m-safe-b) + 10px);
+  z-index: 39;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px 10px 10px;
+  border-radius: 16px;
+  text-align: left;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--purple-deep, var(--accent)));
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--accent) 38%, transparent);
+  animation: m-rise 0.28s var(--ease, ease-out);
+}
+
+.app-shell.is-mobile .mobile-cart-bar:active {
+  transform: scale(0.985);
+}
+
+.app-shell.is-mobile .mobile-cart-bar-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.2);
+  font-size: 20px;
+}
+
+.app-shell.is-mobile .mobile-cart-bar-copy {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.app-shell.is-mobile .mobile-cart-bar-copy b {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.app-shell.is-mobile .mobile-cart-bar-copy small {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.app-shell.is-mobile .mobile-cart-bar-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+@keyframes m-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---- Inner pages: reclaim the vertical space the desktop headers eat --- */
+
+.app-shell.is-mobile main > .page-section,
+.app-shell.is-mobile main .page-section {
+  padding-top: 18px;
+  padding-left: 16px;
+  padding-right: 16px;
+}
+
+.app-shell.is-mobile .section-head {
+  margin-bottom: 16px;
+  gap: 12px;
+}
+
+.app-shell.is-mobile .section-head.large h1 {
+  font-size: 26px;
+  line-height: 1.15;
+  margin: 4px 0 4px;
+}
+
+.app-shell.is-mobile .section-head h2 {
+  font-size: 20px;
+}
+
+.app-shell.is-mobile .section-head.large p {
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.app-shell.is-mobile .section-head.large .primary {
+  padding: 10px 16px;
+  border-radius: 999px;
+  font-size: 14px;
+}
+
+.app-shell.is-mobile .section-kicker {
+  font-size: 9.5px;
+}
+
+.app-shell.is-mobile .event-card,
+.app-shell.is-mobile .post,
+.app-shell.is-mobile .side-card {
+  border-radius: var(--m-radius);
+}
+
+/* Filter chips scroll sideways in one row (Blinkit) instead of wrapping. */
+.app-shell.is-mobile .chips {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 2px 0 6px;
+  scroll-snap-type: x proximity;
+}
+
+.app-shell.is-mobile .chips::-webkit-scrollbar {
+  display: none;
+}
+
+.app-shell.is-mobile .chips > * {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+}
+
+/* ---- Services hub: 2-up tile grid instead of long cards --------------- */
+
+.app-shell.is-mobile .service-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.app-shell.is-mobile .service-card {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--m-radius);
+  background: var(--surface);
+  border-color: var(--border);
+  box-shadow: none;
+}
+
+.app-shell.is-mobile .service-card:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.app-shell.is-mobile .service-card:active {
+  transform: scale(0.98);
+}
+
+.app-shell.is-mobile .service-icon {
+  width: 44px;
+  height: 44px;
+  font-size: 23px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--accent);
+}
+
+.app-shell.is-mobile .service-card h3 {
+  font-size: 14px;
+  margin: 0 0 3px;
+}
+
+.app-shell.is-mobile .service-card p {
+  font-size: 11.5px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.app-shell.is-mobile .service-arrow {
+  display: none;
+}
+
+/* =========================================================================
+   Mobile Home
+   ========================================================================= */
+
+.app-shell.is-mobile .mh {
+  padding: 0 0 8px;
+}
+
+/* Header block: greeting + prompt + search, the Blinkit "location + search"
+   hero. Rounded bottom corners so it reads as a card sitting under the bar. */
+.app-shell.is-mobile .mh-header {
+  position: relative;
+  overflow: hidden;
+  margin: 0;
+  padding: 18px 16px 20px;
+  color: #fff;
+  border-radius: 0 0 26px 26px;
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgba(255, 255, 255, 0.22), transparent 55%),
+    linear-gradient(140deg, var(--accent), var(--purple-deep, var(--accent)));
+}
+
+.app-shell.is-mobile .mh-greeting {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.app-shell.is-mobile .mh-header h1 {
+  margin: 0 0 16px;
+  font: 800 24px/1.18 Manrope, sans-serif;
+  letter-spacing: -0.01em;
+  color: #fff;
+  max-width: 15em;
+}
+
+.app-shell.is-mobile .mh-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 50px;
+  padding: 0 16px;
+  border-radius: 14px;
+  text-align: left;
+  color: #6b6878;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(20, 10, 60, 0.22);
+}
+
+.app-shell.is-mobile .mh-search svg {
+  width: 20px;
+  height: 20px;
+  color: var(--accent);
+}
+
+.app-shell.is-mobile .mh-search span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14.5px;
+}
+
+.app-shell.is-mobile .mh-search b {
+  font-weight: 700;
+  color: #17151f;
+  animation: m-hint 0.35s var(--ease, ease-out);
+}
+
+@keyframes m-hint {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* SOS strip (MyGate keeps emergency one tap from the home screen). */
+.app-shell.is-mobile .mh-sos {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: calc(100% - 32px);
+  margin: 16px 16px 0;
+  padding: 11px 12px;
+  border-radius: 16px;
+  text-align: left;
+  color: var(--text);
+  background: color-mix(in srgb, #ef4444 9%, var(--surface));
+  border: 1px solid color-mix(in srgb, #ef4444 26%, var(--border));
+}
+
+.app-shell.is-mobile .mh-sos-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  font-size: 22px;
+  color: #fff;
+  background: #ef4444;
+}
+
+.app-shell.is-mobile .mh-sos-copy {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.app-shell.is-mobile .mh-sos-copy b {
+  font-size: 14px;
+}
+
+.app-shell.is-mobile .mh-sos-copy small {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.app-shell.is-mobile .mh-sos-cta {
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #fff;
+  background: #ef4444;
+}
+
+/* Section titles */
+.app-shell.is-mobile .mh-section {
+  padding: 22px 16px 0;
+}
+
+.app-shell.is-mobile .mh-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.app-shell.is-mobile .mh-section-title h2 {
+  margin: 0;
+  font: 800 17px Manrope, sans-serif;
+  color: var(--text);
+}
+
+.app-shell.is-mobile .mh-section-title button {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 6px 0 6px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* 4-up tile grid (Blinkit category grid / MyGate service grid) */
+.app-shell.is-mobile .mh-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px 8px;
+}
+
+.app-shell.is-mobile .mh-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 2px 0;
+  --tone: var(--accent);
+  transition: transform 0.12s var(--ease, ease-out);
+}
+
+.app-shell.is-mobile .mh-tile:active {
+  transform: scale(0.93);
+}
+
+.app-shell.is-mobile .mh-tile-icon {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  max-width: 68px;
+  aspect-ratio: 1;
+  border-radius: 20px;
+  font-size: 28px;
+  color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 13%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--tone) 16%, transparent);
+}
+
+.app-shell.is-mobile .mh-tile-icon svg {
+  width: 28px;
+  height: 28px;
+}
+
+.app-shell.is-mobile .mh-tile-label {
+  width: 100%;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text);
+}
+
+.app-shell.is-mobile .tone-purple { --tone: #6d4aff; }
+.app-shell.is-mobile .tone-blue   { --tone: #3b82f6; }
+.app-shell.is-mobile .tone-teal   { --tone: #0d9488; }
+.app-shell.is-mobile .tone-orange { --tone: #ea6a12; }
+.app-shell.is-mobile .tone-pink   { --tone: #db2777; }
+.app-shell.is-mobile .tone-green  { --tone: #16a34a; }
+.app-shell.is-mobile .tone-amber  { --tone: #b7791f; }
+.app-shell.is-mobile .tone-red    { --tone: #dc2626; }
+.app-shell.is-mobile .tone-slate  { --tone: #64748b; }
+
+.app-shell.is-mobile.dark-mode .tone-purple { --tone: #a18bff; }
+.app-shell.is-mobile.dark-mode .tone-blue   { --tone: #6aa5ff; }
+.app-shell.is-mobile.dark-mode .tone-teal   { --tone: #2dd4bf; }
+.app-shell.is-mobile.dark-mode .tone-orange { --tone: #fb923c; }
+.app-shell.is-mobile.dark-mode .tone-pink   { --tone: #f472b6; }
+.app-shell.is-mobile.dark-mode .tone-green  { --tone: #4ade80; }
+.app-shell.is-mobile.dark-mode .tone-amber  { --tone: #fbbf24; }
+.app-shell.is-mobile.dark-mode .tone-red    { --tone: #f87171; }
+.app-shell.is-mobile.dark-mode .tone-slate  { --tone: #94a3b8; }
+
+/* Horizontal event carousel (Blinkit product rail) */
+.app-shell.is-mobile .mh-rail {
+  display: flex;
+  gap: 12px;
+  margin: 0 -16px;
+  padding: 2px 16px 8px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-padding: 0 16px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.app-shell.is-mobile .mh-rail::-webkit-scrollbar {
+  display: none;
+}
+
+.app-shell.is-mobile .mh-event {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  flex: 0 0 min(72%, 260px);
+  min-height: 150px;
+  padding: 14px;
+  border-radius: 20px;
+  text-align: left;
+  overflow: hidden;
+  scroll-snap-align: start;
+  color: #fff;
+  --tone: var(--accent);
+  background:
+    radial-gradient(90% 80% at 100% 0%, rgba(255, 255, 255, 0.24), transparent 60%),
+    linear-gradient(150deg, color-mix(in srgb, var(--tone) 92%, #fff), color-mix(in srgb, var(--tone) 68%, #000));
+}
+
+.app-shell.is-mobile .mh-event:active {
+  transform: scale(0.98);
+}
+
+.app-shell.is-mobile .mh-event-date {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 46px;
+  padding: 5px 8px;
+  margin-bottom: 6px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.22);
+  line-height: 1.05;
+}
+
+.app-shell.is-mobile .mh-event-date b {
+  font: 800 18px Manrope, sans-serif;
+}
+
+.app-shell.is-mobile .mh-event-date small {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: #fff;
+}
+
+.app-shell.is-mobile .mh-event-club {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  opacity: 0.9;
+}
+
+.app-shell.is-mobile .mh-event strong {
+  font: 800 16px/1.22 Manrope, sans-serif;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.app-shell.is-mobile .mh-event-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: auto;
+  padding-top: 6px;
+  font-size: 11.5px;
+  opacity: 0.92;
+}
+
+.app-shell.is-mobile .mh-event-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Existing widgets, re-flowed for the phone */
+.app-shell.is-mobile .mh .page-section {
+  padding: 22px 16px 0;
+}
+
+.app-shell.is-mobile .mh .section-head {
+  margin-bottom: 10px;
+}
+
+.app-shell.is-mobile .mh .section-head h2 {
+  font: 800 17px Manrope, sans-serif;
+  margin: 2px 0 2px;
+}
+
+.app-shell.is-mobile .mh .section-head p {
+  font-size: 12px;
+}
+
+.app-shell.is-mobile .mh .recommend-cards {
+  display: flex;
+  gap: 10px;
+  margin: 0 -16px;
+  padding: 2px 16px 6px;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+}
+
+.app-shell.is-mobile .mh .recommend-cards::-webkit-scrollbar {
+  display: none;
+}
+
+.app-shell.is-mobile .mh .recommend-card {
+  flex: 0 0 min(70%, 240px);
+  scroll-snap-align: start;
+}
+
+/* Campus AI entry */
+.app-shell.is-mobile .mh-ai {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: calc(100% - 32px);
+  margin: 22px 16px 0;
+  padding: 14px;
+  border-radius: 18px;
+  text-align: left;
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+}
+
+.app-shell.is-mobile .mh-ai > span:nth-child(2) {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.app-shell.is-mobile .mh-ai b {
+  font-size: 14.5px;
+}
+
+.app-shell.is-mobile .mh-ai small {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.app-shell.is-mobile .mh-ai-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  font-size: 22px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--purple-deep, var(--accent)));
+}
+
+.app-shell.is-mobile .mh-ai > svg {
+  color: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell.is-mobile .mh-search b,
+  .app-shell.is-mobile .mobile-cart-bar {
+    animation: none;
+  }
+}
