@@ -368,6 +368,14 @@
 .modal-close {
   display: grid;
   place-items: center;
+  /* The icon alone renders at 20x20 (see .modal-close svg below) --
+     a tap target well under the ~44px guideline and fiddly to hit on
+     a phone. Pad the button out around the same glyph position rather
+     than resizing the icon itself. */
+  width: 44px;
+  height: 44px;
+  right: 6px;
+  top: 4px;
 }
 
 /* =========================================================
@@ -5502,7 +5510,12 @@
 .app-shell :focus-visible {
   outline: 2px solid var(--accent, var(--purple, #6945e8));
   outline-offset: 2px;
-  border-radius: 4px;
+  /* No fixed border-radius here: it used to hard-set every focused
+     element to a 4px corner, which fought the element's own radius
+     (a 17px pill search bar, a 999px chip, a plain 0-radius input)
+     and drew a visibly clashing rectangle. Chromium/WebKit already
+     round the outline to match each element's real border-radius,
+     so omitting this lets the ring hug whatever shape is underneath. */
 }
 
 .app-shell ::-webkit-scrollbar {
@@ -5765,3 +5778,157 @@
     radial-gradient(circle at 80% 22%, #d97fa0 0, transparent 26%),
     linear-gradient(135deg, #1c1216 0%, #2a1620 55%, #5c2a41 100%);
 }
+
+/* =========================================================
+   MOBILE UI POLISH PASS (7 Sep 2026)
+
+   Fixes for concrete issues found capturing this app at a real phone
+   viewport (390x844, iOS UA) rather than guessing at the CSS: an a11y
+   focus ring that hard-set every focused element's corner radius (see
+   the comment on .app-shell :focus-visible, edited in place further
+   up); a modal-close hit target smaller than its own icon; a desktop
+   keyboard-shortcut hint with no meaning on a touchscreen; and several
+   bold headings that, at phone widths, wrap with a short orphan word
+   alone on the last line (e.g. the login modal's "Welcome to Campus" /
+   "OS"). Appended per this file's own convention (see the UI REFRESH
+   note above) rather than edited in place.
+========================================================= */
+
+/* text-wrap:balance is a no-op wherever the heading already fits on
+   one line, so this only changes anything for headings that actually
+   wrap -- exactly the narrow-viewport case that produced the orphan. */
+.hero h1,
+.section-head h1,
+.section-head h2,
+.feature-modal h2,
+.login-modal h2,
+.ai-banner h2,
+.service-demo h2,
+.opportunity h2,
+.profile-hero h1,
+.empty-profile h1,
+.pulse-card strong,
+.event-content h3,
+.post h3 {
+  text-wrap: balance;
+}
+
+/* The "⌘ K" hint next to the hero search bar only means anything to a
+   keyboard user -- on a touch device there's no such key, and at
+   narrow widths it also crowds out the placeholder text it sits next
+   to. Hidden alongside the other hero/searchbar mobile overrides. */
+@media (max-width: 620px) {
+  .searchbar kbd {
+    display: none;
+  }
+}
+
+/* The bare <input> inside .searchbar has no border-radius of its own
+   (the pill shape belongs to the .searchbar wrapper), so the global
+   focus-visible outline above draws a sharp rectangle poking out of a
+   rounded pill on tap -- and .searchbar:focus-within already puts a
+   matching rounded ring around the whole pill, so the rectangle is
+   pure visual noise on top of an indicator that already works. */
+.searchbar input:focus-visible {
+  outline: none;
+}
+
+/* =========================================================
+   EVENT MANAGER (club dashboard -> Events -> Participants & teams)
+   src/features/clubs/EventWorkspace.jsx. Everything is scoped under
+   .evm-modal / .evm-* and uses the theme variables (--surface, --text,
+   --border, --accent...) so dark mode and the colour themes just work.
+   No @media rule here sets `display` on a selector that is also set
+   unconditionally elsewhere in this block (see check-css-cascade.mjs).
+========================================================= */
+.feature-modal.evm-modal { width: min(1180px, 100%); }
+.evm-modal input[type="checkbox"] { width: auto; margin: 0; padding: 0; }
+.evm-modal input[type="file"] { display: none; }
+
+.evm-tabs { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 4px 0 16px; }
+.evm-tabs .chip { justify-content: flex-start; }
+.evm-refresh { margin-left: auto; }
+
+.evm-toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.evm-toolbar select, .evm-toolbar > input { width: auto; margin-top: 0; padding: 8px 10px; font-size: 12px; }
+.evm-spacer { flex: 1; }
+.evm-search { display: flex; align-items: center; gap: 8px; flex: 1 1 220px; min-width: 200px; border: 1px solid var(--line); border-radius: 10px; padding: 0 10px; background: var(--surface, #fff); }
+.evm-search input { border: 0; margin: 0; padding: 9px 0; background: transparent; box-shadow: none; }
+.evm-search svg { color: var(--muted); flex: 0 0 auto; }
+.evm-check { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-size: 12px; font-weight: 600; }
+
+.evm-btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; font-size: 12px; font-weight: 700;
+  border: 1px solid var(--border, var(--line)); border-radius: 10px; background: var(--surface, #fff); color: var(--text, var(--ink));
+  cursor: pointer; transition: border-color .15s ease, background .15s ease;
+}
+.evm-btn:hover:not(:disabled) { border-color: var(--accent, var(--purple)); background: var(--surface-2, var(--soft)); }
+.evm-btn:disabled { opacity: .5; cursor: not-allowed; }
+.evm-danger { color: #c62828; }
+.evm-icon { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; border: 1px solid var(--border, var(--line)); background: var(--surface, #fff); color: var(--text, var(--ink)); }
+.evm-icon:hover { border-color: var(--accent, var(--purple)); }
+.evm-file { position: relative; cursor: pointer; margin: 0; }
+.evm-open { font-weight: 800; }
+
+.evm-panel { border: 1px solid var(--border, var(--line)); border-radius: 14px; padding: 16px; margin-bottom: 14px; background: var(--surface-2, var(--soft)); }
+.evm-panel > b { display: block; margin-bottom: 6px; }
+.evm-panel label { margin: 10px 0 0; }
+.evm-form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0 14px; }
+.evm-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+.evm-hint { color: var(--muted); font-size: 12px; margin: 6px 0; line-height: 1.5; }
+.evm-warn { color: #b26a00; font-size: 12px; font-weight: 700; margin: 10px 0 0; }
+.evm-steps { margin: 6px 0 12px; padding-left: 20px; font-size: 12px; line-height: 1.7; color: var(--muted); }
+.evm-steps b { color: var(--text, var(--ink)); }
+.evm-result { border-color: #2e9d62; }
+
+.evm-bulk { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 10px 12px; margin-bottom: 10px; border-radius: 12px; background: var(--soft, #f1edff); border: 1px solid var(--accent, var(--purple)); }
+.evm-bulk select { width: auto; margin: 0; padding: 7px 9px; font-size: 12px; }
+
+.evm-table-wrap { overflow: auto; max-height: 55vh; border: 1px solid var(--border, var(--line)); border-radius: 12px; }
+.evm-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.evm-table th, .evm-table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border, var(--line)); vertical-align: middle; white-space: nowrap; }
+.evm-table th { position: sticky; top: 0; z-index: 1; background: var(--surface-2, #f6f4fb); font-size: 11px; }
+.evm-table tr:last-child td { border-bottom: 0; }
+.evm-table select { width: auto; min-width: 110px; margin: 0; padding: 5px 7px; font-size: 11px; border-radius: 8px; }
+.evm-table .evm-answer { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.evm-col-check { width: 34px; }
+.evm-th { display: inline-flex; align-items: center; gap: 4px; font: inherit; font-weight: 800; color: inherit; }
+.evm-src { display: block; font-size: 10px; color: var(--muted); font-weight: 600; margin-top: 1px; }
+.evm-cancelled { opacity: .5; }
+.evm-selected { background: var(--soft, #f1edff); }
+.evm-more { display: flex; align-items: center; gap: 10px; justify-content: center; padding: 12px; font-size: 12px; color: var(--muted); }
+
+.evm-att { display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; border: 1px solid var(--border, var(--line)); background: var(--surface, #fff); color: var(--muted); }
+.evm-att.on { background: #e3f6ec; border-color: #2e9d62; color: #16724a; }
+.evm-att:disabled { opacity: .5; cursor: not-allowed; }
+
+.evm-progress { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; font-size: 13px; flex-wrap: wrap; }
+.evm-progress-bar { flex: 1 1 200px; height: 10px; border-radius: 999px; background: var(--surface-2, #eee); overflow: hidden; }
+.evm-progress-bar span { display: block; height: 100%; background: #2e9d62; border-radius: 999px; transition: width .25s ease; }
+.evm-seg { display: inline-flex; border: 1px solid var(--border, var(--line)); border-radius: 10px; overflow: hidden; }
+.evm-seg button { padding: 8px 12px; font-size: 12px; font-weight: 700; background: var(--surface, #fff); color: var(--text, var(--ink)); }
+.evm-seg button.on { background: var(--accent, var(--purple)); color: #fff; }
+
+.evm-att-list { display: grid; gap: 8px; max-height: 55vh; overflow: auto; }
+.evm-att-row { display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 12px; text-align: left; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border, var(--line)); background: var(--surface, #fff); color: var(--text, var(--ink)); min-height: 56px; }
+.evm-att-row.on { background: #e3f6ec; border-color: #2e9d62; color: #16724a; }
+.evm-att-row small { display: block; color: var(--muted); margin-top: 2px; }
+.evm-att-row.on small { color: #3b7a5b; }
+.evm-att-check { width: 26px; height: 26px; border-radius: 8px; border: 2px solid var(--border, var(--line)); display: grid; place-items: center; }
+.evm-att-row.on .evm-att-check { background: #2e9d62; border-color: #2e9d62; color: #fff; }
+.evm-att-state { font-size: 11px; font-weight: 800; }
+
+.evm-preview { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+.evm-pill { padding: 5px 10px; border-radius: 999px; background: var(--surface, #fff); border: 1px solid var(--border, var(--line)); font-size: 12px; font-weight: 700; }
+
+.evm-teams { display: grid; gap: 10px; }
+.evm-team { border: 1px solid var(--border, var(--line)); border-radius: 14px; padding: 12px 14px; background: var(--surface, #fff); }
+.evm-team header { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.evm-team header small { display: block; color: var(--muted); margin-top: 2px; }
+.evm-team .evm-actions { margin-top: 0; }
+.evm-members { list-style: none; margin: 10px 0 0; padding: 0; border-top: 1px solid var(--border, var(--line)); }
+.evm-members li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border, var(--line)); font-size: 12px; }
+.evm-members li:last-child { border-bottom: 0; }
+.evm-members small { color: var(--muted); margin-left: 6px; }
+.evm-ok { color: #2e9d62; vertical-align: -2px; }
+.evm-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--border, #ccc); margin-right: 6px; }

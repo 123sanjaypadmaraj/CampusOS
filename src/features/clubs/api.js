@@ -309,3 +309,123 @@ export async function getClubEventPayouts(clubId) {
   throwIfError(error);
   return data || [];
 }
+
+/* =========================================================================
+   EVENT MANAGER -- participants (in-app registrants + Google Forms / CSV
+   imports), teams and attendance for one event. Backed by
+   supabase/migrations/20260919000100_event_participants_teams.sql: the tables
+   have RLS on with no policies, so every read and write here is an RPC that
+   re-checks the caller is that event's organizer / club leadership / staff.
+========================================================================= */
+
+const PAGE_SIZE = 1000; // PostgREST's default max rows per response
+const IMPORT_CHUNK = 500; // the RPC accepts at most 2000; stay well under
+
+// Turns the RPCs' "CODE: message" exceptions into just the message.
+export function describeEventManagerError(err) {
+  const msg = (err && err.message) || "";
+  const m = msg.match(/^(?:PARTICIPANT_INVALID|DUPLICATE_PARTICIPANT|TEAM_INVALID|TEAM_DUPLICATE|IMPORT_INVALID|IMPORT_TOO_LARGE):\s*(.+)$/);
+  return m ? m[1] : msg || "Something went wrong";
+}
+
+// Mirrors confirmed in-app registrations into the participants list and
+// pulls ticket check-ins across. Safe to call repeatedly.
+export async function syncEventParticipants(eventId) {
+  const { data, error } = await supabase.rpc("sync_event_participants", { p_event_id: eventId });
+  throwIfError(error);
+  return data; // { added, linked }
+}
+
+export async function listEventParticipants(eventId) {
+  const all = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .rpc("get_event_participants", { p_event_id: eventId })
+      .range(from, from + PAGE_SIZE - 1);
+    throwIfError(error);
+    const page = data || [];
+    all.push(...page);
+    if (page.length < PAGE_SIZE) break;
+  }
+  return all;
+}
+
+export async function listEventTeams(eventId) {
+  const { data, error } = await supabase.rpc("get_event_teams", { p_event_id: eventId });
+  throwIfError(error);
+  return data || [];
+}
+
+// rows: output of buildImportRows(). Re-importing an updated sheet merges into
+// existing participants (matched on email, then USN) rather than duplicating.
+export async function importEventParticipants(eventId, rows) {
+  const total = { inserted: 0, updated: 0, skipped: 0, teams_created: 0 };
+  for (let i = 0; i < rows.length; i += IMPORT_CHUNK) {
+    const { data, error } = await supabase.rpc("import_event_participants", {
+      p_event_id: eventId,
+      p_rows: rows.slice(i, i + IMPORT_CHUNK),
+    });
+    throwIfError(error);
+    for (const k of Object.keys(total)) total[k] += Number(data?.[k] || 0);
+  }
+  return total;
+}
+
+// participantId null => add. `fields` may hold name/usn/email/phone/
+// department/year/notes/team_id; on edit only the keys present change.
+export async function saveEventParticipant(eventId, participantId, fields) {
+  const { data, error } = await supabase.rpc("upsert_event_participant", {
+    p_event_id: eventId,
+    p_participant_id: participantId || null,
+    p_fields: fields,
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function deleteEventParticipants(eventId, ids) {
+  const { data, error } = await supabase.rpc("delete_event_participants", { p_event_id: eventId, p_ids: ids });
+  throwIfError(error);
+  return Number(data || 0);
+}
+
+export async function setParticipantsAttendance(eventId, ids, attended) {
+  const { data, error } = await supabase.rpc("set_participants_attendance", {
+    p_event_id: eventId,
+    p_ids: ids,
+    p_attended: !!attended,
+  });
+  throwIfError(error);
+  return Number(data || 0);
+}
+
+export async function createEventTeams(eventId, names) {
+  const { data, error } = await supabase.rpc("create_event_teams", { p_event_id: eventId, p_names: names });
+  throwIfError(error);
+  return data || [];
+}
+
+export async function updateEventTeam(teamId, name, notes) {
+  const { data, error } = await supabase.rpc("update_event_team", { p_team_id: teamId, p_name: name, p_notes: notes || null });
+  throwIfError(error);
+  return data;
+}
+
+export async function deleteEventTeam(teamId) {
+  const { error } = await supabase.rpc("delete_event_team", { p_team_id: teamId });
+  throwIfError(error);
+}
+
+// assignments: [{ participant_id, team_id }] -- team_id null un-assigns.
+export async function assignParticipantsToTeams(eventId, assignments) {
+  let changed = 0;
+  for (let i = 0; i < assignments.length; i += 2000) {
+    const { data, error } = await supabase.rpc("assign_participants_to_teams", {
+      p_event_id: eventId,
+      p_assignments: assignments.slice(i, i + 2000),
+    });
+    throwIfError(error);
+    changed += Number(data || 0);
+  }
+  return changed;
+}

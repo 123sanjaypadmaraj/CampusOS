@@ -20,11 +20,13 @@ import {
   HiBanknotes,
   HiCurrencyRupee,
   HiArrowUturnLeft,
+  HiTableCells,
 } from "react-icons/hi2";
 import { FEATURES } from "../../config/features";
 import { LoadingState, EmptyState, ErrorState } from "../../components/ui/States";
 import { TrendChart, StatTile } from "../../components/ui/Charts";
 import * as clubApi from "./api";
+import EventWorkspace from "./EventWorkspace";
 import { getEventRoster, checkinEventTicket, uploadEventCoverImage } from "../../services/mvpService";
 import { useModalA11y } from "../../hooks/useModalA11y";
 import { downloadCsv } from "../../utils/csv";
@@ -310,6 +312,7 @@ function MembersTab({ club, members, canManage, authUser, notify, onChange }) {
 function EventsTab({ clubId, campusId, events, authUser, notify, onChange }) {
   const [modal, setModal] = useState(null);
   const [rosterFor, setRosterFor] = useState(null);
+  const [workspaceFor, setWorkspaceFor] = useState(null);
 
   return (
     <div>
@@ -333,6 +336,7 @@ function EventsTab({ clubId, campusId, events, authUser, notify, onChange }) {
               </small>
             </div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <button className="evm-open" onClick={() => setWorkspaceFor(ev)}><HiTableCells /> Participants &amp; teams</button>
               <button onClick={() => setRosterFor(ev)}><HiQrCode /> Roster &amp; check-in</button>
               <button onClick={() => setModal(ev)}><HiPencilSquare /> Edit</button>
               <button
@@ -373,6 +377,9 @@ function EventsTab({ clubId, campusId, events, authUser, notify, onChange }) {
       )}
       {rosterFor && (
         <EventRosterModal event={rosterFor} onClose={() => setRosterFor(null)} notify={notify} />
+      )}
+      {workspaceFor && (
+        <EventWorkspace event={workspaceFor} onClose={() => setWorkspaceFor(null)} notify={notify} />
       )}
     </div>
   );
